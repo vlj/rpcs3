@@ -139,9 +139,9 @@ std::string CgBinaryDisasm::FormatDisAsm(const std::string& code)
 	const std::pair<std::string, std::function<std::string()>> repl_list[] =
 	{
 		{ "$$", []() -> std::string { return "$"; } },
-		{ "$0", std::bind(std::mem_fn(&CgBinaryDisasm::GetSrcDisAsm<SRC0>), this, src0) },
-		{ "$1", std::bind(std::mem_fn(&CgBinaryDisasm::GetSrcDisAsm<SRC1>), this, src1) },
-		{ "$2", std::bind(std::mem_fn(&CgBinaryDisasm::GetSrcDisAsm<SRC2>), this, src2) },
+		{ "$0", [this]() -> std::string {return GetSrcDisAsm<SRC0>(src0);} },//std::bind(std::mem_fn(&CgBinaryDisasm::GetSrcDisAsm<SRC0>), this, src0) },
+		{ "$1", [this]() -> std::string {return GetSrcDisAsm<SRC1>(src1);} },//std::bind(std::mem_fn(&CgBinaryDisasm::GetSrcDisAsm<SRC1>), this, src1) },
+		{ "$2", [this]() -> std::string {return GetSrcDisAsm<SRC2>(src2);} },//std::bind(std::mem_fn(&CgBinaryDisasm::GetSrcDisAsm<SRC2>), this, src2) },
 		{ "$t", std::bind(std::mem_fn(&CgBinaryDisasm::AddTexDisAsm), this) },
 		{ "$m", std::bind(std::mem_fn(&CgBinaryDisasm::GetMask), this) },
 		{ "$cond", std::bind(std::mem_fn(&CgBinaryDisasm::GetCondDisAsm), this) },
