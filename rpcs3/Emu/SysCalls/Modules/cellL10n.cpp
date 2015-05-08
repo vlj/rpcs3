@@ -23,7 +23,7 @@ int UTF16stoUTF8s(vm::lptrl<const char16_t> utf16, vm::ptr<u32> utf16_len, vm::p
 
 	std::u16string wstr = utf16.get_ptr(); // ???
 	wstr.resize(*utf16_len); // TODO: Is this really the role of utf16_len in this function?
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && _MSC_VER <1900 //bug in the new C-runtime exposes only "codecvt<unsigned short>::id" but not "codecvt<char16_t>::id"
 	std::wstring_convert<std::codecvt_utf8_utf16<char16_t>,char16_t> convert;
 	std::string str = convert.to_bytes(wstr);
 
