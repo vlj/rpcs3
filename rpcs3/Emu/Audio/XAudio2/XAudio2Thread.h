@@ -4,7 +4,7 @@
 #if defined (_WIN32)
 
 // forced define Win7, delete this for using XAudio2 2.8
-#define FORCED_WINVER 0x0601
+#define FORCED_WINVER 0x0602
 
 #if (FORCED_WINVER >= 0x0602 /*_WIN32_WINNT_WIN8*/)
 #include <xaudio2.h>
