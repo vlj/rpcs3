@@ -90,6 +90,9 @@
     <Filter Include="Emu\CPU\ARMv7\Objects">
       <UniqueIdentifier>{368770cf-c8d9-4f4a-9ac3-5bdf48101ffe}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Emu\GPU\RSX\D3D12">
+      <UniqueIdentifier>{a8d52101-3497-4df0-b326-e0dbc9625e59}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Crypto\aes.cpp">
@@ -863,6 +866,9 @@
     <ClCompile Include="..\Utilities\File.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\D3D12\D3D12GSRender.cpp">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">
@@ -1548,6 +1554,12 @@
     </ClInclude>
     <ClInclude Include="..\Utilities\File.h">
       <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12GSRender.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12RenderTargetSets.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
