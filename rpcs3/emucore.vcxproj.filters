@@ -93,6 +93,9 @@
     <Filter Include="Emu\GPU\RSX\Common">
       <UniqueIdentifier>{2a8841dc-bce0-41bb-9fcb-5bf1f8dda213}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Emu\GPU\RSX\D3D12">
+      <UniqueIdentifier>{25818cb6-10d5-4ae3-8c5e-9dd79c306e53}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Crypto\aes.cpp">
@@ -883,6 +886,9 @@
     </ClCompile>
     <ClCompile Include="Emu\SysCalls\Modules\sceNpUtil.cpp">
       <Filter>Emu\SysCalls\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\RSX\D3D12\D3D12GSRender.cpp">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -1737,6 +1743,12 @@
     </ClInclude>
     <ClInclude Include="Emu\SysCalls\Modules\sceNpUtil.h">
       <Filter>Emu\SysCalls\Modules</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12GSRender.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12RenderTargetSets.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

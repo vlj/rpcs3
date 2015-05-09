@@ -41,6 +41,7 @@
     <ClCompile Include="Emu\RSX\Common\FragmentProgramDecompiler.cpp" />
     <ClCompile Include="Emu\RSX\Common\ShaderParam.cpp" />
     <ClCompile Include="Emu\RSX\Common\VertexProgramDecompiler.cpp" />
+    <ClCompile Include="Emu\RSX\D3D12\D3D12GSRender.cpp" />
     <ClCompile Include="Emu\RSX\GL\GLCommonDecompiler.cpp" />
     <ClCompile Include="Emu\SysCalls\lv2\sys_dbg.cpp" />
     <ClCompile Include="Emu\SysCalls\lv2\sys_fs.cpp" />
@@ -470,6 +471,8 @@
     <ClInclude Include="Emu\RSX\Common\ProgramStateCache.h" />
     <ClInclude Include="Emu\RSX\Common\ShaderParam.h" />
     <ClInclude Include="Emu\RSX\Common\VertexProgramDecompiler.h" />
+    <ClInclude Include="Emu\RSX\D3D12\D3D12GSRender.h" />
+    <ClInclude Include="Emu\RSX\D3D12\D3D12RenderTargetSets.h" />
     <ClInclude Include="Emu\RSX\GCM.h" />
     <ClInclude Include="Emu\RSX\GL\GLBuffers.h" />
     <ClInclude Include="Emu\RSX\GL\GLCommonDecompiler.h" />
@@ -688,7 +691,7 @@
       <Optimization>Disabled</Optimization>
       <SDLCheck>false</SDLCheck>
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PreprocessorDefinitions>_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;%(PreprocessorDefinitions);DX12_SUPPORT</PreprocessorDefinitions>
       <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
       <ExceptionHandling>Async</ExceptionHandling>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -727,7 +730,7 @@
       <Optimization>Disabled</Optimization>
       <SDLCheck>false</SDLCheck>
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PreprocessorDefinitions>_UNICODE;UNICODE;MSVC_CRT_MEMLEAK_DETECTION;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;MSVC_CRT_MEMLEAK_DETECTION;%(PreprocessorDefinitions);DX12_SUPPORT</PreprocessorDefinitions>
       <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
       <ExceptionHandling>Async</ExceptionHandling>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -751,6 +754,7 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;%(PreprocessorDefinitions);DX12_SUPPORT</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -768,7 +772,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
       <ExceptionHandling>Async</ExceptionHandling>
-      <PreprocessorDefinitions>LLVM_AVAILABLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>LLVM_AVAILABLE;%(PreprocessorDefinitions);DX12_SUPPORT</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
