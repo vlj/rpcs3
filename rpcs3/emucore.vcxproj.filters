@@ -878,6 +878,12 @@
     <ClCompile Include="Emu\RSX\GL\GLCommonDecompiler.cpp">
       <Filter>Emu\GPU\RSX\GL</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\D3D12\D3D12RenderTargetSets.cpp">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\RSX\D3D12\D3D12PipelineState.cpp">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">
@@ -1573,5 +1579,13 @@
     <ClInclude Include="Emu\RSX\GL\GLCommonDecompiler.h">
       <Filter>Emu\GPU\RSX\GL</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12PipelineState.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Emu\RSX\D3D12\DefaultPixelShader.hlsl">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>
