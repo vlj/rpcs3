@@ -41,6 +41,7 @@
     <ClCompile Include="Emu\Cell\SPUInterpreter.cpp" />
     <ClCompile Include="Emu\RSX\CgBinaryFragmentProgram.cpp" />
     <ClCompile Include="Emu\RSX\CgBinaryVertexProgram.cpp" />
+    <ClCompile Include="Emu\RSX\D3D12\D3D12Buffer.cpp" />
     <ClCompile Include="Emu\RSX\D3D12\D3D12GSRender.cpp" />
     <ClCompile Include="Emu\RSX\D3D12\D3D12PipelineState.cpp" />
     <ClCompile Include="Emu\RSX\D3D12\D3D12ProgramDisassembler.cpp" />
@@ -420,6 +421,7 @@
     <ClInclude Include="Emu\Memory\atomic.h" />
     <ClInclude Include="Emu\Memory\refcnt.h" />
     <ClInclude Include="Emu\RSX\CgBinaryProgram.h" />
+    <ClInclude Include="Emu\RSX\D3D12\D3D12Buffer.h" />
     <ClInclude Include="Emu\RSX\D3D12\D3D12GSRender.h" />
     <ClInclude Include="Emu\RSX\D3D12\D3D12PipelineState.h" />
     <ClInclude Include="Emu\RSX\D3D12\D3D12ProgramDisassembler.h" />
