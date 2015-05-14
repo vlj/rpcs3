@@ -46,6 +46,7 @@
     <ClCompile Include="Emu\RSX\D3D12\D3D12PipelineState.cpp" />
     <ClCompile Include="Emu\RSX\D3D12\D3D12ProgramDisassembler.cpp" />
     <ClCompile Include="Emu\RSX\D3D12\D3D12RenderTargetSets.cpp" />
+    <ClCompile Include="Emu\RSX\D3D12\VertexProgramDecompiler.cpp" />
     <ClCompile Include="Emu\SysCalls\lv2\sys_fs.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellFs.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellSpursSpu.cpp" />
@@ -426,6 +427,7 @@
     <ClInclude Include="Emu\RSX\D3D12\D3D12PipelineState.h" />
     <ClInclude Include="Emu\RSX\D3D12\D3D12ProgramDisassembler.h" />
     <ClInclude Include="Emu\RSX\D3D12\D3D12RenderTargetSets.h" />
+    <ClInclude Include="Emu\RSX\D3D12\VertexProgramDecompiler.h" />
     <ClInclude Include="Emu\RSX\GCM.h" />
     <ClInclude Include="Emu\RSX\GL\GLBuffers.h" />
     <ClInclude Include="Emu\RSX\GL\GLFragmentProgram.h" />
