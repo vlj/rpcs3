@@ -11,8 +11,8 @@
 	url = https://github.com/kobalicek/asmjit
 [submodule "llvm"]
 	path = llvm
-	url = https://github.com/llvm-mirror/llvm.git
-	branch = release_35
+	url = https://github.com/llvm-mirror/llvm
+	branch = release_36
 [submodule "minidx9"]
 	path = minidx9
 	url = https://github.com/hrydgard/minidx9.git
