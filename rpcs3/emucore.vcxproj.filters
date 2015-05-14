@@ -884,6 +884,9 @@
     <ClCompile Include="Emu\RSX\D3D12\ShaderParam.cpp">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\D3D12\FragmentProgramDecompiler.cpp">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">
@@ -1586,6 +1589,9 @@
       <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClInclude>
     <ClInclude Include="Emu\RSX\D3D12\ShaderParam.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\FragmentProgramDecompiler.h">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClInclude>
   </ItemGroup>
