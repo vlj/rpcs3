@@ -93,6 +93,9 @@
     <Filter Include="Emu\GPU\RSX\D3D12">
       <UniqueIdentifier>{a8d52101-3497-4df0-b326-e0dbc9625e59}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Emu\GPU\RSX\Common">
+      <UniqueIdentifier>{a579b680-aee9-48a8-91eb-764ba08c106d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Crypto\aes.cpp">
@@ -1593,6 +1596,9 @@
     </ClInclude>
     <ClInclude Include="Emu\RSX\D3D12\FragmentProgramDecompiler.h">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\Common\ProgramStateCache.h">
+      <Filter>Emu\GPU\RSX\Common</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
