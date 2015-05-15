@@ -86,8 +86,15 @@ public:
 	GLVertexProgram();
 	~GLVertexProgram();
 
+	GLVertexProgram& operator=(const GLVertexProgram &in)
+	{
+		Id = in.Id;
+		shader = in.shader;
+		return *this;
+	}
+
 	GLParamArray parr;
-	u32 id;
+	u32 Id;
 	std::string shader;
 
 	void Decompile(RSXVertexProgram& prog);

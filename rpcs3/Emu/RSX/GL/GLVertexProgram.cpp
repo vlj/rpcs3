@@ -767,7 +767,7 @@ void GLVertexDecompilerThread::Task()
 
 GLVertexProgram::GLVertexProgram()
 	: m_decompiler_thread(nullptr)
-	, id(0)
+	, Id(0)
 {
 }
 
@@ -822,30 +822,30 @@ void GLVertexProgram::DecompileAsync(RSXVertexProgram& prog)
 
 void GLVertexProgram::Compile()
 {
-	if (id) 
+	if (Id)
 	{
-		glDeleteShader(id);
+		glDeleteShader(Id);
 	}
 
-	id = glCreateShader(GL_VERTEX_SHADER);
+	Id = glCreateShader(GL_VERTEX_SHADER);
 
 	const char* str = shader.c_str();
 	const int strlen = shader.length();
 
-	glShaderSource(id, 1, &str, &strlen);
-	glCompileShader(id);
+	glShaderSource(Id, 1, &str, &strlen);
+	glCompileShader(Id);
 
 	GLint r = GL_FALSE;
-	glGetShaderiv(id, GL_COMPILE_STATUS, &r);
+	glGetShaderiv(Id, GL_COMPILE_STATUS, &r);
 	if (r != GL_TRUE)
 	{
-		glGetShaderiv(id, GL_INFO_LOG_LENGTH, &r);
+		glGetShaderiv(Id, GL_INFO_LOG_LENGTH, &r);
 
 		if (r)
 		{
 			char* buf = new char[r + 1]();
 			GLsizei len;
-			glGetShaderInfoLog(id, r, &len, buf);
+			glGetShaderInfoLog(Id, r, &len, buf);
 			LOG_ERROR(RSX, "Failed to compile vertex shader: %s", buf);
 			delete[] buf;
 		}
@@ -862,16 +862,16 @@ void GLVertexProgram::Delete()
 	parr.params.clear();
 	shader.clear();
 
-	if (id)
+	if (Id)
 	{
 		if (Emu.IsStopped())
 		{
-			LOG_WARNING(RSX, "GLVertexProgram::Delete(): glDeleteShader(%d) avoided", id);
+			LOG_WARNING(RSX, "GLVertexProgram::Delete(): glDeleteShader(%d) avoided", Id);
 		}
 		else
 		{
-			glDeleteShader(id);
+//			glDeleteShader(Id);
 		}
-		id = 0;
+		Id = 0;
 	}
 }
