@@ -105,10 +105,10 @@ std::string GLFragmentDecompilerThread::AddConst()
 	auto data = vm::ptr<u32>::make(m_addr + m_size + 4 * sizeof(u32));
 
 	m_offset = 2 * 4 * sizeof(u32);
-	u32 x = GetData(data[0]);
-	u32 y = GetData(data[1]);
-	u32 z = GetData(data[2]);
-	u32 w = GetData(data[3]);
+	u32 x = 0;//GetData(data[0]);
+	u32 y = 0;//GetData(data[1]);
+	u32 z = 0;//GetData(data[2]);
+	u32 w = 0;//GetData(data[3]);
 	return m_parr.AddParam(PARAM_UNIFORM, "vec4", name,
 		std::string("vec4(") + std::to_string((float&)x) + ", " + std::to_string((float&)y)
 		+ ", " + std::to_string((float&)z) + ", " + std::to_string((float&)w) + ")");
@@ -613,12 +613,12 @@ void GLFragmentDecompilerThread::Task()
 	m_code_level = 1;
 	m_shader = BuildCode();
 	main.clear();
-	m_parr.params.clear();
+//	m_parr.params.clear();
 }
 
 GLFragmentProgram::GLFragmentProgram()
 	: m_decompiler_thread(nullptr)
-	, id(0)
+	, Id(0)
 {
 }
 
@@ -673,32 +673,32 @@ void GLFragmentProgram::DecompileAsync(RSXFragmentProgram& prog)
 
 void GLFragmentProgram::Compile()
 {
-	if (id) 
+	if (Id)
 	{
-		glDeleteShader(id);
+		glDeleteShader(Id);
 	}
 
-	id = glCreateShader(GL_FRAGMENT_SHADER);
+	Id = glCreateShader(GL_FRAGMENT_SHADER);
 
 	const char* str = shader.c_str();
 	const int strlen = shader.length();
 
-	glShaderSource(id, 1, &str, &strlen);
-	glCompileShader(id);
+	glShaderSource(Id, 1, &str, &strlen);
+	glCompileShader(Id);
 
 	GLint compileStatus = GL_FALSE;
-	glGetShaderiv(id, GL_COMPILE_STATUS, &compileStatus); // Determine the result of the glCompileShader call
+	glGetShaderiv(Id, GL_COMPILE_STATUS, &compileStatus); // Determine the result of the glCompileShader call
 	if (compileStatus != GL_TRUE) // If the shader failed to compile...
 	{
 		GLint infoLength;
-		glGetShaderiv(id, GL_INFO_LOG_LENGTH, &infoLength); // Retrieve the length in bytes (including trailing NULL) of the shader info log
+		glGetShaderiv(Id, GL_INFO_LOG_LENGTH, &infoLength); // Retrieve the length in bytes (including trailing NULL) of the shader info log
 
 		if (infoLength > 0)
 		{
 			GLsizei len;
 			char* buf = new char[infoLength]; // Buffer to store infoLog
 
-			glGetShaderInfoLog(id, infoLength, &len, buf); // Retrieve the shader info log into our buffer
+			glGetShaderInfoLog(Id, infoLength, &len, buf); // Retrieve the shader info log into our buffer
 			LOG_ERROR(RSX, "Failed to compile shader: %s", buf); // Write log to the console
 
 			delete[] buf;
@@ -706,6 +706,15 @@ void GLFragmentProgram::Compile()
 
 		LOG_NOTICE(RSX, shader.c_str()); // Log the text of the shader that failed to compile
 		Emu.Pause(); // Pause the emulator, we can't really continue from here
+	}
+	for (const GLParamType& PT : parr.params)
+	{
+		if (PT.flag != PARAM_UNIFORM) continue;
+		for (const GLParamItem PI : PT.items)
+		{
+			size_t offset = atoi(PI.name.c_str() + 2);
+			FragmentConstantOffsetCache.push_back(offset);
+		}
 	}
 }
 
@@ -719,16 +728,16 @@ void GLFragmentProgram::Delete()
 	parr.params.clear();
 	shader.clear();
 
-	if (id)
+	if (Id)
 	{
 		if (Emu.IsStopped())
 		{
-			LOG_WARNING(RSX, "GLFragmentProgram::Delete(): glDeleteShader(%d) avoided", id);
+			LOG_WARNING(RSX, "GLFragmentProgram::Delete(): glDeleteShader(%d) avoided", Id);
 		}
 		else
 		{
-			glDeleteShader(id);
+			glDeleteShader(Id);
 		}
-		id = 0;
+		Id = 0;
 	}
 }

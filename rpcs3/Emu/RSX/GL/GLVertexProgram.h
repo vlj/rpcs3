@@ -87,7 +87,7 @@ public:
 	~GLVertexProgram();
 
 	GLParamArray parr;
-	u32 id;
+	u32 Id;
 	std::string shader;
 
 	void Decompile(RSXVertexProgram& prog);
