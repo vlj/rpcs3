@@ -63,8 +63,9 @@ public:
 	~GLFragmentProgram();
 
 	GLParamArray parr;
-	u32 id;
+	u32 Id;
 	std::string shader;
+	std::vector<size_t> FragmentConstantOffsetCache;
 
 	/**
 	 * Decompile a fragment shader located in the PS3's Memory.  This function operates synchronously.
