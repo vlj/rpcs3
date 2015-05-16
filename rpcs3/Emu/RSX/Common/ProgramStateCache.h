@@ -338,12 +338,10 @@ public:
 
 	const std::vector<size_t> &getFragmentConstantOffsetsCache(const RSXFragmentProgram *fragmentShader) const
 	{
-		binary2FS::const_iterator It = m_cacheFS.find(vm::get_ptr<void>(rsx_fp->addr));
+		binary2FS::const_iterator It = m_cacheFS.find(vm::get_ptr<void>(fragmentShader->addr));
 		if (It != m_cacheFS.end())
-		{
-			found = true;
-			return  It->second.FragmentConstantOffsetCache;
-		}
+			return It->second.FragmentConstantOffsetCache;
 		LOG_ERROR(RSX, "Can't retrieve constant offset cache");
+		return std::vector<size_t>();
 	}
 };
