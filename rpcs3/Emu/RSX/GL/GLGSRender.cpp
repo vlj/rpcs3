@@ -1089,6 +1089,28 @@ void GLGSRender::InitFragmentData()
 		return;
 	}
 
+	// Get constant from fragment program
+	const std::vector<size_t> &fragmentOffset = m_prog_buffer.getFragmentConstantOffsetsCache(m_cur_fragment_prog);
+	for (size_t offsetInFP : fragmentOffset)
+	{
+		auto data = vm::ptr<u32>::make(m_cur_fragment_prog->addr + (u32)offsetInFP);
+
+		u32 c0 = (data[0] >> 16 | data[0] << 16);
+		u32 c1 = (data[1] >> 16 | data[1] << 16);
+		u32 c2 = (data[2] >> 16 | data[2] << 16);
+		u32 c3 = (data[3] >> 16 | data[3] << 16);
+		const std::string name = fmt::Format("fc%u", offsetInFP);
+		const int l = m_program.GetLocation(name);
+		checkForGlError("glGetUniformLocation " + name);
+
+		float f0 = (float&)c0;
+		float f1 = (float&)c1;
+		float f2 = (float&)c2;
+		float f3 = (float&)c3;
+		glUniform4f(l, f0, f1, f2, f3);
+		checkForGlError("glUniform4f " + name + fmt::Format(" %u [%f %f %f %f]", l, f0, f1, f2, f3));
+	}
+
 	for (const RSXTransformConstant& c : m_fragment_constants)
 	{
 		u32 id = c.id - m_cur_fragment_prog->offset;
@@ -1102,6 +1124,7 @@ void GLGSRender::InitFragmentData()
 		glUniform4f(l, c.x, c.y, c.z, c.w);
 		checkForGlError("glUniform4f " + name + fmt::Format(" %u [%f %f %f %f]", l, c.x, c.y, c.z, c.w));
 	}
+
 
 	//if (m_fragment_constants.GetCount())
 	//	LOG_NOTICE(HLE, "");
