@@ -192,6 +192,17 @@ namespace ProgramHashUtil
 /**
 * Cache for program help structure (blob, string...)
 * The class is responsible for creating the object so the state only has to call getGraphicPipelineState
+* Template argument is a struct which has the following type declaration :
+* - a typedef VertexProgramData to a type that encapsulate vertex program info. It should provide an Id member.
+* - a typedef FragmentProgramData to a types that encapsulate fragment program info. It should provide an Id member and a fragment constant offset vector.
+* - a typedef PipelineData encapsulating monolithic program.
+* - a typedef PipelineProperties to a type that encapsulate various state info relevant to program compilation (alpha test, primitive type,...)
+* - a	typedef ExtraData type that will be passed to the buildProgram function.
+* It should also contains the following function member :
+* - static void RecompileFragmentProgram(RSXFragmentProgram *RSXFP, FragmentProgramData& fragmentProgramData, size_t ID);
+* - static void RecompileVertexProgram(RSXVertexProgram *RSXVP, VertexProgramData& vertexProgramData, size_t ID);
+* - static PipelineData *BuildProgram(VertexProgramData &vertexProgramData, FragmentProgramData &fragmentProgramData, const PipelineProperties &pipelineProperties, const ExtraData& extraData);
+* - void DeleteProgram(PipelineData *ptr);
 */
 template<typename BackendTraits>
 class ProgramStateCache
@@ -323,5 +334,16 @@ public:
 			Add(result, { vertexProg.Id, fragmentProg.Id, pipelineProperties });
 		}
 		return result;
+	}
+
+	const std::vector<size_t> &getFragmentConstantOffsetsCache(const RSXFragmentProgram *fragmentShader) const
+	{
+		binary2FS::const_iterator It = m_cacheFS.find(vm::get_ptr<void>(rsx_fp->addr));
+		if (It != m_cacheFS.end())
+		{
+			found = true;
+			return  It->second.FragmentConstantOffsetCache;
+		}
+		LOG_ERROR(RSX, "Can't retrieve constant offset cache");
 	}
 };
