@@ -231,26 +231,42 @@ private:
 
 	std::unordered_map<PSOKey, typename BackendTraits::PipelineData*, PSOKeyHash, PSOKeyCompare> m_cachePSO;
 
-	bool SearchFp(const RSXFragmentProgram& rsx_fp, typename BackendTraits::FragmentProgramData& shader) const
+	typename BackendTraits::FragmentProgramData& SearchFp(RSXFragmentProgram* rsx_fp, bool& found)
 	{
-		binary2FS::const_iterator It = m_cacheFS.find(vm::get_ptr<void>(rsx_fp.addr));
+		binary2FS::iterator It = m_cacheFS.find(vm::get_ptr<void>(rsx_fp->addr));
 		if (It != m_cacheFS.end())
 		{
-			shader = It->second;
-			return true;
+			found = true;
+			return  It->second;
 		}
-		return false;
+		found = false;
+		LOG_WARNING(RSX, "FP not found in buffer!");
+		size_t actualFPSize = ProgramHashUtil::FragmentProgramUtil::getFPBinarySize(vm::get_ptr<u8>(rsx_fp->addr));
+		void *fpShadowCopy = malloc(actualFPSize);
+		memcpy(fpShadowCopy, vm::get_ptr<u8>(rsx_fp->addr), actualFPSize);
+		typename BackendTraits::FragmentProgramData &newShader = m_cacheFS[fpShadowCopy];
+		BackendTraits::RecompileFragmentProgram(rsx_fp, newShader, m_currentShaderId++);
+
+		return newShader;
 	}
 
-	bool SearchVp(const RSXVertexProgram& rsx_vp, typename BackendTraits::VertexProgramData& shader) const
+	typename BackendTraits::VertexProgramData& SearchVp(RSXVertexProgram* rsx_vp, bool &found)
 	{
-		binary2VS::const_iterator It = m_cacheVS.find((void*)rsx_vp.data.data());
+		binary2VS::iterator It = m_cacheVS.find((void*)rsx_vp->data.data());
 		if (It != m_cacheVS.end())
 		{
-			shader = It->second;
-			return true;
+			found = true;
+			return It->second;
 		}
-		return false;
+		found = false;
+		LOG_WARNING(RSX, "VP not found in buffer!");
+		size_t actualVPSize = rsx_vp->data.size() * 4;
+		void *vpShadowCopy = malloc(actualVPSize);
+		memcpy(vpShadowCopy, rsx_vp->data.data(), actualVPSize);
+		typename BackendTraits::VertexProgramData& newShader = m_cacheVS[vpShadowCopy];
+		BackendTraits::RecompileVertexProgram(rsx_vp, newShader, m_currentShaderId++);
+
+		return newShader;
 	}
 
 	typename BackendTraits::PipelineData *GetProg(const PSOKey &psoKey) const
@@ -259,22 +275,6 @@ private:
 		if (It == m_cachePSO.end())
 			return nullptr;
 		return It->second;
-	}
-
-	void AddVertexProgram(typename BackendTraits::VertexProgramData& vp, RSXVertexProgram& rsx_vp)
-	{
-		size_t actualVPSize = rsx_vp.data.size() * 4;
-		void *vpShadowCopy = malloc(actualVPSize);
-		memcpy(vpShadowCopy, rsx_vp.data.data(), actualVPSize);
-		m_cacheVS.insert(std::make_pair(vpShadowCopy, vp));
-	}
-
-	void AddFragmentProgram(typename BackendTraits::FragmentProgramData& fp, RSXFragmentProgram& rsx_fp)
-	{
-		size_t actualFPSize = ProgramHashUtil::FragmentProgramUtil::getFPBinarySize(vm::get_ptr<u8>(rsx_fp.addr));
-		void *fpShadowCopy = malloc(actualFPSize);
-		memcpy(fpShadowCopy, vm::get_ptr<u8>(rsx_fp.addr), actualFPSize);
-		m_cacheFS.insert(std::make_pair(fpShadowCopy, fp));
 	}
 
 	void Add(typename BackendTraits::PipelineData *prog, const PSOKey& PSOKey)
@@ -298,24 +298,9 @@ public:
 		)
 	{
 		typename BackendTraits::PipelineData *result = nullptr;
-		typename BackendTraits::VertexProgramData vertexProg;
-		typename BackendTraits::FragmentProgramData fragmentProg;
-		bool fpFound = SearchFp(*fragmentShader, fragmentProg);
-		bool vpFound = SearchVp(*vertexShader, vertexProg);
-
-		if (!fpFound)
-		{
-			LOG_WARNING(RSX, "FP not found in buffer!");
-			BackendTraits::RecompileFragmentProgram(fragmentShader, fragmentProg, m_currentShaderId++);
-			AddFragmentProgram(fragmentProg, *fragmentShader);
-		}
-
-		if (!vpFound)
-		{
-			LOG_WARNING(RSX, "VP not found in buffer!");
-			BackendTraits::RecompileVertexProgram(vertexShader, vertexProg, m_currentShaderId++);
-			AddVertexProgram(vertexProg, *vertexShader);
-		}
+		bool fpFound, vpFound;
+		typename BackendTraits::VertexProgramData &vertexProg = SearchVp(vertexShader, vpFound);
+		typename BackendTraits::FragmentProgramData &fragmentProg = SearchFp(fragmentShader, fpFound);
 
 		if (fpFound && vpFound)
 		{
