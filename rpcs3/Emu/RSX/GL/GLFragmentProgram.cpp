@@ -726,7 +726,7 @@ void GLFragmentProgram::Delete()
 		}
 		else
 		{
-//			glDeleteShader(Id);
+			glDeleteShader(Id);
 		}
 		Id = 0;
 	}
