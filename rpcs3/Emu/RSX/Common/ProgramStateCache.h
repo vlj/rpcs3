@@ -288,6 +288,10 @@ public:
 	{
 		for (auto pair : m_cachePSO)
 			BackendTraits::DeleteProgram(pair.second);
+		for (auto pair : m_cacheVS)
+			free(pair.first);
+		for (auto pair : m_cacheFS)
+			free(pair.first);
 	}
 
 	typename BackendTraits::PipelineData *getGraphicPipelineState(
