@@ -617,7 +617,7 @@ void GLFragmentDecompilerThread::Task()
 
 GLFragmentProgram::GLFragmentProgram()
 	: m_decompiler_thread(nullptr)
-	, Id(0)
+	, id(0)
 {
 }
 
@@ -672,32 +672,32 @@ void GLFragmentProgram::DecompileAsync(RSXFragmentProgram& prog)
 
 void GLFragmentProgram::Compile()
 {
-	if (Id)
+	if (id) 
 	{
-		glDeleteShader(Id);
+		glDeleteShader(id);
 	}
 
-	Id = glCreateShader(GL_FRAGMENT_SHADER);
+	id = glCreateShader(GL_FRAGMENT_SHADER);
 
 	const char* str = shader.c_str();
 	const int strlen = shader.length();
 
-	glShaderSource(Id, 1, &str, &strlen);
-	glCompileShader(Id);
+	glShaderSource(id, 1, &str, &strlen);
+	glCompileShader(id);
 
 	GLint compileStatus = GL_FALSE;
-	glGetShaderiv(Id, GL_COMPILE_STATUS, &compileStatus); // Determine the result of the glCompileShader call
+	glGetShaderiv(id, GL_COMPILE_STATUS, &compileStatus); // Determine the result of the glCompileShader call
 	if (compileStatus != GL_TRUE) // If the shader failed to compile...
 	{
 		GLint infoLength;
-		glGetShaderiv(Id, GL_INFO_LOG_LENGTH, &infoLength); // Retrieve the length in bytes (including trailing NULL) of the shader info log
+		glGetShaderiv(id, GL_INFO_LOG_LENGTH, &infoLength); // Retrieve the length in bytes (including trailing NULL) of the shader info log
 
 		if (infoLength > 0)
 		{
 			GLsizei len;
 			char* buf = new char[infoLength]; // Buffer to store infoLog
 
-			glGetShaderInfoLog(Id, infoLength, &len, buf); // Retrieve the shader info log into our buffer
+			glGetShaderInfoLog(id, infoLength, &len, buf); // Retrieve the shader info log into our buffer
 			LOG_ERROR(RSX, "Failed to compile shader: %s", buf); // Write log to the console
 
 			delete[] buf;
@@ -727,16 +727,16 @@ void GLFragmentProgram::Delete()
 	parr.params.clear();
 	shader.clear();
 
-	if (Id)
+	if (id)
 	{
 		if (Emu.IsStopped())
 		{
-			LOG_WARNING(RSX, "GLFragmentProgram::Delete(): glDeleteShader(%d) avoided", Id);
+			LOG_WARNING(RSX, "GLFragmentProgram::Delete(): glDeleteShader(%d) avoided", id);
 		}
 		else
 		{
-//			glDeleteShader(Id);
+			glDeleteShader(id);
 		}
-		Id = 0;
+		id = 0;
 	}
 }

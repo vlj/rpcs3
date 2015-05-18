@@ -38,11 +38,9 @@ void GLProgram::Create(const u32 vp, const u32 fp)
 		Delete();
 
 	id = glCreateProgram();
-	GLuint res = glGetError();
+
 	glAttachShader(id, vp);
-	res = glGetError();
 	glAttachShader(id, fp);
-	res = glGetError();
 
 	glLinkProgram(id);
 

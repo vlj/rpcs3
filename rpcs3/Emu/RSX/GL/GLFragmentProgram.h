@@ -62,15 +62,8 @@ public:
 	GLFragmentProgram();
 	~GLFragmentProgram();
 
-	GLFragmentProgram& operator=(const GLFragmentProgram &in)
-	{
-		Id = in.Id;
-		shader = in.shader;
-		return *this;
-	}
-
 	GLParamArray parr;
-	u32 Id;
+	u32 id;
 	std::string shader;
 
 	/**
