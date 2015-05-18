@@ -870,7 +870,7 @@ void GLVertexProgram::Delete()
 		}
 		else
 		{
-			glDeleteShader(Id);
+//			glDeleteShader(Id);
 		}
 		Id = 0;
 	}
