@@ -30,7 +30,6 @@ namespace ProgramHashUtil
 			const qword *instbuffer = (const qword*)program;
 			size_t instIndex = 0;
 			bool end = false;
-			return 0;
 			while (true)
 			{
 				const qword inst = instbuffer[instIndex];
@@ -55,7 +54,6 @@ namespace ProgramHashUtil
 			const qword *instBuffer1 = (const qword*)binary1;
 			const qword *instBuffer2 = (const qword*)binary2;
 			size_t instIndex = 0;
-			return true;
 			while (true)
 			{
 				const qword& inst1 = instBuffer1[instIndex];
