@@ -255,7 +255,7 @@ private:
 
 	typename BackendTraits::PipelineData *GetProg(const PSOKey &psoKey) const
 	{
-		std::unordered_map<PSOKey, typename BackendTraits::PipelineData *, PSOKeyHash, PSOKeyCompare>::const_iterator It = m_cachePSO.find(psoKey);
+		std::unordered_map<PSOKey, ID3D12PipelineState *, PSOKeyHash, PSOKeyCompare>::const_iterator It = m_cachePSO.find(psoKey);
 		if (It == m_cachePSO.end())
 			return nullptr;
 		return It->second;
@@ -266,6 +266,7 @@ private:
 		size_t actualVPSize = rsx_vp.data.size() * 4;
 		void *vpShadowCopy = malloc(actualVPSize);
 		memcpy(vpShadowCopy, rsx_vp.data.data(), actualVPSize);
+		vp.Id = (u32)m_currentShaderId++;
 		m_cacheVS.insert(std::make_pair(vpShadowCopy, vp));
 	}
 
@@ -274,6 +275,7 @@ private:
 		size_t actualFPSize = ProgramHashUtil::FragmentProgramUtil::getFPBinarySize(vm::get_ptr<u8>(rsx_fp.addr));
 		void *fpShadowCopy = malloc(actualFPSize);
 		memcpy(fpShadowCopy, vm::get_ptr<u8>(rsx_fp.addr), actualFPSize);
+		fp.Id = (u32)m_currentShaderId++;
 		m_cacheFS.insert(std::make_pair(fpShadowCopy, fp));
 	}
 
@@ -291,6 +293,8 @@ public:
 	}
 
 	typename BackendTraits::PipelineData *getGraphicPipelineState(
+		ID3D12Device *device,
+		ID3D12RootSignature *rootSignature,
 		RSXVertexProgram *vertexShader,
 		RSXFragmentProgram *fragmentShader,
 		const typename BackendTraits::PipelineProperties &pipelineProperties,
