@@ -50,6 +50,25 @@ std::string GLVertexDecompilerThread::getFunction(FUNCTION f)
 	}
 }
 
+std::string GLVertexDecompilerThread::compareFunction(COMPARE f, const std::string &Op0, const std::string &Op1)
+{
+	switch (f)
+	{
+	case COMPARE::FUNCTION_SEQ:
+		return "equal(" + Op0 + ", " + Op1 + ")";
+	case COMPARE::FUNCTION_SGE:
+		return "greaterThanEqual(" + Op0 + ", " + Op1 + ")";
+	case COMPARE::FUNCTION_SGT:
+		return "greaterThan(" + Op0 + ", " + Op1 + ")";
+	case COMPARE::FUNCTION_SLE:
+		return "lessThanEqual(" + Op0 + ", " + Op1 + ")";
+	case COMPARE::FUNCTION_SLT:
+		return "lessThan(" + Op0 + ", " + Op1 + ")";
+	case COMPARE::FUNCTION_SNE:
+		return "notEqual(" + Op0 + ", " + Op1 + ")";
+	}
+}
+
 void GLVertexDecompilerThread::insertHeader(std::stringstream &OS)
 {
 	OS << "#version 420" << std::endl << std::endl;
