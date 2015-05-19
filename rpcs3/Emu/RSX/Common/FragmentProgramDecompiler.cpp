@@ -401,13 +401,13 @@ std::string FragmentProgramDecompiler::Decompile()
 			case RSX_FP_OPCODE_MUL: SetDst("($0 * $1)"); break;
 			case RSX_FP_OPCODE_RCP: SetDst("1 / $0"); break;
 			case RSX_FP_OPCODE_RSQ: SetDst("inversesqrt(abs($0))"); break;
-			case RSX_FP_OPCODE_SEQ: SetDst(compareFunction(COMPARE::FUNCTION_SEQ, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SEQ: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SEQ, "$0", "$1") + ")"); break;
 			case RSX_FP_OPCODE_SFL: SetDst(getFunction(FUNCTION::FUNCTION_SFL)); break;
-			case RSX_FP_OPCODE_SGE: SetDst(compareFunction(COMPARE::FUNCTION_SGE, "$0", "$1")); break;
-			case RSX_FP_OPCODE_SGT: SetDst(compareFunction(COMPARE::FUNCTION_SGT, "$0", "$1")); break;
-			case RSX_FP_OPCODE_SLE: SetDst(compareFunction(COMPARE::FUNCTION_SLE, "$0", "$1")); break;
-			case RSX_FP_OPCODE_SLT: SetDst(compareFunction(COMPARE::FUNCTION_SLT, "$0", "$1")); break;
-			case RSX_FP_OPCODE_SNE: SetDst(compareFunction(COMPARE::FUNCTION_SNE, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SGE: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SGE, "$0", "$1") + ")"); break;
+			case RSX_FP_OPCODE_SGT: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SGT, "$0", "$1") + ")"); break;
+			case RSX_FP_OPCODE_SLE: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SLE, "$0", "$1") + ")"); break;
+			case RSX_FP_OPCODE_SLT: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SLT, "$0", "$1") + ")"); break;
+			case RSX_FP_OPCODE_SNE: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SNE, "$0", "$1") + ")"); break;
 			case RSX_FP_OPCODE_STR: SetDst(getFunction(FUNCTION::FUNCTION_STR)); break;
 
 			default:
@@ -446,14 +446,14 @@ std::string FragmentProgramDecompiler::Decompile()
 			case RSX_FP_OPCODE_PK16: LOG_ERROR(RSX, "Unimplemented SCB instruction: PK16"); break;
 			case RSX_FP_OPCODE_PKB: LOG_ERROR(RSX, "Unimplemented SCB instruction: PKB"); break;
 			case RSX_FP_OPCODE_PKG: LOG_ERROR(RSX, "Unimplemented SCB instruction: PKG"); break;
-			case RSX_FP_OPCODE_SEQ: SetDst(compareFunction(COMPARE::FUNCTION_SEQ, "$0", "$1")); break;
-			case RSX_FP_OPCODE_SFL: SetDst(getFunction(FUNCTION::FUNCTION_SFL)); break;
-			case RSX_FP_OPCODE_SGE: SetDst(compareFunction(COMPARE::FUNCTION_SGE, "$0", "$1")); break;
-			case RSX_FP_OPCODE_SGT: SetDst(compareFunction(COMPARE::FUNCTION_SGT, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SEQ: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SEQ, "$0", "$1") + ")"); break;
+			case RSX_FP_OPCODE_SFL: SetDst(getFloatTypeName(4) + "(" + getFunction(FUNCTION::FUNCTION_SFL)); break;
+			case RSX_FP_OPCODE_SGE: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SGE, "$0", "$1") + ")"); break;
+			case RSX_FP_OPCODE_SGT: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SGT, "$0", "$1") + ")"); break;
 			case RSX_FP_OPCODE_SIN: SetDst("sin($0)"); break;
-			case RSX_FP_OPCODE_SLE: SetDst(compareFunction(COMPARE::FUNCTION_SLE, "$0", "$1")); break;
-			case RSX_FP_OPCODE_SLT: SetDst(compareFunction(COMPARE::FUNCTION_SLT, "$0", "$1")); break;
-			case RSX_FP_OPCODE_SNE: SetDst(compareFunction(COMPARE::FUNCTION_SNE, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SLE: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SLE, "$0", "$1") + ")"); break;
+			case RSX_FP_OPCODE_SLT: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SLT, "$0", "$1") + ")"); break;
+			case RSX_FP_OPCODE_SNE: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SNE, "$0", "$1") + ")"); break;
 			case RSX_FP_OPCODE_STR: SetDst(getFunction(FUNCTION::FUNCTION_STR)); break;
 
 			default:
