@@ -65,6 +65,7 @@ struct VertexProgramDecompiler
 protected:
 	virtual std::string getFloatTypeName(size_t elementCount) = 0;
 	virtual std::string getFunction(enum class FUNCTION) = 0;
+	virtual std::string compareFunction(enum class COMPARE, const std::string &, const std::string &) = 0;
 
 	virtual void insertHeader(std::stringstream &OS) = 0;
 	virtual void insertInputs(std::stringstream &OS, const std::vector<ParamType> &inputs) = 0;

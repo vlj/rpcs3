@@ -278,16 +278,15 @@ void VertexProgramDecompiler::AddCodeCond(const std::string& dst, const std::str
 		return;
 	}
 
-	static const char* cond_string_table[(lt | gt | eq) + 1] =
+	static const COMPARE cond_string_table[(lt | gt | eq) + 1] =
 	{
-		"error",
-		"<",
-		"==",
-		"<=",
-		">",
-		"!=",
-		">=",
-		"error"
+		COMPARE::FUNCTION_SLT, // "error"
+		COMPARE::FUNCTION_SLT,
+		COMPARE::FUNCTION_SEQ,
+		COMPARE::FUNCTION_SLE,
+		COMPARE::FUNCTION_SGT,
+		COMPARE::FUNCTION_SNE,
+		COMPARE::FUNCTION_SGE,
 	};
 
 	static const char f[4] = { 'x', 'y', 'z', 'w' };
@@ -300,7 +299,7 @@ void VertexProgramDecompiler::AddCodeCond(const std::string& dst, const std::str
 
 	swizzle = swizzle == "xyzw" ? "" : "." + swizzle;
 
-	std::string cond = fmt::Format("(cc%d%s %s float4(0., 0., 0., 0.))", d0.cond_reg_sel_1, swizzle.c_str(), cond_string_table[d0.cond]);
+	std::string cond = compareFunction(cond_string_table[d0.cond], "cc" + std::to_string(d0.cond_reg_sel_1) + swizzle.c_str(), getFloatTypeName(4) + "(0., 0., 0., 0.)");
 
 	ShaderVariable dst_var(dst);
 	dst_var.symplify();
