@@ -389,7 +389,7 @@ std::string FragmentProgramDecompiler::Decompile()
 			{
 			case RSX_FP_OPCODE_ADD: SetDst("($0 + $1)"); break;
 			case RSX_FP_OPCODE_DIV: SetDst("($0 / $1)"); break;
-			case RSX_FP_OPCODE_DIVSQ: SetDst("($0 / sqrt($1))"); break;
+			case RSX_FP_OPCODE_DIVSQ: SetDst("($0 / sqrt($1).xxxx)"); break;
 			case RSX_FP_OPCODE_DP2: SetDst(getFunction(FUNCTION::FUNCTION_DP2)); break;
 			case RSX_FP_OPCODE_DP3: SetDst(getFunction(FUNCTION::FUNCTION_DP3)); break;
 			case RSX_FP_OPCODE_DP4: SetDst(getFunction(FUNCTION::FUNCTION_DP4)); break;
@@ -422,7 +422,7 @@ std::string FragmentProgramDecompiler::Decompile()
 			switch (opcode)
 			{
 			case RSX_FP_OPCODE_ADD: SetDst("($0 + $1)"); break;
-			case RSX_FP_OPCODE_COS: SetDst("cos($0)"); break;
+			case RSX_FP_OPCODE_COS: SetDst("cos($0.xxxx)"); break;
 			case RSX_FP_OPCODE_DP2: SetDst(getFunction(FUNCTION::FUNCTION_DP2)); break;
 			case RSX_FP_OPCODE_DP3: SetDst(getFunction(FUNCTION::FUNCTION_DP3)); break;
 			case RSX_FP_OPCODE_DP4: SetDst(getFunction(FUNCTION::FUNCTION_DP4)); break;
@@ -450,7 +450,7 @@ std::string FragmentProgramDecompiler::Decompile()
 			case RSX_FP_OPCODE_SFL: SetDst(getFloatTypeName(4) + "(" + getFunction(FUNCTION::FUNCTION_SFL)); break;
 			case RSX_FP_OPCODE_SGE: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SGE, "$0", "$1") + ")"); break;
 			case RSX_FP_OPCODE_SGT: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SGT, "$0", "$1") + ")"); break;
-			case RSX_FP_OPCODE_SIN: SetDst("sin($0)"); break;
+			case RSX_FP_OPCODE_SIN: SetDst("sin($0.xxxx)"); break;
 			case RSX_FP_OPCODE_SLE: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SLE, "$0", "$1") + ")"); break;
 			case RSX_FP_OPCODE_SLT: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SLT, "$0", "$1") + ")"); break;
 			case RSX_FP_OPCODE_SNE: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SNE, "$0", "$1") + ")"); break;
