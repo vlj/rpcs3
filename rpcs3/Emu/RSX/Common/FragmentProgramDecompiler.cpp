@@ -5,14 +5,6 @@
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
 
-static std::string typeName[] =
-{
-	"float",
-	"float2",
-	"float3",
-	"float4"
-};
-
 FragmentProgramDecompiler::FragmentProgramDecompiler(u32 addr, u32& size, u32 ctrl) :
 	m_addr(addr),
 	m_size(size),
@@ -55,7 +47,7 @@ void FragmentProgramDecompiler::SetDst(std::string code, bool append_mask)
 	{
 		if (dst.set_cond)
 		{
-			AddCode("$ifcond " + m_parr.AddParam(PF_PARAM_NONE, typeName[3], "cc" + std::to_string(src0.cond_mod_reg_index)) + "$m = " + code + ";");
+			AddCode("$ifcond " + m_parr.AddParam(PF_PARAM_NONE, getFloatTypeName(4), "cc" + std::to_string(src0.cond_mod_reg_index)) + "$m = " + code + ";");
 		}
 		else
 		{
@@ -72,7 +64,7 @@ void FragmentProgramDecompiler::SetDst(std::string code, bool append_mask)
 
 	if (dst.set_cond)
 	{
-		AddCode(m_parr.AddParam(PF_PARAM_NONE, typeName[3], "cc" + std::to_string(src0.cond_mod_reg_index)) + "$m = " + dest + ";");
+		AddCode(m_parr.AddParam(PF_PARAM_NONE, getFloatTypeName(4), "cc" + std::to_string(src0.cond_mod_reg_index)) + "$m = " + dest + ";");
 	}
 }
 
@@ -100,24 +92,24 @@ std::string FragmentProgramDecompiler::GetMask()
 
 std::string FragmentProgramDecompiler::AddReg(u32 index, int fp16)
 {
-	return m_parr.AddParam(PF_PARAM_NONE, typeName[3], std::string(fp16 ? "h" : "r") + std::to_string(index), typeName[3] + "(0.0)");
+	return m_parr.AddParam(PF_PARAM_NONE, getFloatTypeName(4), std::string(fp16 ? "h" : "r") + std::to_string(index), getFloatTypeName(4) + "(0.0)");
 }
 
 bool FragmentProgramDecompiler::HasReg(u32 index, int fp16)
 {
-	return m_parr.HasParam(PF_PARAM_NONE, typeName[3],
+	return m_parr.HasParam(PF_PARAM_NONE, getFloatTypeName(4),
 		std::string(fp16 ? "h" : "r") + std::to_string(index));
 }
 
 std::string FragmentProgramDecompiler::AddCond()
 {
-	return m_parr.AddParam(PF_PARAM_NONE, typeName[3], "cc" + std::to_string(src0.cond_reg_index));
+	return m_parr.AddParam(PF_PARAM_NONE, getFloatTypeName(4), "cc" + std::to_string(src0.cond_reg_index));
 }
 
 std::string FragmentProgramDecompiler::AddConst()
 {
 	std::string name = std::string("fc") + std::to_string(m_size + 4 * 4);
-	if (m_parr.HasParam(PF_PARAM_UNIFORM, typeName[3], name))
+	if (m_parr.HasParam(PF_PARAM_UNIFORM, getFloatTypeName(4), name))
 	{
 		return name;
 	}
@@ -129,8 +121,8 @@ std::string FragmentProgramDecompiler::AddConst()
 	u32 y = GetData(data[1]);
 	u32 z = GetData(data[2]);
 	u32 w = GetData(data[3]);
-	return m_parr.AddParam(PF_PARAM_UNIFORM, typeName[3], name,
-		std::string(typeName[3] + "(") + std::to_string((float&)x) + ", " + std::to_string((float&)y)
+	return m_parr.AddParam(PF_PARAM_UNIFORM, getFloatTypeName(4), name,
+		std::string(getFloatTypeName(4) + "(") + std::to_string((float&)x) + ", " + std::to_string((float&)y)
 		+ ", " + std::to_string((float&)z) + ", " + std::to_string((float&)w) + ")");
 }
 
@@ -208,7 +200,7 @@ std::string FragmentProgramDecompiler::GetCond()
 		cond = "equal";
 	}
 
-	return "any(" + cond + "(" + AddCond() + swizzle + ", " + typeName[3] + "(0.0)))";
+	return "any(" + cond + "(" + AddCond() + swizzle + ", " + getFloatTypeName(4) + "(0.0)))";
 }
 
 void FragmentProgramDecompiler::AddCodeCond(const std::string& dst, const std::string& src)
@@ -259,7 +251,7 @@ void FragmentProgramDecompiler::AddCodeCond(const std::string& dst, const std::s
 		cond = "==";
 	}
 
-	cond = "(" + AddCond() + swizzle + " " + cond + " " + typeName[3] + "(0., 0., 0., 0.))";
+	cond = "(" + AddCond() + swizzle + " " + cond + " " + getFloatTypeName(4) + "(0., 0., 0., 0.))";
 
 	ShaderVariable dst_var(dst);
 	dst_var.symplify();
@@ -306,12 +298,12 @@ template<typename T> std::string FragmentProgramDecompiler::GetSRC(T src)
 		default:
 			if (dst.src_attr_reg_num < sizeof(reg_table) / sizeof(reg_table[0]))
 			{
-				ret += m_parr.AddParam(PF_PARAM_IN, typeName[3], reg_table[dst.src_attr_reg_num]);
+				ret += m_parr.AddParam(PF_PARAM_IN, getFloatTypeName(4), reg_table[dst.src_attr_reg_num]);
 			}
 			else
 			{
 				LOG_ERROR(RSX, "Bad src reg num: %d", fmt::by_value(dst.src_attr_reg_num));
-				ret += m_parr.AddParam(PF_PARAM_IN, typeName[3], "unk");
+				ret += m_parr.AddParam(PF_PARAM_IN, getFloatTypeName(4), "unk");
 				Emu.Pause();
 			}
 			break;
