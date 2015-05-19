@@ -107,6 +107,7 @@ void GLFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 			continue;
 		for (ParamItem PI : PT.items)
 			OS << "uniform " << PT.type << " " << PI.name << ";" << std::endl;
+
 	}
 
 	for (ParamType PT : m_parr.params[PF_PARAM_UNIFORM])
@@ -194,6 +195,14 @@ void GLFragmentProgram::Decompile(RSXFragmentProgram& prog)
 {
 	GLFragmentDecompilerThread decompiler(shader, parr, prog.addr, prog.size, prog.ctrl);
 	decompiler.Task();
+	for (const ParamType& PT : decompiler.m_parr.params[PF_PARAM_UNIFORM])
+	{
+		for (const ParamItem PI : PT.items)
+		{
+			size_t offset = atoi(PI.name.c_str() + 2);
+			FragmentConstantOffsetCache.push_back(offset);
+		}
+	}
 }
 
 void GLFragmentProgram::DecompileAsync(RSXFragmentProgram& prog)
@@ -249,14 +258,6 @@ void GLFragmentProgram::Compile()
 
 		LOG_NOTICE(RSX, shader.c_str()); // Log the text of the shader that failed to compile
 		Emu.Pause(); // Pause the emulator, we can't really continue from here
-	}
-	for (const ParamType& PT : parr.params[PF_PARAM_UNIFORM])
-	{
-		for (const ParamItem PI : PT.items)
-		{
-			size_t offset = atoi(PI.name.c_str() + 2);
-			FragmentConstantOffsetCache.push_back(offset);
-		}
 	}
 }
 
