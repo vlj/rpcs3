@@ -177,30 +177,30 @@ std::string FragmentProgramDecompiler::GetCond()
 
 	if (src0.exec_if_gr && src0.exec_if_eq)
 	{
-		cond = "greaterThanEqual";
+		cond = ">=";
 	}
 	else if (src0.exec_if_lt && src0.exec_if_eq)
 	{
-		cond = "lessThanEqual";
+		cond = "<=";
 	}
 	else if (src0.exec_if_gr && src0.exec_if_lt)
 	{
-		cond = "notEqual";
+		cond = "!=";
 	}
 	else if (src0.exec_if_gr)
 	{
-		cond = "greaterThan";
+		cond = ">";
 	}
 	else if (src0.exec_if_lt)
 	{
-		cond = "lessThan";
+		cond = "<";
 	}
 	else //if(src0.exec_if_eq)
 	{
-		cond = "equal";
+		cond = "==";
 	}
 
-	return "any(" + cond + "(" + AddCond() + swizzle + ", " + getFloatTypeName(4) + "(0.0)))";
+	return "any((" + AddCond() + swizzle + " " + cond + " " + getFloatTypeName(4) + "(0., 0., 0., 0.)))";
 }
 
 void FragmentProgramDecompiler::AddCodeCond(const std::string& dst, const std::string& src)
