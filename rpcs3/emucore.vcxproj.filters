@@ -881,13 +881,16 @@
     <ClCompile Include="Emu\RSX\D3D12\D3D12Buffer.cpp">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="Emu\RSX\D3D12\VertexProgramDecompiler.cpp">
+    <ClCompile Include="Emu\RSX\Common\FragmentProgramDecompiler.cpp">
+      <Filter>Emu\GPU\RSX\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\RSX\Common\ShaderParam.cpp">
+      <Filter>Emu\GPU\RSX\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\RSX\D3D12\D3D12FragmentProgramDecompiler.cpp">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClCompile>
-    <ClCompile Include="Emu\RSX\D3D12\ShaderParam.cpp">
-      <Filter>Emu\GPU\RSX\D3D12</Filter>
-    </ClCompile>
-    <ClCompile Include="Emu\RSX\D3D12\FragmentProgramDecompiler.cpp">
+    <ClCompile Include="Emu\RSX\D3D12\D3D12VertexProgramDecompiler.cpp">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClCompile>
   </ItemGroup>
@@ -1588,17 +1591,20 @@
     <ClInclude Include="Emu\RSX\D3D12\D3D12Buffer.h">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClInclude>
-    <ClInclude Include="Emu\RSX\D3D12\VertexProgramDecompiler.h">
-      <Filter>Emu\GPU\RSX\D3D12</Filter>
-    </ClInclude>
-    <ClInclude Include="Emu\RSX\D3D12\ShaderParam.h">
-      <Filter>Emu\GPU\RSX\D3D12</Filter>
-    </ClInclude>
-    <ClInclude Include="Emu\RSX\D3D12\FragmentProgramDecompiler.h">
-      <Filter>Emu\GPU\RSX\D3D12</Filter>
-    </ClInclude>
     <ClInclude Include="Emu\RSX\Common\ProgramStateCache.h">
       <Filter>Emu\GPU\RSX\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\Common\FragmentProgramDecompiler.h">
+      <Filter>Emu\GPU\RSX\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\Common\ShaderParam.h">
+      <Filter>Emu\GPU\RSX\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12FragmentProgramDecompiler.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12VertexProgramDecompiler.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
