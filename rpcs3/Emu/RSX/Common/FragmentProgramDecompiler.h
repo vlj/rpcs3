@@ -3,28 +3,6 @@
 #include "Emu/RSX/RSXFragmentProgram.h"
 #include <sstream>
 
-enum class FUNCTION {
-	FUNCTION_DP2,
-	FUNCTION_DP2A,
-	FUNCTION_DP3,
-	FUNCTION_DP4,
-	FUNCTION_SFL, // Set zero
-	FUNCTION_STR, // Set One
-	FUNCTION_FRACT,
-	FUNCTION_DFDX,
-	FUNCTION_DFDY,
-	FUNCTION_TEXTURE_SAMPLE,
-};
-
-enum class COMPARE {
-	FUNCTION_SEQ,
-	FUNCTION_SGE,
-	FUNCTION_SGT,
-	FUNCTION_SLE,
-	FUNCTION_SLT,
-	FUNCTION_SNE,
-};
-
 class FragmentProgramDecompiler
 {
 	std::string main;

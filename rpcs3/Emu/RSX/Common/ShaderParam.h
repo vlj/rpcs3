@@ -1,8 +1,28 @@
 #pragma once
-#pragma once
-#if defined(DX12_SUPPORT)
 #include <string>
 #include <vector>
+
+enum class FUNCTION {
+	FUNCTION_DP2,
+	FUNCTION_DP2A,
+	FUNCTION_DP3,
+	FUNCTION_DP4,
+	FUNCTION_SFL, // Set zero
+	FUNCTION_STR, // Set One
+	FUNCTION_FRACT,
+	FUNCTION_DFDX,
+	FUNCTION_DFDY,
+	FUNCTION_TEXTURE_SAMPLE,
+};
+
+enum class COMPARE {
+	FUNCTION_SEQ,
+	FUNCTION_SGE,
+	FUNCTION_SGT,
+	FUNCTION_SLE,
+	FUNCTION_SLT,
+	FUNCTION_SNE,
+};
 
 enum ParamFlag
 {
@@ -192,4 +212,3 @@ public:
 		return name + "." + fmt::merge({ swizzles }, ".");
 	}
 };
-#endif
