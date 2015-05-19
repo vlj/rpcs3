@@ -18,6 +18,9 @@ enum class FUNCTION {
 	FUNCTION_SNE,
 	FUNCTION_STR, // Set One
 	FUNCTION_FRACT,
+	FUNCTION_DFDX,
+	FUNCTION_DFDY,
+	FUNCTION_TEXTURE_SAMPLE,
 };
 
 class FragmentProgramDecompiler

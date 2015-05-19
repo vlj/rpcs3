@@ -493,11 +493,11 @@ std::string FragmentProgramDecompiler::Decompile()
 		{
 			switch (opcode)
 			{
-			case RSX_FP_OPCODE_DDX: SetDst("dFdx($0)"); break;
-			case RSX_FP_OPCODE_DDY: SetDst("dFdy($0)"); break;
+			case RSX_FP_OPCODE_DDX: SetDst(getFunction(FUNCTION::FUNCTION_DFDX)); break;
+			case RSX_FP_OPCODE_DDY: SetDst(getFunction(FUNCTION::FUNCTION_DFDY)); break;
 			case RSX_FP_OPCODE_NRM: SetDst("normalize($0)"); break;
 			case RSX_FP_OPCODE_BEM: LOG_ERROR(RSX, "Unimplemented TEX_SRB instruction: BEM"); break;
-			case RSX_FP_OPCODE_TEX: SetDst("$t.Sample($tsampler, $0.xy)");  break;
+			case RSX_FP_OPCODE_TEX: SetDst(getFunction(FUNCTION::FUNCTION_TEXTURE_SAMPLE));  break;
 			case RSX_FP_OPCODE_TEXBEM: SetDst("texture($t, $0.xy, $1.x)"); break;
 			case RSX_FP_OPCODE_TXP: SetDst("textureProj($t, $0.xyz, $1.x)"); break; //TODO: More testing (Sonic The Hedgehog (NPUB-30442/NPEB-00478) and The Simpsons Arcade Game (NPUB30563))
 			case RSX_FP_OPCODE_TXPBEM: SetDst("textureProj($t, $0.xyz, $1.x)"); break;
