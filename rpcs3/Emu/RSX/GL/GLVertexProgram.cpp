@@ -268,6 +268,7 @@ void GLVertexDecompilerThread::insertMainEnd(std::stringstream & OS)
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", i.src_reg))
 			OS << "	" << i.name << " = " << i.src_reg << ";" << std::endl;
 	}
+	OS << "	gl_Position = gl_Position * scaleOffsetMat;" << std::endl;
 	OS << "}" << std::endl;
 }
 
