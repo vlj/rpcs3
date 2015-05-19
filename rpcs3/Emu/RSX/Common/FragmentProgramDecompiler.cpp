@@ -38,7 +38,7 @@ void FragmentProgramDecompiler::SetDst(std::string code, bool append_mask)
 
 	if (dst.saturate)
 	{
-		code = getFunction(FUNCTION::FUNCTION_SATURATE) + "(" + code + ")";
+		code = saturate(code);
 	}
 
 	code += (append_mask ? "$m" : "");

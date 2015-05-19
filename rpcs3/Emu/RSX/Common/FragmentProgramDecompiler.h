@@ -4,7 +4,6 @@
 #include <sstream>
 
 enum class FUNCTION {
-	FUNCTION_SATURATE,
 	FUNCTION_DP2,
 	FUNCTION_DP2A,
 	FUNCTION_DP3,
@@ -31,7 +30,7 @@ class FragmentProgramDecompiler
 	u32 m_const_index;
 	u32 m_offset;
 	u32 m_location;
-	u32 m_ctrl;
+
 	u32 m_loop_count;
 	int m_code_level;
 	std::vector<u32> m_end_offsets;
@@ -55,8 +54,10 @@ class FragmentProgramDecompiler
 
 	u32 GetData(const u32 d) const { return d << 16 | d >> 16; }
 protected:
+	u32 m_ctrl;
 	virtual std::string getFloatTypeName(size_t elementCount) = 0;
 	virtual std::string getFunction(enum class FUNCTION) = 0;
+	virtual std::string saturate(const std::string &code) = 0;
 
 	virtual void insertHeader(std::stringstream &OS) = 0;
 	virtual void insertIntputs(std::stringstream &OS) = 0;
