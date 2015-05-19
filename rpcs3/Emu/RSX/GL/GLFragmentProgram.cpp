@@ -35,20 +35,8 @@ std::string GLFragmentDecompilerThread::getFunction(FUNCTION f)
 		return "vec4(dot($0.xyz, $1.xyz))";
 	case FUNCTION::FUNCTION_DP4:
 		return "vec4(dot($0, $1))";
-	case FUNCTION::FUNCTION_SEQ:
-		return "vec4($0 == $1)";
 	case FUNCTION::FUNCTION_SFL:
 		return "vec4(0., 0., 0., 0.)";
-	case FUNCTION::FUNCTION_SGE:
-		return "vec4($0 >= $1)";
-	case FUNCTION::FUNCTION_SGT:
-		return "vec4($0 > $1)";
-	case FUNCTION::FUNCTION_SLE:
-		return "vec4($0 <= $1)";
-	case FUNCTION::FUNCTION_SLT:
-		return "vec4($0 < $1)";
-	case FUNCTION::FUNCTION_SNE:
-		return "vec4($0 != $1)";
 	case FUNCTION::FUNCTION_STR:
 		return "vec4(1., 1., 1., 1.)";
 	case FUNCTION::FUNCTION_FRACT:
@@ -65,6 +53,25 @@ std::string GLFragmentDecompilerThread::getFunction(FUNCTION f)
 std::string GLFragmentDecompilerThread::saturate(const std::string & code)
 {
 	return "clamp(" + code + ", 0., 1.)";
+}
+
+std::string GLFragmentDecompilerThread::compareFunction(COMPARE f, const std::string &Op0, const std::string &Op1)
+{
+	switch (f)
+	{
+	case COMPARE::FUNCTION_SEQ:
+		return "equal(" + Op0 + ", " + Op1 + ")";
+	case COMPARE::FUNCTION_SGE:
+		return "greaterThanEqual(" + Op0 + ", " + Op1 + ")";
+	case COMPARE::FUNCTION_SGT:
+		return "greaterThan(" + Op0 + ", " + Op1 + ")";
+	case COMPARE::FUNCTION_SLE:
+		return "lessThanEqual(" + Op0 + ", " + Op1 + ")";
+	case COMPARE::FUNCTION_SLT:
+		return "lessThan(" + Op0 + ", " + Op1 + ")";
+	case COMPARE::FUNCTION_SNE:
+		return "notEqual(" + Op0 + ", " + Op1 + ")";
+	}
 }
 
 
