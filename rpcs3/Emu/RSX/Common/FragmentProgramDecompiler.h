@@ -8,18 +8,21 @@ enum class FUNCTION {
 	FUNCTION_DP2A,
 	FUNCTION_DP3,
 	FUNCTION_DP4,
-	FUNCTION_SEQ,
 	FUNCTION_SFL, // Set zero
-	FUNCTION_SGE,
-	FUNCTION_SGT,
-	FUNCTION_SLE,
-	FUNCTION_SLT,
-	FUNCTION_SNE,
 	FUNCTION_STR, // Set One
 	FUNCTION_FRACT,
 	FUNCTION_DFDX,
 	FUNCTION_DFDY,
 	FUNCTION_TEXTURE_SAMPLE,
+};
+
+enum class COMPARE {
+	FUNCTION_SEQ,
+	FUNCTION_SGE,
+	FUNCTION_SGT,
+	FUNCTION_SLE,
+	FUNCTION_SLT,
+	FUNCTION_SNE,
 };
 
 class FragmentProgramDecompiler
@@ -58,6 +61,7 @@ protected:
 	virtual std::string getFloatTypeName(size_t elementCount) = 0;
 	virtual std::string getFunction(enum class FUNCTION) = 0;
 	virtual std::string saturate(const std::string &code) = 0;
+	virtual std::string compareFunction(enum class COMPARE, const std::string &, const std::string &) = 0;
 
 	virtual void insertHeader(std::stringstream &OS) = 0;
 	virtual void insertIntputs(std::stringstream &OS) = 0;

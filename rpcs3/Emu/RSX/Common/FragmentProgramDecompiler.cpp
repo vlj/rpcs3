@@ -176,31 +176,19 @@ std::string FragmentProgramDecompiler::GetCond()
 	swizzle = swizzle == "xyzw" ? "" : "." + swizzle;
 
 	if (src0.exec_if_gr && src0.exec_if_eq)
-	{
-		cond = ">=";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SGE, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 	else if (src0.exec_if_lt && src0.exec_if_eq)
-	{
-		cond = "<=";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SLE, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 	else if (src0.exec_if_gr && src0.exec_if_lt)
-	{
-		cond = "!=";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SNE, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 	else if (src0.exec_if_gr)
-	{
-		cond = ">";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SGT, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 	else if (src0.exec_if_lt)
-	{
-		cond = "<";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SLT, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 	else //if(src0.exec_if_eq)
-	{
-		cond = "==";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SEQ, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 
-	return "any((" + AddCond() + swizzle + " " + cond + " " + getFloatTypeName(4) + "(0., 0., 0., 0.)))";
+	return "any(" + cond + ")";
 }
 
 void FragmentProgramDecompiler::AddCodeCond(const std::string& dst, const std::string& src)
@@ -227,31 +215,17 @@ void FragmentProgramDecompiler::AddCodeCond(const std::string& dst, const std::s
 	swizzle = swizzle == "xyzw" ? "" : "." + swizzle;
 
 	if (src0.exec_if_gr && src0.exec_if_eq)
-	{
-		cond = ">=";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SGE, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 	else if (src0.exec_if_lt && src0.exec_if_eq)
-	{
-		cond = "<=";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SLE, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 	else if (src0.exec_if_gr && src0.exec_if_lt)
-	{
-		cond = "!=";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SNE, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 	else if (src0.exec_if_gr)
-	{
-		cond = ">";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SGT, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 	else if (src0.exec_if_lt)
-	{
-		cond = "<";
-	}
+		cond = compareFunction(COMPARE::FUNCTION_SLT, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 	else //if(src0.exec_if_eq)
-	{
-		cond = "==";
-	}
-
-	cond = "(" + AddCond() + swizzle + " " + cond + " " + getFloatTypeName(4) + "(0., 0., 0., 0.))";
+		cond = compareFunction(COMPARE::FUNCTION_SEQ, AddCond() + swizzle, getFloatTypeName(4) + "(0., 0., 0., 0.)");
 
 	ShaderVariable dst_var(dst);
 	dst_var.symplify();
@@ -427,13 +401,13 @@ std::string FragmentProgramDecompiler::Decompile()
 			case RSX_FP_OPCODE_MUL: SetDst("($0 * $1)"); break;
 			case RSX_FP_OPCODE_RCP: SetDst("1 / $0"); break;
 			case RSX_FP_OPCODE_RSQ: SetDst("inversesqrt(abs($0))"); break;
-			case RSX_FP_OPCODE_SEQ: SetDst(getFunction(FUNCTION::FUNCTION_SEQ)); break;
+			case RSX_FP_OPCODE_SEQ: SetDst(compareFunction(COMPARE::FUNCTION_SEQ, "$0", "$1")); break;
 			case RSX_FP_OPCODE_SFL: SetDst(getFunction(FUNCTION::FUNCTION_SFL)); break;
-			case RSX_FP_OPCODE_SGE: SetDst(getFunction(FUNCTION::FUNCTION_SGE)); break;
-			case RSX_FP_OPCODE_SGT: SetDst(getFunction(FUNCTION::FUNCTION_SGT)); break;
-			case RSX_FP_OPCODE_SLE: SetDst(getFunction(FUNCTION::FUNCTION_SLE)); break;
-			case RSX_FP_OPCODE_SLT: SetDst(getFunction(FUNCTION::FUNCTION_SLT)); break;
-			case RSX_FP_OPCODE_SNE: SetDst(getFunction(FUNCTION::FUNCTION_SNE)); break;
+			case RSX_FP_OPCODE_SGE: SetDst(compareFunction(COMPARE::FUNCTION_SGE, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SGT: SetDst(compareFunction(COMPARE::FUNCTION_SGT, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SLE: SetDst(compareFunction(COMPARE::FUNCTION_SLE, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SLT: SetDst(compareFunction(COMPARE::FUNCTION_SLT, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SNE: SetDst(compareFunction(COMPARE::FUNCTION_SNE, "$0", "$1")); break;
 			case RSX_FP_OPCODE_STR: SetDst(getFunction(FUNCTION::FUNCTION_STR)); break;
 
 			default:
@@ -472,14 +446,14 @@ std::string FragmentProgramDecompiler::Decompile()
 			case RSX_FP_OPCODE_PK16: LOG_ERROR(RSX, "Unimplemented SCB instruction: PK16"); break;
 			case RSX_FP_OPCODE_PKB: LOG_ERROR(RSX, "Unimplemented SCB instruction: PKB"); break;
 			case RSX_FP_OPCODE_PKG: LOG_ERROR(RSX, "Unimplemented SCB instruction: PKG"); break;
-			case RSX_FP_OPCODE_SEQ: SetDst(getFunction(FUNCTION::FUNCTION_SEQ)); break;
+			case RSX_FP_OPCODE_SEQ: SetDst(compareFunction(COMPARE::FUNCTION_SEQ, "$0", "$1")); break;
 			case RSX_FP_OPCODE_SFL: SetDst(getFunction(FUNCTION::FUNCTION_SFL)); break;
-			case RSX_FP_OPCODE_SGE: SetDst(getFunction(FUNCTION::FUNCTION_SGE)); break;
-			case RSX_FP_OPCODE_SGT: SetDst(getFunction(FUNCTION::FUNCTION_SGT)); break;
+			case RSX_FP_OPCODE_SGE: SetDst(compareFunction(COMPARE::FUNCTION_SGE, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SGT: SetDst(compareFunction(COMPARE::FUNCTION_SGT, "$0", "$1")); break;
 			case RSX_FP_OPCODE_SIN: SetDst("sin($0)"); break;
-			case RSX_FP_OPCODE_SLE: SetDst(getFunction(FUNCTION::FUNCTION_SLE)); break;
-			case RSX_FP_OPCODE_SLT: SetDst(getFunction(FUNCTION::FUNCTION_SLT)); break;
-			case RSX_FP_OPCODE_SNE: SetDst(getFunction(FUNCTION::FUNCTION_SNE)); break;
+			case RSX_FP_OPCODE_SLE: SetDst(compareFunction(COMPARE::FUNCTION_SLE, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SLT: SetDst(compareFunction(COMPARE::FUNCTION_SLT, "$0", "$1")); break;
+			case RSX_FP_OPCODE_SNE: SetDst(compareFunction(COMPARE::FUNCTION_SNE, "$0", "$1")); break;
 			case RSX_FP_OPCODE_STR: SetDst(getFunction(FUNCTION::FUNCTION_STR)); break;
 
 			default:
