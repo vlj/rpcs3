@@ -13,13 +13,6 @@ static std::string typeName[] =
 	"float4"
 };
 
-static std::string functionName[] =
-{
-	"saturate",
-	"float4(dot($0.xy, $1.xy), dot($0.xy, $1.xy), dot($0.xy, $1.xy), dot($0.xy, $1.xy))",
-	"frac($0)",
-};
-
 FragmentProgramDecompiler::FragmentProgramDecompiler(u32 addr, u32& size, u32 ctrl) :
 	m_addr(addr),
 	m_size(size),
@@ -53,7 +46,7 @@ void FragmentProgramDecompiler::SetDst(std::string code, bool append_mask)
 
 	if (dst.saturate)
 	{
-		code = functionName[FUNCTION_SATURATE] + "(" + code + ")";
+		code = getFunction(FUNCTION::FUNCTION_SATURATE) + "(" + code + ")";
 	}
 
 	code += (append_mask ? "$m" : "");
@@ -431,10 +424,10 @@ std::string FragmentProgramDecompiler::Decompile()
 			case RSX_FP_OPCODE_ADD: SetDst("($0 + $1)"); break;
 			case RSX_FP_OPCODE_DIV: SetDst("($0 / $1)"); break;
 			case RSX_FP_OPCODE_DIVSQ: SetDst("($0 / sqrt($1))"); break;
-			case RSX_FP_OPCODE_DP2: SetDst(functionName[FUNCTION_DP2]); break;
-			case RSX_FP_OPCODE_DP3: SetDst("vec4(dot($0.xyz, $1.xyz))"); break;
-			case RSX_FP_OPCODE_DP4: SetDst("vec4(dot($0, $1))"); break;
-			case RSX_FP_OPCODE_DP2A: SetDst("vec4($0.x * $1.x + $0.y * $1.y + $2.x)"); break;
+			case RSX_FP_OPCODE_DP2: SetDst(getFunction(FUNCTION::FUNCTION_DP2)); break;
+			case RSX_FP_OPCODE_DP3: SetDst(getFunction(FUNCTION::FUNCTION_DP3)); break;
+			case RSX_FP_OPCODE_DP4: SetDst(getFunction(FUNCTION::FUNCTION_DP4)); break;
+			case RSX_FP_OPCODE_DP2A: SetDst(getFunction(FUNCTION::FUNCTION_DP2A)); break;
 			case RSX_FP_OPCODE_MAD: SetDst("($0 * $1 + $2)"); break;
 			case RSX_FP_OPCODE_MAX: SetDst("max($0, $1)"); break;
 			case RSX_FP_OPCODE_MIN: SetDst("min($0, $1)"); break;
@@ -442,14 +435,14 @@ std::string FragmentProgramDecompiler::Decompile()
 			case RSX_FP_OPCODE_MUL: SetDst("($0 * $1)"); break;
 			case RSX_FP_OPCODE_RCP: SetDst("1 / $0"); break;
 			case RSX_FP_OPCODE_RSQ: SetDst("inversesqrt(abs($0))"); break;
-			case RSX_FP_OPCODE_SEQ: SetDst("vec4(equal($0, $1))"); break;
-			case RSX_FP_OPCODE_SFL: SetDst("vec4(0.0)"); break;
-			case RSX_FP_OPCODE_SGE: SetDst("vec4(greaterThanEqual($0, $1))"); break;
-			case RSX_FP_OPCODE_SGT: SetDst("vec4(greaterThan($0, $1))"); break;
-			case RSX_FP_OPCODE_SLE: SetDst("vec4(lessThanEqual($0, $1))"); break;
-			case RSX_FP_OPCODE_SLT: SetDst("vec4(lessThan($0, $1))"); break;
-			case RSX_FP_OPCODE_SNE: SetDst("vec4(notEqual($0, $1))"); break;
-			case RSX_FP_OPCODE_STR: SetDst("vec4(1.0)"); break;
+			case RSX_FP_OPCODE_SEQ: SetDst(getFunction(FUNCTION::FUNCTION_SEQ)); break;
+			case RSX_FP_OPCODE_SFL: SetDst(getFunction(FUNCTION::FUNCTION_SFL)); break;
+			case RSX_FP_OPCODE_SGE: SetDst(getFunction(FUNCTION::FUNCTION_SGE)); break;
+			case RSX_FP_OPCODE_SGT: SetDst(getFunction(FUNCTION::FUNCTION_SGT)); break;
+			case RSX_FP_OPCODE_SLE: SetDst(getFunction(FUNCTION::FUNCTION_SLE)); break;
+			case RSX_FP_OPCODE_SLT: SetDst(getFunction(FUNCTION::FUNCTION_SLT)); break;
+			case RSX_FP_OPCODE_SNE: SetDst(getFunction(FUNCTION::FUNCTION_SNE)); break;
+			case RSX_FP_OPCODE_STR: SetDst(getFunction(FUNCTION::FUNCTION_STR)); break;
 
 			default:
 				return false;
@@ -464,15 +457,15 @@ std::string FragmentProgramDecompiler::Decompile()
 			{
 			case RSX_FP_OPCODE_ADD: SetDst("($0 + $1)"); break;
 			case RSX_FP_OPCODE_COS: SetDst("cos($0)"); break;
-			case RSX_FP_OPCODE_DP2: SetDst("dot($0.xy, $1.xy).xxxx"); break;
-			case RSX_FP_OPCODE_DP3: SetDst("dot($0.xyz, $1.xyz).xxxx"); break;
-			case RSX_FP_OPCODE_DP4: SetDst("dot($0, $1).xxxx"); break;
-			case RSX_FP_OPCODE_DP2A: SetDst("vec4($0.x * $1.x + $0.y * $1.y + $2.x)"); break;
+			case RSX_FP_OPCODE_DP2: SetDst(getFunction(FUNCTION::FUNCTION_DP2)); break;
+			case RSX_FP_OPCODE_DP3: SetDst(getFunction(FUNCTION::FUNCTION_DP3)); break;
+			case RSX_FP_OPCODE_DP4: SetDst(getFunction(FUNCTION::FUNCTION_DP4)); break;
+			case RSX_FP_OPCODE_DP2A: SetDst(getFunction(FUNCTION::FUNCTION_DP2A)); break;
 			case RSX_FP_OPCODE_DST: SetDst("vec4(distance($0, $1))"); break;
 			case RSX_FP_OPCODE_REFL: LOG_ERROR(RSX, "Unimplemented SCB instruction: REFL"); break; // TODO: Is this in the right category?
 			case RSX_FP_OPCODE_EX2: SetDst("exp2($0)"); break;
 			case RSX_FP_OPCODE_FLR: SetDst("floor($0)"); break;
-			case RSX_FP_OPCODE_FRC: SetDst(functionName[FUNCTION_FRACT]); break;
+			case RSX_FP_OPCODE_FRC: SetDst(getFunction(FUNCTION::FUNCTION_FRACT)); break;
 			case RSX_FP_OPCODE_LIT: SetDst("vec4(1.0, $0.x, ($0.x > 0.0 ? exp($0.w * log2($0.y)) : 0.0), 1.0)"); break;
 			case RSX_FP_OPCODE_LIF: SetDst("vec4(1.0, $0.y, ($0.y > 0 ? pow(2.0, $0.w) : 0.0), 1.0)"); break;
 			case RSX_FP_OPCODE_LRP: LOG_ERROR(RSX, "Unimplemented SCB instruction: LRP"); break; // TODO: Is this in the right category?
@@ -487,15 +480,15 @@ std::string FragmentProgramDecompiler::Decompile()
 			case RSX_FP_OPCODE_PK16: LOG_ERROR(RSX, "Unimplemented SCB instruction: PK16"); break;
 			case RSX_FP_OPCODE_PKB: LOG_ERROR(RSX, "Unimplemented SCB instruction: PKB"); break;
 			case RSX_FP_OPCODE_PKG: LOG_ERROR(RSX, "Unimplemented SCB instruction: PKG"); break;
-			case RSX_FP_OPCODE_SEQ: SetDst("vec4(equal($0, $1))"); break;
-			case RSX_FP_OPCODE_SFL: SetDst("vec4(0.0)"); break;
-			case RSX_FP_OPCODE_SGE: SetDst("vec4(greaterThanEqual($0, $1))"); break;
-			case RSX_FP_OPCODE_SGT: SetDst("vec4(greaterThan($0, $1))"); break;
+			case RSX_FP_OPCODE_SEQ: SetDst(getFunction(FUNCTION::FUNCTION_SEQ)); break;
+			case RSX_FP_OPCODE_SFL: SetDst(getFunction(FUNCTION::FUNCTION_SFL)); break;
+			case RSX_FP_OPCODE_SGE: SetDst(getFunction(FUNCTION::FUNCTION_SGE)); break;
+			case RSX_FP_OPCODE_SGT: SetDst(getFunction(FUNCTION::FUNCTION_SGT)); break;
 			case RSX_FP_OPCODE_SIN: SetDst("sin($0)"); break;
-			case RSX_FP_OPCODE_SLE: SetDst("vec4(lessThanEqual($0, $1))"); break;
-			case RSX_FP_OPCODE_SLT: SetDst("vec4(lessThan($0, $1))"); break;
-			case RSX_FP_OPCODE_SNE: SetDst("vec4(notEqual($0, $1))"); break;
-			case RSX_FP_OPCODE_STR: SetDst("vec4(1.0)"); break;
+			case RSX_FP_OPCODE_SLE: SetDst(getFunction(FUNCTION::FUNCTION_SLE)); break;
+			case RSX_FP_OPCODE_SLT: SetDst(getFunction(FUNCTION::FUNCTION_SLT)); break;
+			case RSX_FP_OPCODE_SNE: SetDst(getFunction(FUNCTION::FUNCTION_SNE)); break;
+			case RSX_FP_OPCODE_STR: SetDst(getFunction(FUNCTION::FUNCTION_STR)); break;
 
 			default:
 				return false;
