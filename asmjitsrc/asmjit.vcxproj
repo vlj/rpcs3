@@ -76,6 +76,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{AC40FF01-426E-4838-A317-66354CEFAE88}</ProjectGuid>
     <RootNamespace>asmjit</RootNamespace>
+    <TargetPlatformVersion>10.0.10075.0</TargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
