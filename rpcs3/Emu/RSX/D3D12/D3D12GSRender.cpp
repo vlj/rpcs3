@@ -79,15 +79,6 @@ void D3D12GSRender::ResourceStorage::Init(ID3D12Device *device)
 		IID_PPV_ARGS(&m_indexBuffer)
 		));
 
-	check(device->CreateCommittedResource(
-		&heapProp,
-		D3D12_HEAP_FLAG_NONE,
-		&resDesc,
-		D3D12_RESOURCE_STATE_GENERIC_READ,
-		nullptr,
-		IID_PPV_ARGS(&m_constantsVertexBuffer)
-		));
-
 	D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc = {};
 	descriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	descriptorHeapDesc.NumDescriptors = 1000; // For safety
@@ -127,7 +118,6 @@ void D3D12GSRender::ResourceStorage::Release()
 	m_backbufferAsRendertarget->Release();
 	m_constantsBufferDescriptorsHeap->Release();
 	m_scaleOffsetDescriptorHeap->Release();
-	m_constantsVertexBuffer->Release();
 	m_constantsBuffersHeap->Release();
 	m_vertexBuffersHeap->Release();
 	m_backBuffer->Release();
@@ -251,6 +241,7 @@ D3D12GSRender::D3D12GSRender()
 	m_perFrameStorage[1].Reset();
 
 	m_currentResourceStorageIndex = m_swapChain->GetCurrentBackBufferIndex();
+	m_vertexConstantBufferShadowCopy = new float[468 * 4];
 }
 
 D3D12GSRender::~D3D12GSRender()
@@ -264,6 +255,7 @@ D3D12GSRender::~D3D12GSRender()
 	m_rootSignature->Release();
 	m_swapChain->Release();
 	m_device->Release();
+	delete[] m_vertexConstantBufferShadowCopy;
 }
 
 D3D12GSRender::ResourceStorage &D3D12GSRender::getCurrentResourceStorage()
@@ -573,27 +565,49 @@ void D3D12GSRender::setScaleOffset()
 
 void D3D12GSRender::FillVertexShaderConstantsBuffer()
 {
-	void *constantsBufferMap;
-	check(getCurrentResourceStorage().m_constantsVertexBuffer->Map(0, nullptr, &constantsBufferMap));
-
 	for (const RSXTransformConstant& c : m_transform_constants)
 	{
 		size_t offset = c.id * 4 * sizeof(float);
 		float vector[] = { c.x, c.y, c.z, c.w };
-		memcpy((char*)constantsBufferMap + offset, vector, 4 * sizeof(float));
-		size_t bufferSizeCandidate = offset + 4 * sizeof(float);
-		getCurrentResourceStorage().m_constantsBufferSize = bufferSizeCandidate > getCurrentResourceStorage().m_constantsBufferSize ? bufferSizeCandidate : getCurrentResourceStorage().m_constantsBufferSize;
+		memcpy((char*)m_vertexConstantBufferShadowCopy + offset, vector, 4 * sizeof(float));
 	}
-	getCurrentResourceStorage().m_constantsVertexBuffer->Unmap(0, nullptr);
-	// make it multiple of 256 bytes
-	getCurrentResourceStorage().m_constantsBufferSize = (getCurrentResourceStorage().m_constantsBufferSize + 255) & ~255;
+
+	size_t constantBuffersHeapOffset = getCurrentResourceStorage().m_constantsBuffersHeapFreeSpace;
+	// 65536 alignment
+	constantBuffersHeapOffset = (constantBuffersHeapOffset + 65536 - 1) & ~65535;
+
+	D3D12_RESOURCE_DESC resDesc = {};
+	resDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	resDesc.Width = 512 * 4 * sizeof(float);
+	resDesc.Height = 1;
+	resDesc.DepthOrArraySize = 1;
+	resDesc.SampleDesc.Count = 1;
+	resDesc.MipLevels = 1;
+	resDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+	ID3D12Resource *constantVertexBuffer;
+	check(m_device->CreatePlacedResource(
+		getCurrentResourceStorage().m_constantsBuffersHeap,
+		D3D12_HEAP_FLAG_NONE,
+		&resDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&constantVertexBuffer)
+		));
+
+	void *constantsBufferMap;
+	check(constantVertexBuffer->Map(0, nullptr, &constantsBufferMap));
+	memcpy(constantsBufferMap, m_vertexConstantBufferShadowCopy, 468 * 4 * sizeof(float));
+	constantVertexBuffer->Unmap(0, nullptr);
 
 	D3D12_CONSTANT_BUFFER_VIEW_DESC constantBufferViewDesc = {};
-	constantBufferViewDesc.BufferLocation = getCurrentResourceStorage().m_constantsVertexBuffer->GetGPUVirtualAddress();
-	constantBufferViewDesc.SizeInBytes = (UINT)getCurrentResourceStorage().m_constantsBufferSize;
+	constantBufferViewDesc.BufferLocation = constantVertexBuffer->GetGPUVirtualAddress();
+	constantBufferViewDesc.SizeInBytes = (UINT)512 * 4 * sizeof(float);
 	D3D12_CPU_DESCRIPTOR_HANDLE Handle = getCurrentResourceStorage().m_constantsBufferDescriptorsHeap->GetCPUDescriptorHandleForHeapStart();
 	Handle.ptr += getCurrentResourceStorage().m_constantsBufferIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	m_device->CreateConstantBufferView(&constantBufferViewDesc, Handle);
+	getCurrentResourceStorage().m_constantsBuffersHeapFreeSpace = constantBuffersHeapOffset + 512 * 4 * sizeof(float);
+	getCurrentResourceStorage().m_inflightResources.push_back(constantVertexBuffer);
 }
 
 static
