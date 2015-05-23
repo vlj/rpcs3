@@ -64,6 +64,7 @@ private:
 		ID3D12Resource *m_indexBuffer;
 
 		// Constants storage
+		ID3D12Resource *m_constantsVertexBuffer;
 		ID3D12Heap *m_constantsBuffersHeap;
 		size_t m_constantsBuffersHeapFreeSpace;
 		ID3D12DescriptorHeap *m_constantsBufferDescriptorsHeap;
@@ -92,7 +93,7 @@ private:
 	};
 
 	ResourceStorage m_perFrameStorage[2];
-	float *m_vertexConstantBufferShadowCopy;
+
 	bool m_forcedIndexBuffer;
 
 	std::vector<D3D12_INPUT_ELEMENT_DESC> m_IASet;
