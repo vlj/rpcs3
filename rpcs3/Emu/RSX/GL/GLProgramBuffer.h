@@ -16,7 +16,6 @@ struct GLTraits
 	{
 		fragmentProgramData.Decompile(*RSXFP);
 		fragmentProgramData.Compile();
-		GLuint res = glGetError();
 		//checkForGlError("m_fragment_prog.Compile");
 
 		// TODO: This shouldn't use current dir
@@ -28,7 +27,6 @@ struct GLTraits
 	{
 		vertexProgramData.Decompile(*RSXVP);
 		vertexProgramData.Compile();
-		GLuint res = glGetError();
 		//checkForGlError("m_vertex_prog.Compile");
 
 		// TODO: This shouldn't use current dir
@@ -39,14 +37,13 @@ struct GLTraits
 	PipelineData *BuildProgram(VertexProgramData &vertexProgramData, FragmentProgramData &fragmentProgramData, const PipelineProperties &pipelineProperties, const ExtraData& extraData)
 	{
 		GLProgram *result = new GLProgram();
-		result->Create(vertexProgramData.Id, fragmentProgramData.Id);
-		GLuint res = glGetError();
+		result->Create(vertexProgramData.id, fragmentProgramData.id);
 		//checkForGlError("m_program.Create");
 		result->Use();
 
 		LOG_NOTICE(RSX, "*** prog id = %d", result->id);
-		LOG_NOTICE(RSX, "*** vp id = %d", vertexProgramData.Id);
-		LOG_NOTICE(RSX, "*** fp id = %d", fragmentProgramData.Id);
+		LOG_NOTICE(RSX, "*** vp id = %d", vertexProgramData.id);
+		LOG_NOTICE(RSX, "*** fp id = %d", fragmentProgramData.id);
 
 		LOG_NOTICE(RSX, "*** vp shader = \n%s", vertexProgramData.shader.c_str());
 		LOG_NOTICE(RSX, "*** fp shader = \n%s", fragmentProgramData.shader.c_str());

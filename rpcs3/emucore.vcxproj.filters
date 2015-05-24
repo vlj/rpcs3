@@ -899,6 +899,9 @@
     <ClCompile Include="Emu\RSX\D3D12\D3D12Texture.cpp">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\GL\GLCommonDecompiler.cpp">
+      <Filter>Emu\GPU\RSX\GL</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">
@@ -1369,9 +1372,6 @@
     <ClInclude Include="Emu\RSX\GL\GLProgramBuffer.h">
       <Filter>Emu\GPU\RSX\GL</Filter>
     </ClInclude>
-    <ClInclude Include="Emu\RSX\GL\GLShaderParam.h">
-      <Filter>Emu\GPU\RSX\GL</Filter>
-    </ClInclude>
     <ClInclude Include="Emu\RSX\GL\GLVertexProgram.h">
       <Filter>Emu\GPU\RSX\GL</Filter>
     </ClInclude>
@@ -1617,6 +1617,9 @@
     </ClInclude>
     <ClInclude Include="Emu\RSX\D3D12\D3D12Texture.h">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\GL\GLCommonDecompiler.h">
+      <Filter>Emu\GPU\RSX\GL</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

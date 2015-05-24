@@ -3,72 +3,21 @@
 #include "Emu/System.h"
 
 #include "GLVertexProgram.h"
+#include "GLCommonDecompiler.h"
 
 std::string GLVertexDecompilerThread::getFloatTypeName(size_t elementCount)
 {
-	switch (elementCount)
-	{
-	default:
-		abort();
-	case 1:
-		return "float";
-	case 2:
-		return "vec2";
-	case 3:
-		return "vec3";
-	case 4:
-		return "vec4";
-	}
+	return getFloatTypeNameImpl(elementCount);
 }
 
 std::string GLVertexDecompilerThread::getFunction(FUNCTION f)
 {
-	switch (f)
-	{
-	default:
-		abort();
-	case FUNCTION::FUNCTION_DP2:
-		return "vec4(dot($0.xy, $1.xy))";
-	case FUNCTION::FUNCTION_DP2A:
-		return "vec4(dot($0.xy, $1.xy) + $2.x)";
-	case FUNCTION::FUNCTION_DP3:
-		return "vec4(dot($0.xyz, $1.xyz))";
-	case FUNCTION::FUNCTION_DP4:
-		return "vec4(dot($0, $1))";
-	case FUNCTION::FUNCTION_DPH:
-		return "vec4(dot(vec4($0.xyz, 1.0), $1))";
-	case FUNCTION::FUNCTION_SFL:
-		return "vec4(0., 0., 0., 0.)";
-	case FUNCTION::FUNCTION_STR:
-		return "vec4(1., 1., 1., 1.)";
-	case FUNCTION::FUNCTION_FRACT:
-		return "fract($0)";
-	case FUNCTION::FUNCTION_TEXTURE_SAMPLE:
-		return "texture($t, $0.xy)";
-	case FUNCTION::FUNCTION_DFDX:
-		return "dFdx($0)";
-	case FUNCTION::FUNCTION_DFDY:
-		return "dFdy($0)";
-	}
+	return getFunctionImpl(f);
 }
 
 std::string GLVertexDecompilerThread::compareFunction(COMPARE f, const std::string &Op0, const std::string &Op1)
 {
-	switch (f)
-	{
-	case COMPARE::FUNCTION_SEQ:
-		return "equal(" + Op0 + ", " + Op1 + ")";
-	case COMPARE::FUNCTION_SGE:
-		return "greaterThanEqual(" + Op0 + ", " + Op1 + ")";
-	case COMPARE::FUNCTION_SGT:
-		return "greaterThan(" + Op0 + ", " + Op1 + ")";
-	case COMPARE::FUNCTION_SLE:
-		return "lessThanEqual(" + Op0 + ", " + Op1 + ")";
-	case COMPARE::FUNCTION_SLT:
-		return "lessThan(" + Op0 + ", " + Op1 + ")";
-	case COMPARE::FUNCTION_SNE:
-		return "notEqual(" + Op0 + ", " + Op1 + ")";
-	}
+	return compareFunctionImpl(f, Op0, Op1);
 }
 
 void GLVertexDecompilerThread::insertHeader(std::stringstream &OS)
@@ -178,7 +127,7 @@ void GLVertexDecompilerThread::Task()
 
 GLVertexProgram::GLVertexProgram()
 	: m_decompiler_thread(nullptr)
-	, Id(0)
+	, id(0)
 {
 }
 
@@ -233,30 +182,30 @@ void GLVertexProgram::DecompileAsync(RSXVertexProgram& prog)
 
 void GLVertexProgram::Compile()
 {
-	if (Id)
+	if (id)
 	{
-		glDeleteShader(Id);
+		glDeleteShader(id);
 	}
 
-	Id = glCreateShader(GL_VERTEX_SHADER);
+	id = glCreateShader(GL_VERTEX_SHADER);
 
 	const char* str = shader.c_str();
 	const int strlen = shader.length();
 
-	glShaderSource(Id, 1, &str, &strlen);
-	glCompileShader(Id);
+	glShaderSource(id, 1, &str, &strlen);
+	glCompileShader(id);
 
 	GLint r = GL_FALSE;
-	glGetShaderiv(Id, GL_COMPILE_STATUS, &r);
+	glGetShaderiv(id, GL_COMPILE_STATUS, &r);
 	if (r != GL_TRUE)
 	{
-		glGetShaderiv(Id, GL_INFO_LOG_LENGTH, &r);
+		glGetShaderiv(id, GL_INFO_LOG_LENGTH, &r);
 
 		if (r)
 		{
 			char* buf = new char[r + 1]();
 			GLsizei len;
-			glGetShaderInfoLog(Id, r, &len, buf);
+			glGetShaderInfoLog(id, r, &len, buf);
 			LOG_ERROR(RSX, "Failed to compile vertex shader: %s", buf);
 			delete[] buf;
 		}
@@ -272,16 +221,16 @@ void GLVertexProgram::Delete()
 {
 	shader.clear();
 
-	if (Id)
+	if (id)
 	{
 		if (Emu.IsStopped())
 		{
-			LOG_WARNING(RSX, "GLVertexProgram::Delete(): glDeleteShader(%d) avoided", Id);
+			LOG_WARNING(RSX, "GLVertexProgram::Delete(): glDeleteShader(%d) avoided", id);
 		}
 		else
 		{
-			glDeleteShader(Id);
+			glDeleteShader(id);
 		}
-		Id = 0;
+		id = 0;
 	}
 }

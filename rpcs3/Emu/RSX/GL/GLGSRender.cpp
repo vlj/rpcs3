@@ -656,7 +656,7 @@ void PostDrawObj::Initialize()
 	InitializeShaders();
 	m_fp.Compile();
 	m_vp.Compile();
-	m_program.Create(m_vp.Id, m_fp.Id);
+	m_program.Create(m_vp.id, m_fp.id);
 	m_program.Use();
 	InitializeLocations();
 }

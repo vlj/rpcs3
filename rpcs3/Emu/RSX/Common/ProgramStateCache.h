@@ -309,7 +309,7 @@ public:
 
 		if (fpFound && vpFound)
 		{
-			result = GetProg({ vertexProg.Id, fragmentProg.Id, pipelineProperties });
+			result = GetProg({ vertexProg.id, fragmentProg.id, pipelineProperties });
 		}
 
 		if (result != nullptr)
@@ -317,18 +317,18 @@ public:
 		else
 		{
 			LOG_WARNING(RSX, "Add program :");
-			LOG_WARNING(RSX, "*** vp id = %d", vertexProg.Id);
-			LOG_WARNING(RSX, "*** fp id = %d", fragmentProg.Id);
+			LOG_WARNING(RSX, "*** vp id = %d", vertexProg.id);
+			LOG_WARNING(RSX, "*** fp id = %d", fragmentProg.id);
 
 			result = BackendTraits::BuildProgram(vertexProg, fragmentProg, pipelineProperties, extraData);
-			Add(result, { vertexProg.Id, fragmentProg.Id, pipelineProperties });
+			Add(result, { vertexProg.id, fragmentProg.id, pipelineProperties });
 		}
 		return result;
 	}
 
 	const std::vector<size_t> &getFragmentConstantOffsetsCache(const RSXFragmentProgram *fragmentShader) const
 	{
-		binary2FS::const_iterator It = m_cacheFS.find(vm::get_ptr<void>(fragmentShader->addr));
+		typename binary2FS::const_iterator It = m_cacheFS.find(vm::get_ptr<void>(fragmentShader->addr));
 		if (It != m_cacheFS.end())
 			return It->second.FragmentConstantOffsetCache;
 		LOG_ERROR(RSX, "Can't retrieve constant offset cache");

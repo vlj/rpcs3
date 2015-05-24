@@ -3,6 +3,21 @@
 #include "Emu/RSX/RSXFragmentProgram.h"
 #include <sstream>
 
+
+/**
+ * This class is used to translate RSX Fragment program to GLSL/HLSL code
+ * Backend with text based shader can subclass this class and implement :
+ * - virtual std::string getFloatTypeName(size_t elementCount) = 0;
+ * - virtual std::string getFunction(enum class FUNCTION) = 0;
+ * - virtual std::string saturate(const std::string &code) = 0;
+ * - virtual std::string compareFunction(enum class COMPARE, const std::string &, const std::string &) = 0;
+ * - virtual void insertHeader(std::stringstream &OS) = 0;
+ * - virtual void insertIntputs(std::stringstream &OS) = 0;
+ * - virtual void insertOutputs(std::stringstream &OS) = 0;
+ * - virtual void insertConstants(std::stringstream &OS) = 0;
+ * - virtual void insertMainStart(std::stringstream &OS) = 0;
+ * - virtual void insertMainEnd(std::stringstream &OS) = 0;
+ */
 class FragmentProgramDecompiler
 {
 	std::string main;
@@ -36,16 +51,39 @@ class FragmentProgramDecompiler
 	u32 GetData(const u32 d) const { return d << 16 | d >> 16; }
 protected:
 	u32 m_ctrl;
+	/** returns the type name of float vectors.
+	 */
 	virtual std::string getFloatTypeName(size_t elementCount) = 0;
-	virtual std::string getFunction(enum class FUNCTION) = 0;
-	virtual std::string saturate(const std::string &code) = 0;
-	virtual std::string compareFunction(enum class COMPARE, const std::string &, const std::string &) = 0;
 
+	/** returns string calling function where arguments are passed via
+	 * $0 $1 $2 substring.
+	 */
+	virtual std::string getFunction(FUNCTION) = 0;
+
+	/** returns string calling saturate function.
+	*/
+	virtual std::string saturate(const std::string &code) = 0;
+	/** returns string calling comparaison function on 2 args passed as strings.
+	 */
+	virtual std::string compareFunction(COMPARE, const std::string &, const std::string &) = 0;
+
+	/** Insert header of shader file (eg #version, "system constants"...)
+	 */
 	virtual void insertHeader(std::stringstream &OS) = 0;
+	/** Insert global declaration of fragments inputs.
+	 */
 	virtual void insertIntputs(std::stringstream &OS) = 0;
+	/** insert global declaration of fragments outputs.
+	*/
 	virtual void insertOutputs(std::stringstream &OS) = 0;
+	/** insert declaration of shader constants.
+	*/
 	virtual void insertConstants(std::stringstream &OS) = 0;
+	/** insert beginning of main (signature, temporary declaration...)
+	*/
 	virtual void insertMainStart(std::stringstream &OS) = 0;
+	/** insert end of main function (return value, output copy...)
+	 */
 	virtual void insertMainEnd(std::stringstream &OS) = 0;
 public:
 	ParamArray m_parr;
