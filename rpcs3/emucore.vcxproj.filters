@@ -1783,5 +1783,8 @@
     <ClInclude Include="Emu\RSX\D3D12\D3D12Texture.h">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
