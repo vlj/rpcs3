@@ -1621,5 +1621,8 @@
     <ClInclude Include="Emu\RSX\GL\GLCommonDecompiler.h">
       <Filter>Emu\GPU\RSX\GL</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
