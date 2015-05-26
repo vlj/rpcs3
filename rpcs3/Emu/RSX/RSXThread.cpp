@@ -201,43 +201,41 @@ void RSXThread::DoCmd(const u32 fcmd, const u32 cmd, const u32 args_addr, const 
 	}
 
 	case NV4097_SET_SEMAPHORE_OFFSET:
+	{
+		m_PGRAPH_semaphore_offset = ARGS(0);
+		break;
+	}
+
 	case NV406E_SEMAPHORE_OFFSET:
 	{
-		m_set_semaphore_offset = true;
-		m_semaphore_offset = ARGS(0);
+		m_PFIFO_semaphore_offset = ARGS(0);
 		break;
 	}
 
 	case NV406E_SEMAPHORE_ACQUIRE:
 	{
-		if (ARGS(0))
-		{
-			LOG_WARNING(RSX, "TODO: NV406E_SEMAPHORE_ACQUIRE: 0x%x", ARGS(0));
-		}
+		semaphorePFIFOAcquire(m_PFIFO_semaphore_offset, ARGS(0));
 		break;
 	}
 
 	case NV406E_SEMAPHORE_RELEASE:
+	{
+		m_PFIFO_semaphore_release = true;
+		m_PFIFO_semaphore_release_value = ARGS(0);
+		break;
+	}
+
 	case NV4097_TEXTURE_READ_SEMAPHORE_RELEASE:
 	{
-		if (m_set_semaphore_offset)
-		{
-			m_set_semaphore_offset = false;
-			vm::write32(m_label_addr + m_semaphore_offset, ARGS(0));
-		}
+		semaphorePGRAPHBackendRelease(m_PGRAPH_semaphore_offset, ARGS(0));
 		break;
 	}
 
 	case NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE:
 	{
-		if (m_set_semaphore_offset)
-		{
-			m_set_semaphore_offset = false;
-			u32 value = ARGS(0);
-			value = (value & 0xff00ff00) | ((value & 0xff) << 16) | ((value >> 16) & 0xff);
-
-			vm::write32(m_label_addr + m_semaphore_offset, value);
-		}
+		u32 value = ARGS(0);
+		value = (value & 0xff00ff00) | ((value & 0xff) << 16) | ((value >> 16) & 0xff);
+		semaphorePGRAPHBackendRelease(m_PGRAPH_semaphore_offset, value);
 		break;
 	}
 
@@ -2607,4 +2605,19 @@ void RSXThread::WriteIO32(u32 addr, u32 value)
 	{
 		throw fmt::Format("%s(addr=0x%x): RSXIO memory not mapped", __FUNCTION__, addr);
 	}
+}
+
+void RSXThread::semaphorePGRAPHTextureReadRelease(u32 offset, u32 value)
+{
+	vm::write32(m_label_addr + offset, value);
+}
+
+void RSXThread::semaphorePGRAPHBackendRelease(u32 offset, u32 value)
+{
+	vm::write32(m_label_addr + offset, value);
+}
+
+void RSXThread::semaphorePFIFOAcquire(u32 offset, u32 value)
+{
+
 }
