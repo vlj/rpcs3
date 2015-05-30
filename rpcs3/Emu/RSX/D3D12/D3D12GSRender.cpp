@@ -322,10 +322,17 @@ D3D12GSRender::D3D12GSRender()
 	check(m_device->CreateHeap(&hd, IID_PPV_ARGS(&m_readbackResources.m_heap)));
 	m_readbackResources.m_putPos = 0;
 	m_readbackResources.m_getPos = 1024 * 1024 * 128 - 1;
+
+	hd.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+	hd.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
+	check(m_device->CreateHeap(&hd, IID_PPV_ARGS(&m_UAVHeap.m_heap)));
+	m_UAVHeap.m_putPos = 0;
+	m_UAVHeap.m_getPos = 1024 * 1024 * 128 - 1;
 }
 
 D3D12GSRender::~D3D12GSRender()
 {
+	m_UAVHeap.m_heap->Release();
 	m_readbackResources.m_heap->Release();
 	m_texturesRTTs.clear();
 	m_dummyTexture->Release();
@@ -1267,20 +1274,28 @@ void D3D12GSRender::WriteDepthBuffer()
 {
 }
 
-static
-ID3D12Resource *writeColorBuffer(ID3D12Device *device, ID3D12Resource *RTT, ID3D12GraphicsCommandList *cmdlist, size_t rowPitch, size_t width, size_t height)
+ID3D12Resource * D3D12GSRender::writeColorBuffer(ID3D12Resource * RTT, ID3D12GraphicsCommandList * cmdlist)
 {
 	ID3D12Resource *Result;
+	size_t rowPitch = RSXThread::m_width * 4;
+	rowPitch = (rowPitch + 255) & ~255;
 
 	D3D12_HEAP_PROPERTIES heapProp = {};
 	heapProp.Type = D3D12_HEAP_TYPE_READBACK;
-	D3D12_RESOURCE_DESC resdesc = getBufferResourceDesc(rowPitch * height);
+	D3D12_RESOURCE_DESC resdesc = getBufferResourceDesc(rowPitch * RSXThread::m_height);
 
+	size_t heapOffset = powerOf2Align(m_readbackResources.m_putPos.load(), 65536);
+	size_t sizeInByte = rowPitch * RSXThread::m_height;
+
+	if (heapOffset + sizeInByte >= 1024 * 1024 * 128) // If it will be stored past heap size
+		heapOffset = 0;
+
+	resdesc = getBufferResourceDesc(sizeInByte);
 
 	check(
-		device->CreateCommittedResource(
-			&heapProp,
-			D3D12_HEAP_FLAG_NONE,
+		m_device->CreatePlacedResource(
+			m_readbackResources.m_heap,
+			heapOffset,
 			&resdesc,
 			D3D12_RESOURCE_STATE_COPY_DEST,
 			nullptr,
@@ -1298,8 +1313,8 @@ ID3D12Resource *writeColorBuffer(ID3D12Device *device, ID3D12Resource *RTT, ID3D
 	dst.PlacedFootprint.Offset = 0;
 	dst.PlacedFootprint.Footprint.Depth = 1;
 	dst.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	dst.PlacedFootprint.Footprint.Height = (UINT)height;
-	dst.PlacedFootprint.Footprint.Width = (UINT)width;
+	dst.PlacedFootprint.Footprint.Height = (UINT)RSXThread::m_height;
+	dst.PlacedFootprint.Footprint.Width = (UINT)RSXThread::m_width;
 	dst.PlacedFootprint.Footprint.RowPitch = (UINT)rowPitch;
 	cmdlist->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
 	cmdlist->ResourceBarrier(1, &getResourceBarrierTransition(RTT, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
@@ -1350,26 +1365,30 @@ void D3D12GSRender::semaphorePGRAPHBackendRelease(u32 offset, u32 value)
 		D3D12_RESOURCE_DESC resdesc = getTexture2DResourceDesc(RSXThread::m_width, RSXThread::m_height, DXGI_FORMAT_R8_UNORM);
 		resdesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
+		size_t heapOffset = m_readbackResources.m_putPos.load();
+		heapOffset = powerOf2Align(heapOffset, 65536);
+		size_t sizeInByte = RSXThread::m_width * RSXThread::m_height;
+		if (heapOffset + sizeInByte >= 1024 * 1024 * 128) // If it will be stored past heap size
+			heapOffset = 0;
+
 		check(
-			m_device->CreateCommittedResource(
-				&heapProp,
-				D3D12_HEAP_FLAG_NONE,
+			m_device->CreatePlacedResource(
+				m_UAVHeap.m_heap,
+				heapOffset,
 				&resdesc,
 				D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
 				nullptr,
 				IID_PPV_ARGS(&depthConverted)
 				)
 			);
+		m_UAVHeap.m_putPos.store(heapOffset + sizeInByte);
 
-		size_t heapOffset = m_readbackResources.m_putPos.load();
+		heapOffset = m_readbackResources.m_putPos.load();
 		heapOffset = powerOf2Align(heapOffset, 65536);
-		size_t sizeInByte = depthRowPitch * RSXThread::m_height;
+		sizeInByte = depthRowPitch * RSXThread::m_height;
 
 		if (heapOffset + sizeInByte >= 1024 * 1024 * 128) // If it will be stored past heap size
 			heapOffset = 0;
-
-		heapProp = {};
-		heapProp.Type = D3D12_HEAP_TYPE_READBACK;
 		resdesc = getBufferResourceDesc(sizeInByte);
 
 		check(
@@ -1472,8 +1491,6 @@ void D3D12GSRender::semaphorePGRAPHBackendRelease(u32 offset, u32 value)
 		downloadCommandList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
 	}
 
-	size_t colorRowPitch = RSXThread::m_width * 4;
-	colorRowPitch = (colorRowPitch + 255) & ~255;
 	ID3D12Resource *rtt0, *rtt1, *rtt2, *rtt3;
 	switch (m_surface_color_target)
 	{
@@ -1481,29 +1498,29 @@ void D3D12GSRender::semaphorePGRAPHBackendRelease(u32 offset, u32 value)
 		break;
 
 	case CELL_GCM_SURFACE_TARGET_0:
-		if (m_context_dma_color_a) rtt0 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(0), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
+		if (m_context_dma_color_a) rtt0 = writeColorBuffer(m_fbo->getRenderTargetTexture(0), downloadCommandList);
 		break;
 
 	case CELL_GCM_SURFACE_TARGET_1:
-		if (m_context_dma_color_b) rtt1 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(1), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
+		if (m_context_dma_color_b) rtt1 = writeColorBuffer(m_fbo->getRenderTargetTexture(1), downloadCommandList);
 		break;
 
 	case CELL_GCM_SURFACE_TARGET_MRT1:
-		if (m_context_dma_color_a) rtt0 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(0), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
-		if (m_context_dma_color_b) rtt1 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(1), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
+		if (m_context_dma_color_a) rtt0 = writeColorBuffer(m_fbo->getRenderTargetTexture(0), downloadCommandList);
+		if (m_context_dma_color_b) rtt1 = writeColorBuffer(m_fbo->getRenderTargetTexture(1), downloadCommandList);
 		break;
 
 	case CELL_GCM_SURFACE_TARGET_MRT2:
-		if (m_context_dma_color_a) rtt0 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(0), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
-		if (m_context_dma_color_b) rtt1 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(1), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
-		if (m_context_dma_color_b) rtt2 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(2), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
+		if (m_context_dma_color_a) rtt0 = writeColorBuffer(m_fbo->getRenderTargetTexture(0), downloadCommandList);
+		if (m_context_dma_color_b) rtt1 = writeColorBuffer(m_fbo->getRenderTargetTexture(1), downloadCommandList);
+		if (m_context_dma_color_b) rtt2 = writeColorBuffer(m_fbo->getRenderTargetTexture(2), downloadCommandList);
 		break;
 
 	case CELL_GCM_SURFACE_TARGET_MRT3:
-		if (m_context_dma_color_a) rtt0 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(0), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
-		if (m_context_dma_color_b) rtt1 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(1), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
-		if (m_context_dma_color_b) rtt2 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(2), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
-		if (m_context_dma_color_b) rtt3 = writeColorBuffer(m_device, m_fbo->getRenderTargetTexture(3), downloadCommandList, colorRowPitch, RSXThread::m_width, RSXThread::m_height);
+		if (m_context_dma_color_a) rtt0 = writeColorBuffer(m_fbo->getRenderTargetTexture(0), downloadCommandList);
+		if (m_context_dma_color_b) rtt1 = writeColorBuffer(m_fbo->getRenderTargetTexture(1), downloadCommandList);
+		if (m_context_dma_color_b) rtt2 = writeColorBuffer(m_fbo->getRenderTargetTexture(2), downloadCommandList);
+		if (m_context_dma_color_b) rtt3 = writeColorBuffer(m_fbo->getRenderTargetTexture(3), downloadCommandList);
 		break;
 	}
 	if (needTransfer)
@@ -1544,6 +1561,9 @@ void D3D12GSRender::semaphorePGRAPHBackendRelease(u32 offset, u32 value)
 			descriptorHeap->Release();
 			convertCommandList->Release();
 		}
+
+		size_t colorRowPitch = RSXThread::m_width * 4;
+		colorRowPitch = (colorRowPitch + 255) & ~255;
 
 		switch (m_surface_color_target)
 		{

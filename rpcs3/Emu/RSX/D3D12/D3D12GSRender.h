@@ -95,6 +95,14 @@ private:
 
 	ResourceStorage m_perFrameStorage;
 
+	struct UAVHeap
+	{
+		ID3D12Heap *m_heap;
+		std::atomic<int> m_putPos, // Start of free space
+			m_getPos; // End of free space
+	};
+
+	UAVHeap m_UAVHeap;
 
 	struct ReadbackHeap
 	{
@@ -136,6 +144,7 @@ public:
 	virtual void semaphorePFIFOAcquire(u32 offset, u32 value) override;
 
 private:
+	ID3D12Resource *writeColorBuffer(ID3D12Resource *RTT, ID3D12GraphicsCommandList *cmdlist);
 	virtual void Close() override;
 
 	bool LoadProgram();
