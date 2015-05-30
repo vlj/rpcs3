@@ -47,7 +47,10 @@ void SetGetD3DGSFrameCallback(GetGSFrameCb2 value);
 class D3D12GSRender : public GSRender
 {
 private:
+	// Copy of RTT to be used as texture
+	std::unordered_map<u32, Microsoft::WRL::ComPtr<ID3D12Resource> > m_texturesRTTs;
 
+	std::unordered_map<u32, ID3D12Resource*> m_texturesCache;
 	//  std::vector<PostDrawObj> m_post_draw_objs;
 
 	PipelineStateObjectCache m_cachePSO;
@@ -85,15 +88,22 @@ private:
 		ID3D12DescriptorHeap *m_samplerDescriptorHeap;
 		size_t m_currentTextureIndex;
 
-		// Fence
-		HANDLE m_queueCompletion;
-
 		void Reset();
 		void Init(ID3D12Device *device);
 		void Release();
 	};
 
 	ResourceStorage m_perFrameStorage;
+
+
+	struct ReadbackHeap
+	{
+		ID3D12Heap *m_heap;
+		std::atomic<int> m_putPos, // Start of free space
+			m_getPos; // End of free space
+	};
+
+	ReadbackHeap m_readbackResources;
 
 	bool m_forcedIndexBuffer;
 	size_t indexCount;
