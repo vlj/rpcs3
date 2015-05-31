@@ -42,8 +42,7 @@
 /bin/rpcs3.ini
 /bin/FragmentProgram.txt
 /bin/VertexProgram.txt
-/bin/FragmentProgram.hlsl
-/bin/VertexProgram.hlsl
+/bin/*.hlsl
 /bin/BreakPoints.dat
 /bin/textures
 /bin/*.lib
