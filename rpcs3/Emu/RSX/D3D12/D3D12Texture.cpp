@@ -99,9 +99,6 @@ size_t D3D12GSRender::UploadTextures()
 		bool is_swizzled = !(m_textures[i].GetFormat() & CELL_GCM_TEXTURE_LN);
 		switch (format)
 		{
-		case CELL_GCM_TEXTURE_A1R5G5B5:
-		case CELL_GCM_TEXTURE_A4R4G4B4:
-		case CELL_GCM_TEXTURE_R5G6B5:
 		case CELL_GCM_TEXTURE_G8B8:
 		case CELL_GCM_TEXTURE_R6G5B5:
 		case CELL_GCM_TEXTURE_DEPTH24_D8:
@@ -122,6 +119,21 @@ size_t D3D12GSRender::UploadTextures()
 		case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8:
 		default:
 			LOG_ERROR(RSX, "Unimplemented Texture format : %x", format);
+			break;
+		case CELL_GCM_TEXTURE_A1R5G5B5:
+			dxgiFormat = DXGI_FORMAT_B5G5R5A1_UNORM;
+			blockSizeInByte = 2;
+			blockWidthInPixel = 1, blockHeightInPixel = 1;
+			break;
+		case CELL_GCM_TEXTURE_A4R4G4B4:
+			dxgiFormat = DXGI_FORMAT_B4G4R4A4_UNORM;
+			blockSizeInByte = 2;
+			blockWidthInPixel = 1, blockHeightInPixel = 1;
+			break;
+		case CELL_GCM_TEXTURE_R5G6B5:
+			dxgiFormat = DXGI_FORMAT_B5G6R5_UNORM;
+			blockSizeInByte = 2;
+			blockWidthInPixel = 1, blockHeightInPixel = 1;
 			break;
 		case CELL_GCM_TEXTURE_D8R8G8B8:
 			dxgiFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -279,9 +291,6 @@ size_t D3D12GSRender::UploadTextures()
 
 		switch (format)
 		{
-		case CELL_GCM_TEXTURE_A1R5G5B5:
-		case CELL_GCM_TEXTURE_A4R4G4B4:
-		case CELL_GCM_TEXTURE_R5G6B5:
 		case CELL_GCM_TEXTURE_G8B8:
 		case CELL_GCM_TEXTURE_R6G5B5:
 		case CELL_GCM_TEXTURE_DEPTH24_D8:
@@ -302,6 +311,15 @@ size_t D3D12GSRender::UploadTextures()
 		case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8:
 		default:
 			LOG_ERROR(RSX, "Unimplemented Texture format : %x", format);
+			break;
+		case CELL_GCM_TEXTURE_A1R5G5B5:
+			srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			break;
+		case CELL_GCM_TEXTURE_A4R4G4B4:
+			srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			break;
+		case CELL_GCM_TEXTURE_R5G6B5:
+			srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 			break;
 		case CELL_GCM_TEXTURE_D8R8G8B8:
 		{
