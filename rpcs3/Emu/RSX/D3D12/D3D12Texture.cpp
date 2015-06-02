@@ -196,15 +196,18 @@ size_t D3D12GSRender::UploadTextures()
 
 			ID3D12Resource *Texture;
 			size_t textureSize = rowPitch * heightInBlocks;
+			assert(m_textureUploadData.canAlloc(textureSize));
+			size_t heapOffset = m_textureUploadData.alloc(textureSize);
 
 			check(m_device->CreatePlacedResource(
-				m_perFrameStorage.m_uploadTextureHeap,
-				m_perFrameStorage.m_currentStorageOffset,
+				m_textureUploadData.m_heap,
+				heapOffset,
 				&getBufferResourceDesc(textureSize),
 				D3D12_RESOURCE_STATE_GENERIC_READ,
 				nullptr,
 				IID_PPV_ARGS(&Texture)
 				));
+			m_textureUploadData.m_resourceStoredSinceLastSync.push_back(std::make_tuple(heapOffset, textureSize, Texture));
 
 			auto pixels = vm::get_ptr<const u8>(texaddr);
 			void *textureData;
@@ -231,24 +234,34 @@ size_t D3D12GSRender::UploadTextures()
 						dst[(row * rowPitch / 4) + j] = src[LinearToSwizzleAddress(j, i, 0, log2width, log2height, 0)];
 					}
 				}
+				else if (format == CELL_GCM_TEXTURE_R5G6B5)
+				{
+					unsigned short *dst = (unsigned short *)textureData,
+						*src = (unsigned short *)pixels;
+
+					for (int j = 0; j < m_textures[i].GetWidth(); j++)
+					{
+						u16 tmp = src[row * m_texture_pitch / 2 + j];
+						dst[row * rowPitch / 2 + j] = (tmp >> 8) | (tmp << 8);
+					}
+				}
 				else
 					streamToBuffer((char*)textureData + row * rowPitch, (char*)pixels + row * m_texture_pitch, m_texture_pitch);
 			}
 			Texture->Unmap(0, nullptr);
 
+			assert(m_textureData.canAlloc(textureSize * 2));
+			size_t heapOffset2 = m_textureData.alloc(textureSize * 2);
+
 			check(m_device->CreatePlacedResource(
-				m_perFrameStorage.m_textureStorage,
-				m_perFrameStorage.m_currentStorageOffset,
+				m_textureData.m_heap,
+				heapOffset2,
 				&getTexture2DResourceDesc(m_textures[i].GetWidth(), m_textures[i].GetHeight(), dxgiFormat),
 				D3D12_RESOURCE_STATE_COPY_DEST,
 				nullptr,
 				IID_PPV_ARGS(&vramTexture)
 				));
-
-			m_perFrameStorage.m_currentStorageOffset += textureSize;
-			m_perFrameStorage.m_currentStorageOffset = (m_perFrameStorage.m_currentStorageOffset + 65536 - 1) & ~65535;
-			m_perFrameStorage.m_inflightResources.push_back(Texture);
-			m_perFrameStorage.m_inflightResources.push_back(vramTexture);
+			m_textureData.m_resourceStoredSinceLastSync.push_back(std::make_tuple(heapOffset2, textureSize * 2, vramTexture));
 
 			D3D12_TEXTURE_COPY_LOCATION dst = {}, src = {};
 			dst.pResource = vramTexture;

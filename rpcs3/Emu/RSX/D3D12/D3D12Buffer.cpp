@@ -194,15 +194,15 @@ std::pair<std::vector<D3D12_VERTEX_BUFFER_VIEW>, D3D12_INDEX_BUFFER_VIEW> D3D12G
 	for (size_t buffer = 0; buffer < vertexBufferFormat.size(); buffer++)
 	{
 		const VertexBufferFormat &vbf = vertexBufferFormat[buffer];
-		// 65536 alignment
-		size_t bufferHeapOffset = m_perFrameStorage.m_vertexIndexBuffersHeapFreeSpace;
-		bufferHeapOffset = (bufferHeapOffset + 65536 - 1) & ~65535;
+
 		size_t subBufferSize = vbf.range.second - vbf.range.first;
+		assert(m_vertexIndexData.canAlloc(subBufferSize));
+		size_t heapOffset = m_vertexIndexData.alloc(subBufferSize);
 
 		ID3D12Resource *vertexBuffer;
 		check(m_device->CreatePlacedResource(
-			m_perFrameStorage.m_vertexIndexBuffersHeap,
-			bufferHeapOffset,
+			m_vertexIndexData.m_heap,
+			heapOffset,
 			&getBufferResourceDesc(subBufferSize),
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
@@ -250,14 +250,13 @@ std::pair<std::vector<D3D12_VERTEX_BUFFER_VIEW>, D3D12_INDEX_BUFFER_VIEW> D3D12G
 		}
 
 		vertexBuffer->Unmap(0, nullptr);
-		m_perFrameStorage.m_inflightResources.push_back(vertexBuffer);
+		m_vertexIndexData.m_resourceStoredSinceLastSync.push_back(std::make_tuple(heapOffset, subBufferSize, vertexBuffer));
 
 		D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 		vertexBufferView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
 		vertexBufferView.SizeInBytes = (UINT)subBufferSize;
 		vertexBufferView.StrideInBytes = (UINT)vbf.stride;
 		result.first.push_back(vertexBufferView);
-		m_perFrameStorage.m_vertexIndexBuffersHeapFreeSpace = bufferHeapOffset + subBufferSize;
 	}
 
 	// Only handle quads now
@@ -313,14 +312,14 @@ std::pair<std::vector<D3D12_VERTEX_BUFFER_VIEW>, D3D12_INDEX_BUFFER_VIEW> D3D12G
 		else
 			indexCount = m_draw_array_count * 6 / 4;
 		size_t subBufferSize = powerOf2Align(indexCount * indexSize, 64);
-		// 65536 alignment
-		size_t bufferHeapOffset = m_perFrameStorage.m_vertexIndexBuffersHeapFreeSpace;
-		bufferHeapOffset = (bufferHeapOffset + 65536 - 1) & ~65535;
+
+		assert(m_vertexIndexData.canAlloc(subBufferSize));
+		size_t heapOffset = m_vertexIndexData.alloc(subBufferSize);
 
 		ID3D12Resource *indexBuffer;
 		check(m_device->CreatePlacedResource(
-			m_perFrameStorage.m_vertexIndexBuffersHeap,
-			bufferHeapOffset,
+			m_vertexIndexData.m_heap,
+			heapOffset,
 			&getBufferResourceDesc(subBufferSize),
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
@@ -359,9 +358,7 @@ std::pair<std::vector<D3D12_VERTEX_BUFFER_VIEW>, D3D12_INDEX_BUFFER_VIEW> D3D12G
 			}
 		}
 		indexBuffer->Unmap(0, nullptr);
-		m_perFrameStorage.m_inflightResources.push_back(indexBuffer);
-		m_perFrameStorage.m_vertexIndexBuffersHeapFreeSpace = bufferHeapOffset + subBufferSize;
-
+		m_vertexIndexData.m_resourceStoredSinceLastSync.push_back(std::make_tuple(heapOffset, subBufferSize, indexBuffer));
 
 		indexBufferView.SizeInBytes = (UINT)subBufferSize;
 		indexBufferView.BufferLocation = indexBuffer->GetGPUVirtualAddress();
@@ -394,16 +391,15 @@ void D3D12GSRender::setScaleOffset()
 	scaleOffsetMat[3] /= RSXThread::m_width / RSXThread::m_width_scale;
 	scaleOffsetMat[7] /= RSXThread::m_height / RSXThread::m_height_scale;
 
-	size_t constantBuffersHeapOffset = m_perFrameStorage.m_constantsBuffersHeapFreeSpace;
-	// 65536 alignment
-	constantBuffersHeapOffset = (constantBuffersHeapOffset + 65536 - 1) & ~65535;
+	assert(m_constantsData.canAlloc(256));
+	size_t heapOffset = m_constantsData.alloc(256);
 
 	// Scale offset buffer
 	// Separate constant buffer
 	ID3D12Resource *scaleOffsetBuffer;
 	check(m_device->CreatePlacedResource(
-		m_perFrameStorage.m_constantsBuffersHeap,
-		constantBuffersHeapOffset,
+		m_constantsData.m_heap,
+		heapOffset,
 		&getBufferResourceDesc(256),
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
@@ -421,8 +417,7 @@ void D3D12GSRender::setScaleOffset()
 	D3D12_CPU_DESCRIPTOR_HANDLE Handle = m_perFrameStorage.m_scaleOffsetDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	Handle.ptr += m_perFrameStorage.m_currentScaleOffsetBufferIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	m_device->CreateConstantBufferView(&constantBufferViewDesc, Handle);
-	m_perFrameStorage.m_constantsBuffersHeapFreeSpace = constantBuffersHeapOffset + 256;
-	m_perFrameStorage.m_inflightResources.push_back(scaleOffsetBuffer);
+	m_constantsData.m_resourceStoredSinceLastSync.push_back(std::make_tuple(heapOffset, 256, scaleOffsetBuffer));
 }
 
 void D3D12GSRender::FillVertexShaderConstantsBuffer()
@@ -434,14 +429,13 @@ void D3D12GSRender::FillVertexShaderConstantsBuffer()
 		memcpy((char*)vertexConstantShadowCopy + offset, vector, 4 * sizeof(float));
 	}
 
-	size_t constantBuffersHeapOffset = m_perFrameStorage.m_constantsBuffersHeapFreeSpace;
-	// 65536 alignment
-	constantBuffersHeapOffset = (constantBuffersHeapOffset + 65536 - 1) & ~65535;
+	assert(m_constantsData.canAlloc(512 * 4 * sizeof(float)));
+	size_t heapOffset = m_constantsData.alloc(512 * 4 * sizeof(float));
 
 	ID3D12Resource *constantsBuffer;
 	check(m_device->CreatePlacedResource(
-		m_perFrameStorage.m_constantsBuffersHeap,
-		constantBuffersHeapOffset,
+		m_constantsData.m_heap,
+		heapOffset,
 		&getBufferResourceDesc(512 * 4 * sizeof(float)),
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
@@ -459,8 +453,7 @@ void D3D12GSRender::FillVertexShaderConstantsBuffer()
 	D3D12_CPU_DESCRIPTOR_HANDLE Handle = m_perFrameStorage.m_constantsBufferDescriptorsHeap->GetCPUDescriptorHandleForHeapStart();
 	Handle.ptr += m_perFrameStorage.m_constantsBufferIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	m_device->CreateConstantBufferView(&constantBufferViewDesc, Handle);
-	m_perFrameStorage.m_constantsBuffersHeapFreeSpace = constantBuffersHeapOffset + 512 * 4 * sizeof(float);
-	m_perFrameStorage.m_inflightResources.push_back(constantsBuffer);
+	m_constantsData.m_resourceStoredSinceLastSync.push_back(std::make_tuple(heapOffset, 512 * 4 * sizeof(float), constantsBuffer));
 }
 
 void D3D12GSRender::FillPixelShaderConstantsBuffer()
@@ -471,14 +464,13 @@ void D3D12GSRender::FillPixelShaderConstantsBuffer()
 	// Multiple of 256 never 0
 	bufferSize = (bufferSize + 255) & ~255;
 
-	size_t constantBuffersHeapOffset = m_perFrameStorage.m_constantsBuffersHeapFreeSpace;
-	// 65536 alignment
-	constantBuffersHeapOffset = (constantBuffersHeapOffset + 65536 - 1) & ~65535;
+	assert(m_constantsData.canAlloc(bufferSize));
+	size_t heapOffset = m_constantsData.alloc(bufferSize);
 
 	ID3D12Resource *constantsBuffer;
 	check(m_device->CreatePlacedResource(
-		m_perFrameStorage.m_constantsBuffersHeap,
-		constantBuffersHeapOffset,
+		m_constantsData.m_heap,
+		heapOffset,
 		&getBufferResourceDesc(bufferSize),
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
@@ -534,8 +526,7 @@ void D3D12GSRender::FillPixelShaderConstantsBuffer()
 	D3D12_CPU_DESCRIPTOR_HANDLE Handle = m_perFrameStorage.m_constantsBufferDescriptorsHeap->GetCPUDescriptorHandleForHeapStart();
 	Handle.ptr += m_perFrameStorage.m_constantsBufferIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	m_device->CreateConstantBufferView(&constantBufferViewDesc, Handle);
-	m_perFrameStorage.m_constantsBuffersHeapFreeSpace = constantBuffersHeapOffset + bufferSize;
-	m_perFrameStorage.m_inflightResources.push_back(constantsBuffer);
+	m_constantsData.m_resourceStoredSinceLastSync.push_back(std::make_tuple(heapOffset, bufferSize, constantsBuffer));
 }
 
 
