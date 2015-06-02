@@ -90,8 +90,8 @@
     <Filter Include="Emu\CPU\ARMv7\Objects">
       <UniqueIdentifier>{368770cf-c8d9-4f4a-9ac3-5bdf48101ffe}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Emu\GPU\RSX\Common">
-      <UniqueIdentifier>{2a8841dc-bce0-41bb-9fcb-5bf1f8dda213}</UniqueIdentifier>
+    <Filter Include="Emu\GPU\RSX\D3D12">
+      <UniqueIdentifier>{a8d52101-3497-4df0-b326-e0dbc9625e59}</UniqueIdentifier>
     </Filter>
     <Filter Include="Emu\GPU\RSX\Common">
       <UniqueIdentifier>{a579b680-aee9-48a8-91eb-764ba08c106d}</UniqueIdentifier>
@@ -869,17 +869,8 @@
     <ClCompile Include="..\Utilities\File.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
-    <ClCompile Include="Emu\RSX\Common\FragmentProgramDecompiler.cpp">
-      <Filter>Emu\GPU\RSX\Common</Filter>
-    </ClCompile>
-    <ClCompile Include="Emu\RSX\Common\ShaderParam.cpp">
-      <Filter>Emu\GPU\RSX\Common</Filter>
-    </ClCompile>
-    <ClCompile Include="Emu\RSX\Common\VertexProgramDecompiler.cpp">
-      <Filter>Emu\GPU\RSX\Common</Filter>
-    </ClCompile>
-    <ClCompile Include="Emu\RSX\GL\GLCommonDecompiler.cpp">
-      <Filter>Emu\GPU\RSX\GL</Filter>
+    <ClCompile Include="Emu\RSX\D3D12\D3D12GSRender.cpp">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClCompile>
     <ClCompile Include="Emu\RSX\D3D12\D3D12RenderTargetSets.cpp">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
@@ -907,6 +898,9 @@
     </ClCompile>
     <ClCompile Include="Emu\RSX\D3D12\D3D12Texture.cpp">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\RSX\GL\GLCommonDecompiler.cpp">
+      <Filter>Emu\GPU\RSX\GL</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -1573,6 +1567,9 @@
     <ClInclude Include="Emu\Memory\atomic.h">
       <Filter>Emu\Memory</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\Memory\refcnt.h">
+      <Filter>Emu\Memory</Filter>
+    </ClInclude>
     <ClInclude Include="Emu\SysCalls\lv2\sys_fs.h">
       <Filter>Emu\SysCalls\lv2</Filter>
     </ClInclude>
@@ -1588,20 +1585,11 @@
     <ClInclude Include="..\Utilities\File.h">
       <Filter>Utilities</Filter>
     </ClInclude>
-    <ClInclude Include="Emu\RSX\Common\ProgramStateCache.h">
-      <Filter>Emu\GPU\RSX\Common</Filter>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12GSRender.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClInclude>
-    <ClInclude Include="Emu\RSX\Common\FragmentProgramDecompiler.h">
-      <Filter>Emu\GPU\RSX\Common</Filter>
-    </ClInclude>
-    <ClInclude Include="Emu\RSX\Common\ShaderParam.h">
-      <Filter>Emu\GPU\RSX\Common</Filter>
-    </ClInclude>
-    <ClInclude Include="Emu\RSX\Common\VertexProgramDecompiler.h">
-      <Filter>Emu\GPU\RSX\Common</Filter>
-    </ClInclude>
-    <ClInclude Include="Emu\RSX\GL\GLCommonDecompiler.h">
-      <Filter>Emu\GPU\RSX\GL</Filter>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12RenderTargetSets.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClInclude>
     <ClInclude Include="Emu\RSX\D3D12\D3D12PipelineState.h">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
@@ -1628,6 +1616,12 @@
       <Filter>Emu\GPU\RSX\Common</Filter>
     </ClInclude>
     <ClInclude Include="Emu\RSX\D3D12\D3D12Texture.h">
+      <Filter>Emu\GPU\RSX\D3D12</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\GL\GLCommonDecompiler.h">
+      <Filter>Emu\GPU\RSX\GL</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\D3D12\D3D12.h">
       <Filter>Emu\GPU\RSX\D3D12</Filter>
     </ClInclude>
   </ItemGroup>
