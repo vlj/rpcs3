@@ -67,7 +67,7 @@ int GLTexture::GetGlWrap(int wrap)
 	case CELL_GCM_TEXTURE_MIRROR: return GL_MIRRORED_REPEAT;
 	case CELL_GCM_TEXTURE_CLAMP_TO_EDGE: return GL_CLAMP_TO_EDGE;
 	case CELL_GCM_TEXTURE_BORDER: return GL_CLAMP_TO_BORDER;
-	case CELL_GCM_TEXTURE_CLAMP: return GL_CLAMP_TO_EDGE;
+	case CELL_GCM_TEXTURE_CLAMP: return GL_CLAMP;
 	case CELL_GCM_TEXTURE_MIRROR_ONCE_CLAMP_TO_EDGE: return GL_MIRROR_CLAMP_TO_EDGE_EXT;
 	case CELL_GCM_TEXTURE_MIRROR_ONCE_BORDER: return GL_MIRROR_CLAMP_TO_BORDER_EXT;
 	case CELL_GCM_TEXTURE_MIRROR_ONCE_CLAMP: return GL_MIRROR_CLAMP_EXT;
@@ -1966,9 +1966,9 @@ void GLGSRender::ExecCMD()
 	m_vao.Bind();
 
 	if (m_indexed_array.m_count)
-	{
 		LoadVertexData(m_indexed_array.index_min, m_indexed_array.index_max - m_indexed_array.index_min + 1);
-	}
+	else
+		LoadVertexData(m_draw_array_first, m_draw_array_count);
 
 	if (m_indexed_array.m_count || m_draw_array_count)
 	{
