@@ -85,6 +85,15 @@ void D3D12GSRender::ResourceStorage::Reset()
 	m_currentScaleOffsetBufferIndex = 0;
 	m_currentTextureIndex = 0;
 
+	for (auto tmp : m_inUseConstantsBuffers)
+		std::get<2>(tmp)->Release();
+	for (auto tmp : m_inUseVertexIndexBuffers)
+		std::get<2>(tmp)->Release();
+	for (auto tmp : m_inUseTextureUploadBuffers)
+		std::get<2>(tmp)->Release();
+	for (auto tmp : m_inUseTexture2D)
+		std::get<2>(tmp)->Release();
+
 	m_commandAllocator->Reset();
 	m_textureUploadCommandAllocator->Reset();
 	m_downloadCommandAllocator->Reset();
@@ -98,6 +107,7 @@ void D3D12GSRender::ResourceStorage::Reset()
 
 void D3D12GSRender::ResourceStorage::Init(ID3D12Device *device)
 {
+	m_frameFinished = 0;
 	// Create a global command allocator
 	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator));
 	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_textureUploadCommandAllocator));
@@ -130,6 +140,14 @@ void D3D12GSRender::ResourceStorage::Init(ID3D12Device *device)
 void D3D12GSRender::ResourceStorage::Release()
 {
 	// NOTE: Should be released only if no command are in flight !
+	for (auto tmp : m_inUseConstantsBuffers)
+		std::get<2>(tmp)->Release();
+	for (auto tmp : m_inUseVertexIndexBuffers)
+		std::get<2>(tmp)->Release();
+	for (auto tmp : m_inUseTextureUploadBuffers)
+		std::get<2>(tmp)->Release();
+	for (auto tmp : m_inUseTexture2D)
+		std::get<2>(tmp)->Release();
 
 	m_constantsBufferDescriptorsHeap->Release();
 	m_scaleOffsetDescriptorHeap->Release();
@@ -322,8 +340,10 @@ D3D12GSRender::D3D12GSRender()
 			IID_PPV_ARGS(&m_rootSignatures[textureCount]));
 	}
 
-	m_perFrameStorage.Init(m_device);
-	m_perFrameStorage.Reset();
+	m_perFrameStorage[0].Init(m_device);
+	m_perFrameStorage[0].Reset();
+	m_perFrameStorage[1].Init(m_device);
+	m_perFrameStorage[1].Reset();
 
 	vertexConstantShadowCopy = new float[512 * 4];
 
@@ -391,7 +411,8 @@ D3D12GSRender::~D3D12GSRender()
 	m_dummyTexture->Release();
 	m_convertPSO->Release();
 	m_convertRootSignature->Release();
-	m_perFrameStorage.Release();
+	m_perFrameStorage[0].Release();
+	m_perFrameStorage[1].Release();
 	m_commandQueueGraphic->Release();
 	m_commandQueueCopy->Release();
 	m_backbufferAsRendertarget[0]->Release();
@@ -436,8 +457,8 @@ void D3D12GSRender::ExecCMD(u32 cmd)
 	InitDrawBuffers();
 
 	ID3D12GraphicsCommandList *commandList;
-	check(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_perFrameStorage.m_commandAllocator, nullptr, IID_PPV_ARGS(&commandList)));
-	m_perFrameStorage.m_inflightCommandList.push_back(commandList);
+	check(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, getCurrentResourceStorage().m_commandAllocator, nullptr, IID_PPV_ARGS(&commandList)));
+	getCurrentResourceStorage().m_inflightCommandList.push_back(commandList);
 
 /*	if (m_set_color_mask)
 	{
@@ -686,8 +707,8 @@ void D3D12GSRender::ExecCMD()
 	InitDrawBuffers();
 
 	ID3D12GraphicsCommandList *commandList;
-	m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_perFrameStorage.m_commandAllocator, nullptr, IID_PPV_ARGS(&commandList));
-	m_perFrameStorage.m_inflightCommandList.push_back(commandList);
+	m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, getCurrentResourceStorage().m_commandAllocator, nullptr, IID_PPV_ARGS(&commandList));
+	getCurrentResourceStorage().m_inflightCommandList.push_back(commandList);
 
 	if (m_indexed_array.m_count)
 		LoadVertexData(m_indexed_array.index_min, m_indexed_array.index_max - m_indexed_array.index_min + 1);
@@ -711,20 +732,20 @@ void D3D12GSRender::ExecCMD()
 
 	// Constants
 	setScaleOffset();
-	commandList->SetDescriptorHeaps(1, &m_perFrameStorage.m_scaleOffsetDescriptorHeap);
-	D3D12_GPU_DESCRIPTOR_HANDLE Handle = m_perFrameStorage.m_scaleOffsetDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-	Handle.ptr += m_perFrameStorage.m_currentScaleOffsetBufferIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	commandList->SetDescriptorHeaps(1, &getCurrentResourceStorage().m_scaleOffsetDescriptorHeap);
+	D3D12_GPU_DESCRIPTOR_HANDLE Handle = getCurrentResourceStorage().m_scaleOffsetDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+	Handle.ptr += getCurrentResourceStorage().m_currentScaleOffsetBufferIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	commandList->SetGraphicsRootDescriptorTable(0, Handle);
-	m_perFrameStorage.m_currentScaleOffsetBufferIndex++;
+	getCurrentResourceStorage().m_currentScaleOffsetBufferIndex++;
 
-	size_t currentBufferIndex = m_perFrameStorage.m_constantsBufferIndex;
+	size_t currentBufferIndex = getCurrentResourceStorage().m_constantsBufferIndex;
 	FillVertexShaderConstantsBuffer();
-	m_perFrameStorage.m_constantsBufferIndex++;
+	getCurrentResourceStorage().m_constantsBufferIndex++;
 	FillPixelShaderConstantsBuffer();
-	m_perFrameStorage.m_constantsBufferIndex++;
+	getCurrentResourceStorage().m_constantsBufferIndex++;
 
-	commandList->SetDescriptorHeaps(1, &m_perFrameStorage.m_constantsBufferDescriptorsHeap);
-	Handle = m_perFrameStorage.m_constantsBufferDescriptorsHeap->GetGPUDescriptorHandleForHeapStart();
+	commandList->SetDescriptorHeaps(1, &getCurrentResourceStorage().m_constantsBufferDescriptorsHeap);
+	Handle = getCurrentResourceStorage().m_constantsBufferDescriptorsHeap->GetGPUDescriptorHandleForHeapStart();
 	Handle.ptr += currentBufferIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	commandList->SetGraphicsRootDescriptorTable(1, Handle);
 	commandList->SetPipelineState(m_PSO->first);
@@ -732,39 +753,18 @@ void D3D12GSRender::ExecCMD()
 	if (m_PSO->second > 0)
 	{
 		size_t usedTexture = UploadTextures();
-		// Drivers don't like undefined texture descriptors
-	/*	for (; usedTexture < 16; usedTexture++)
-		{
-			D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-			srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-			srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-			srvDesc.Texture2D.MipLevels = 1;
-			srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-			D3D12_CPU_DESCRIPTOR_HANDLE Handle = m_perFrameStorage.m_textureDescriptorsHeap->GetCPUDescriptorHandleForHeapStart();
-			Handle.ptr += (m_perFrameStorage.m_currentTextureIndex + usedTexture) * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-			m_device->CreateShaderResourceView(m_dummyTexture, &srvDesc, Handle);
 
-			D3D12_SAMPLER_DESC samplerDesc = {};
-			samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-			samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-			samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-			samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-			Handle = m_perFrameStorage.m_samplerDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-			Handle.ptr += (usedTexture) * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
-			m_device->CreateSampler(&samplerDesc, Handle);
-		}*/
-
-		Handle = m_perFrameStorage.m_textureDescriptorsHeap->GetGPUDescriptorHandleForHeapStart();
-		Handle.ptr += m_perFrameStorage.m_currentTextureIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-		commandList->SetDescriptorHeaps(1, &m_perFrameStorage.m_textureDescriptorsHeap);
+		Handle = getCurrentResourceStorage().m_textureDescriptorsHeap->GetGPUDescriptorHandleForHeapStart();
+		Handle.ptr += getCurrentResourceStorage().m_currentTextureIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		commandList->SetDescriptorHeaps(1, &getCurrentResourceStorage().m_textureDescriptorsHeap);
 		commandList->SetGraphicsRootDescriptorTable(2, Handle);
 
-		Handle = m_perFrameStorage.m_samplerDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-		Handle.ptr += m_perFrameStorage.m_currentTextureIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
-		commandList->SetDescriptorHeaps(1, &m_perFrameStorage.m_samplerDescriptorHeap);
+		Handle = getCurrentResourceStorage().m_samplerDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+		Handle.ptr += getCurrentResourceStorage().m_currentTextureIndex * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+		commandList->SetDescriptorHeaps(1, &getCurrentResourceStorage().m_samplerDescriptorHeap);
 		commandList->SetGraphicsRootDescriptorTable(3, Handle);
 
-		m_perFrameStorage.m_currentTextureIndex += usedTexture;
+		getCurrentResourceStorage().m_currentTextureIndex += usedTexture;
 	}
 
 	size_t numRTT;
@@ -864,8 +864,8 @@ void D3D12GSRender::ExecCMD()
 void D3D12GSRender::Flip()
 {
 	ID3D12GraphicsCommandList *commandList;
-	m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_perFrameStorage.m_commandAllocator, nullptr, IID_PPV_ARGS(&commandList));
-	m_perFrameStorage.m_inflightCommandList.push_back(commandList);
+	m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, getCurrentResourceStorage().m_commandAllocator, nullptr, IID_PPV_ARGS(&commandList));
+	getCurrentResourceStorage().m_inflightCommandList.push_back(commandList);
 
 	switch (m_surface_color_target)
 	{
@@ -908,41 +908,50 @@ void D3D12GSRender::Flip()
 	// Add an event signaling queue completion
 	Microsoft::WRL::ComPtr<ID3D12Fence> fence;
 	m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
-	HANDLE handle = CreateEvent(0, 0, 0, 0);
-	fence->SetEventOnCompletion(1, handle);
+	getNonCurrentResourceStorage().m_frameFinished = CreateEvent(0, 0, 0, 0);
+	fence->SetEventOnCompletion(1, getNonCurrentResourceStorage().m_frameFinished);
 	m_commandQueueGraphic->Signal(fence.Get(), 1);
-	WaitForSingleObject(handle, INFINITE);
-	CloseHandle(handle);
-	m_perFrameStorage.Reset();
+
+	// Flush
 	m_texturesCache.clear();
 	m_texturesRTTs.clear();
 
-	for (auto tmp : m_constantsData.m_resourceStoredSinceLastSync)
+	if (getCurrentResourceStorage().m_frameFinished)
 	{
-		std::get<2>(tmp)->Release();
-		m_constantsData.m_getPos = std::get<0>(tmp);
+		WaitForSingleObject(getCurrentResourceStorage().m_frameFinished, INFINITE);
+		CloseHandle(getCurrentResourceStorage().m_frameFinished);
+
+		for (auto tmp : getCurrentResourceStorage().m_inUseConstantsBuffers)
+			m_constantsData.m_getPos = std::get<0>(tmp);
+		for (auto tmp : getCurrentResourceStorage().m_inUseVertexIndexBuffers)
+			m_vertexIndexData.m_getPos = std::get<0>(tmp);
+		for (auto tmp : getCurrentResourceStorage().m_inUseTextureUploadBuffers)
+			m_textureUploadData.m_getPos = std::get<0>(tmp);
+		for (auto tmp : getCurrentResourceStorage().m_inUseTexture2D)
+			m_textureData.m_getPos = std::get<0>(tmp);
+		getCurrentResourceStorage().Reset();
 	}
+
+	getCurrentResourceStorage().m_inUseConstantsBuffers = m_constantsData.m_resourceStoredSinceLastSync;
 	m_constantsData.m_resourceStoredSinceLastSync.clear();
-	for (auto tmp : m_vertexIndexData.m_resourceStoredSinceLastSync)
-	{
-		std::get<2>(tmp)->Release();
-		m_vertexIndexData.m_getPos = std::get<0>(tmp);
-	}
+	getCurrentResourceStorage().m_inUseVertexIndexBuffers = m_vertexIndexData.m_resourceStoredSinceLastSync;
 	m_vertexIndexData.m_resourceStoredSinceLastSync.clear();
-	for (auto tmp : m_textureUploadData.m_resourceStoredSinceLastSync)
-	{
-		std::get<2>(tmp)->Release();
-		m_textureUploadData.m_getPos = std::get<0>(tmp);
-	}
+	getCurrentResourceStorage().m_inUseTextureUploadBuffers = m_textureUploadData.m_resourceStoredSinceLastSync;
 	m_textureUploadData.m_resourceStoredSinceLastSync.clear();
-	for (auto tmp : m_textureData.m_resourceStoredSinceLastSync)
-	{
-		std::get<2>(tmp)->Release();
-		m_textureData.m_getPos = std::get<0>(tmp);
-	}
+	getCurrentResourceStorage().m_inUseTexture2D = m_textureData.m_resourceStoredSinceLastSync;
 	m_textureData.m_resourceStoredSinceLastSync.clear();
 
 	m_frame->Flip(nullptr);
+}
+
+D3D12GSRender::ResourceStorage& D3D12GSRender::getCurrentResourceStorage()
+{
+	return m_perFrameStorage[m_swapChain->GetCurrentBackBufferIndex()];
+}
+
+D3D12GSRender::ResourceStorage& D3D12GSRender::getNonCurrentResourceStorage()
+{
+	return m_perFrameStorage[1 - m_swapChain->GetCurrentBackBufferIndex()];
 }
 
 
@@ -1080,7 +1089,7 @@ void D3D12GSRender::semaphorePGRAPHBackendRelease(u32 offset, u32 value)
 		m_readbackResources.m_putPos.store(heapOffset + sizeInByte);
 
 		check(
-			m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_perFrameStorage.m_commandAllocator, nullptr, IID_PPV_ARGS(&convertCommandList))
+			m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, getCurrentResourceStorage().m_commandAllocator, nullptr, IID_PPV_ARGS(&convertCommandList))
 			);
 
 		D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc = {};
@@ -1146,7 +1155,7 @@ void D3D12GSRender::semaphorePGRAPHBackendRelease(u32 offset, u32 value)
 	if (needTransfer)
 	{
 		check(
-			m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_perFrameStorage.m_commandAllocator, nullptr, IID_PPV_ARGS(&downloadCommandList))
+			m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, getCurrentResourceStorage().m_commandAllocator, nullptr, IID_PPV_ARGS(&downloadCommandList))
 			);
 	}
 
