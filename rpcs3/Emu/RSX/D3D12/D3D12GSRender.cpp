@@ -1061,7 +1061,6 @@ void D3D12GSRender::ExecCMD()
 	check(commandList->Close());
 	m_commandQueueGraphic->ExecuteCommandLists(1, (ID3D12CommandList**)&commandList);
 	m_indexed_array.Reset();
-	WriteDepthBuffer();
 }
 
 void D3D12GSRender::Flip()
@@ -1156,11 +1155,6 @@ D3D12GSRender::ResourceStorage& D3D12GSRender::getCurrentResourceStorage()
 D3D12GSRender::ResourceStorage& D3D12GSRender::getNonCurrentResourceStorage()
 {
 	return m_perFrameStorage[1 - m_swapChain->GetCurrentBackBufferIndex()];
-}
-
-
-void D3D12GSRender::WriteDepthBuffer()
-{
 }
 
 ID3D12Resource * D3D12GSRender::writeColorBuffer(ID3D12Resource * RTT, ID3D12GraphicsCommandList * cmdlist)
