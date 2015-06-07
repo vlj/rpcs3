@@ -51,6 +51,7 @@
     <ClCompile Include="Emu\RSX\D3D12\D3D12RenderTargetSets.cpp" />
     <ClCompile Include="Emu\RSX\D3D12\D3D12Texture.cpp" />
     <ClCompile Include="Emu\RSX\D3D12\D3D12VertexProgramDecompiler.cpp" />
+    <ClCompile Include="Emu\RSX\D3D12\D3D12CommonDecompiler.cpp" />
     <ClCompile Include="Emu\RSX\GL\GLCommonDecompiler.cpp" />
     <ClCompile Include="Emu\SysCalls\lv2\sys_fs.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellFs.cpp" />
@@ -438,6 +439,7 @@
     <ClInclude Include="Emu\RSX\D3D12\D3D12RenderTargetSets.h" />
     <ClInclude Include="Emu\RSX\D3D12\D3D12Texture.h" />
     <ClInclude Include="Emu\RSX\D3D12\D3D12VertexProgramDecompiler.h" />
+    <ClInclude Include="Emu\RSX\D3D12\D3D12CommonDecompiler.h" />
     <ClInclude Include="Emu\RSX\GCM.h" />
     <ClInclude Include="Emu\RSX\GL\GLBuffers.h" />
     <ClInclude Include="Emu\RSX\GL\GLCommonDecompiler.h" />
