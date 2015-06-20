@@ -425,7 +425,7 @@ namespace vm
 				DWORD old;
 
 				auto protection = f2 & page_writable ? PAGE_READWRITE : (f2 & page_readable ? PAGE_READONLY : PAGE_NOACCESS);
-				if (!VirtualProtect(real_addr, size, protection, &old))
+				if (!VirtualProtect(real_addr, 4096, protection, &old))
 #else
 				auto protection = f2 & page_writable ? PROT_WRITE | PROT_READ : (f2 & page_readable ? PROT_READ : PROT_NONE);
 				if (mprotect(real_addr, size, protection))
