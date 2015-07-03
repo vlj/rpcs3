@@ -111,7 +111,7 @@ void SPURecompilerCore::Compile(u16 pos)
 			//const u64 stamp1 = get_system_time();
 			dis_asm.dump_pc = pos * 4;
 			(*SPU_instr::rrr_list)(&dis_asm, opcode);
-			OS << "	" << dis_asm.last_opcode << "\n";
+			compiler.addComment(dis_asm.last_opcode.c_str());
 			// compile single opcode:
 			(*SPU_instr::rrr_list)(m_enc.get(), opcode);
 			// force finalization between every slice using absolute alignment
@@ -154,24 +154,8 @@ void SPURecompilerCore::Compile(u16 pos)
 	entry[start].pointer = compiler.make();
 	compiler.setLogger(nullptr); // crashes without it
 
-	OS << "TO \n";
 	OS << stringLogger.getString();
-
-	//std::string log = fmt::format("========== START POSITION 0x%x ==========\n\n", start * 4);
-	//log += stringLogger.getString();
-	//if (!entry[start].pointer)
-	//{
-	//	LOG_ERROR(Log::SPU, "SPURecompilerCore::Compile(pos=0x%x) failed", start * sizeof(u32));
-	//	log += "========== FAILED ============\n\n";
-	//	Emu.Pause();
-	//}
-	//else
-	//{
-	//	log += fmt::format("========== COMPILED %d (excess %d), time: [start=%lld (decoding=%lld), finalize=%lld]\n\n",
-	//		entry[start].count, excess, stamp1 - stamp0, time0, get_system_time() - stamp1);
-	//}
-
-	//fs::file(fmt::Format("SPUjit_%d.log", this->CPU.GetId()), o_write | o_create | (first ? o_trunc : o_append)).write(log.c_str(), log.size());
+	OS << "\n\n";
 
 	m_enc->compiler = nullptr;
 	first = false;
