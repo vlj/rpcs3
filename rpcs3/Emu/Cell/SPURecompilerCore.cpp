@@ -3211,8 +3211,8 @@ void SPURecompiler::ILA(u32 rt, u32 i18)
 
 void SPURecompiler::SELB(u32 rt, u32 ra, u32 rb, u32 rc)
 {
-	const XmmLink& vb = XmmGet(rb);
-	const XmmLink& vc = XmmGet(rc);
+	const XmmLink& vb = XmmGetEco(rb);
+	const XmmLink& vc = XmmGetEco(rc);
 	c.pand(vb.get(), vc.get());
 	c.pandn(vc.get(), cpu_xmm(GPR[ra]));
 	c.por(vb.get(), vc.get());
