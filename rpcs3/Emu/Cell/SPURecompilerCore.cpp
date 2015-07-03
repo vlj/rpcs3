@@ -1928,7 +1928,7 @@ void SPURecompiler::XSBH(u32 rt, u32 ra)
 void SPURecompiler::CLGT(u32 rt, u32 ra, u32 rb)
 {
 	// compare if-greater-than
-	const XmmLink& va = XmmGet(ra, rt);
+	const XmmLink& va = XmmGetEco(ra, rt);
 	const XmmLink& vi = XmmAlloc();
 	c.movdqa(vi.get(), XmmConst(u128::from32p(0x80000000)));
 	c.pxor(va.get(), vi.get());
