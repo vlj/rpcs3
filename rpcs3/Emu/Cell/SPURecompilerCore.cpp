@@ -3223,7 +3223,7 @@ void SPURecompiler::SELB(u32 rt, u32 ra, u32 rb, u32 rc)
 
 void SPURecompiler::SHUFB(u32 rt, u32 ra, u32 rb, u32 rc)
 {
-	const XmmLink& v0 = XmmGet(rc); // v0 = mask
+	const XmmLink& v0 = XmmGetEco(rc); // v0 = mask
 	const XmmLink& v1 = XmmAlloc();
 	const XmmLink& v2 = XmmCopy(v0); // v2 = mask
 	const XmmLink& v3 = XmmAlloc();
