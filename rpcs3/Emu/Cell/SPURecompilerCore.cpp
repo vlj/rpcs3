@@ -50,14 +50,14 @@ void SPURecompilerCore::Compile(u16 pos)
 	SPUDisAsm dis_asm(CPUDisAsm_InterpreterMode);
 	dis_asm.offset = vm::get_ptr<u8>(CPU.offset);
 
-	//StringLogger stringLogger;
-	//stringLogger.setOption(kLoggerOptionBinaryForm, true);
+	StringLogger stringLogger;
+	stringLogger.setOption(kLoggerOptionBinaryForm, true);
 
 	OS << "TRANSLATION UNIT @ " << fmt::Format("0x%05x", pos * 4) << "\n";
 
 	X86Compiler compiler(m_jit.get());
 	m_enc->compiler = &compiler;
-	//compiler.setLogger(&stringLogger);
+	compiler.setLogger(&stringLogger);
 
 	compiler.addFunc(kFuncConvHost, FuncBuilder4<u32, void*, void*, void*, u32>());
 	const u16 start = pos;
@@ -153,6 +153,9 @@ void SPURecompilerCore::Compile(u16 pos)
 	compiler.endFunc();
 	entry[start].pointer = compiler.make();
 	compiler.setLogger(nullptr); // crashes without it
+
+	OS << "TO \n";
+	OS << stringLogger.getString();
 
 	//std::string log = fmt::format("========== START POSITION 0x%x ==========\n\n", start * 4);
 	//log += stringLogger.getString();
