@@ -105,6 +105,7 @@ public:
 	const XmmLink& XmmAlloc(s8 pref = -1);
 	const XmmLink* XmmRead(const s8 reg) const;
 	const XmmLink& XmmGet(s8 reg, s8 target = -1);
+	const XmmLink& XmmGetEco(s8 reg, s8 target = -1);
 	const XmmLink& XmmCopy(const XmmLink& from, s8 pref = -1);
 	void XmmInvalidate(const s8 reg);
 	void XmmFinalize(const XmmLink& var, s8 reg = -1);

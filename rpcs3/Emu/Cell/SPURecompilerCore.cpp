@@ -357,6 +357,71 @@ const SPURecompiler::XmmLink* SPURecompiler::XmmRead(const s8 reg) const // get 
 	return nullptr;
 }
 
+const SPURecompiler::XmmLink& SPURecompiler::XmmGetEco(s8 reg, s8 target) // get xmm register with specific SPU reg
+{
+	assert(reg >= 0);
+
+	if (reg == target)
+	{
+		for (u32 i = 0; i < 16; i++)
+		{
+			if (xmm_var[i].reg == reg)
+			{
+				const XmmLink* res = &xmm_var[i];
+				if (xmm_var[i].taken) throw "XmmGet(): xmm_var is taken";
+				xmm_var[i].taken = true;
+				xmm_var[i].got = false;
+				//xmm_var[i].reg = -1;
+				for (u32 j = i + 1; j < 16; j++)
+				{
+					if (xmm_var[j].reg == reg) throw "XmmGet(): xmm_var duplicate";
+				}
+				LOG4_OPCODE("cached GPR[%d] used (i=%d)", reg, i);
+				return *res;
+			}
+		}
+	}
+
+	for (u32 i = 0; i < 16; i++)
+	{
+		if (xmm_var[i].reg == reg)
+		{
+			const XmmLink* res = &xmm_var[i];
+			if (xmm_var[i].taken) throw "XmmGet(): xmm_var is taken";
+			xmm_var[i].taken = true;
+			xmm_var[i].got = false;
+			//xmm_var[i].reg = -1;
+			for (u32 j = i + 1; j < 16; j++)
+			{
+				if (xmm_var[j].reg == reg) throw "XmmGet(): xmm_var duplicate";
+			}
+			LOG4_OPCODE("cached GPR[%d] used (i=%d)", reg, i);
+			return *res;
+		}
+	}
+
+	const XmmLink* res = &XmmAlloc(target);
+	/*if (target != res->reg)
+	{
+	c.movdqa(*res->data, cpu_xmm(GPR[reg]));
+	}
+	else*/
+	{
+		if (const XmmLink* source = XmmRead(reg))
+		{
+			c.movdqa(*res->data, source->read());
+		}
+		else
+		{
+			c.movdqa(*res->data, cpu_xmm(GPR[reg]));
+		}
+	}
+	const_cast<XmmLink*>(res)->reg = -1; // ???
+	LOG4_OPCODE("* cached GPR[%d] not found", reg);
+	return *res;
+}
+
+
 const SPURecompiler::XmmLink& SPURecompiler::XmmGet(s8 reg, s8 target) // get xmm register with specific SPU reg
 {
 	assert(reg >= 0);
