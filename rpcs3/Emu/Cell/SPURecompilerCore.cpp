@@ -3086,7 +3086,7 @@ void SPURecompiler::HGTI(u32 rt, u32 ra, s32 i10)
 
 void SPURecompiler::CLGTI(u32 rt, u32 ra, s32 i10)
 {
-	const XmmLink& va = XmmGet(ra);
+	const XmmLink& va = XmmGetEco(ra);
 	c.pxor(va.get(), XmmConst(u128::from32p(0x80000000)));
 	c.pcmpgtd(va.get(), XmmConst(u128::from32p((u32)i10 - 0x80000000)));
 	XmmFinalize(va, rt);
