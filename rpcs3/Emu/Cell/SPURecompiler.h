@@ -2,6 +2,8 @@
 #include "Emu/CPU/CPUDecoder.h"
 #include "Emu/Cell/SPUOpcodes.h"
 
+#include <fstream>
+
 namespace asmjit
 {
 	struct JitRuntime;
@@ -20,6 +22,7 @@ class SPURecompilerCore : public CPUDecoder
 	std::unique_ptr<SPUInterpreter> m_int;
 	std::unique_ptr<asmjit::JitRuntime> m_jit;
 	SPUThread& CPU;
+	std::ofstream OS;
 
 public:
 	bool first = true;
@@ -37,6 +40,7 @@ public:
 	std::vector<u128> imm_table;
 
 	SPURecompilerCore(SPUThread& cpu);
+	~SPURecompilerCore();
 
 	void Compile(u16 pos);
 
