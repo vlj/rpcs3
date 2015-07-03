@@ -943,7 +943,7 @@ void SPURecompiler::A(u32 rt, u32 ra, u32 rb)
 void SPURecompiler::AND(u32 rt, u32 ra, u32 rb)
 {
 	// and
-	const XmmLink& vb = XmmGet(rb, rt);
+	const XmmLink& vb = XmmGetEco(rb, rt);
 	if (const XmmLink* va = XmmRead(ra))
 	{
 		c.pand(vb.get(), va->read());
