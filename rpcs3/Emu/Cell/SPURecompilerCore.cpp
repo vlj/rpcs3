@@ -11,6 +11,7 @@
 #include "SPUInterpreter.h"
 #include "SPURecompiler.h"
 
+
 #define ASMJIT_STATIC
 
 #include "asmjit.h"
@@ -28,6 +29,12 @@ SPURecompilerCore::SPURecompilerCore(SPUThread& cpu)
 {
 	X86CpuInfo inf;
 	X86CpuUtil::detect(&inf);
+	OS.open("SPU.txt");
+}
+
+SPURecompilerCore::~SPURecompilerCore()
+{
+	OS.close();
 }
 
 void SPURecompilerCore::Decode(const u32 code) // decode instruction and run with interpreter
@@ -40,11 +47,13 @@ void SPURecompilerCore::Compile(u16 pos)
 	//const u64 stamp0 = get_system_time();
 	//u64 time0 = 0;
 
-	//SPUDisAsm dis_asm(CPUDisAsm_InterpreterMode);
-	//dis_asm.offset = vm::get_ptr<u8>(CPU.offset);
+	SPUDisAsm dis_asm(CPUDisAsm_InterpreterMode);
+	dis_asm.offset = vm::get_ptr<u8>(CPU.offset);
 
 	//StringLogger stringLogger;
 	//stringLogger.setOption(kLoggerOptionBinaryForm, true);
+
+	OS << "TRANSLATION UNIT @ " << fmt::Format("0x%05x", pos * 4) << "\n";
 
 	X86Compiler compiler(m_jit.get());
 	m_enc->compiler = &compiler;
@@ -100,10 +109,9 @@ void SPURecompilerCore::Compile(u16 pos)
 		if (opcode.data())
 		{
 			//const u64 stamp1 = get_system_time();
-			// disasm for logging:
-			//dis_asm.dump_pc = pos * 4;
-			//(*SPU_instr::rrr_list)(&dis_asm, opcode);
-			//compiler.addComment(fmt::Format("SPU data: PC=0x%05x %s", pos * 4, dis_asm.last_opcode.c_str()).c_str());
+			dis_asm.dump_pc = pos * 4;
+			(*SPU_instr::rrr_list)(&dis_asm, opcode);
+			OS << "	" << dis_asm.last_opcode << "\n";
 			// compile single opcode:
 			(*SPU_instr::rrr_list)(m_enc.get(), opcode);
 			// force finalization between every slice using absolute alignment
