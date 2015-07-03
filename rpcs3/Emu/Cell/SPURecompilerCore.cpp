@@ -2963,9 +2963,11 @@ void SPURecompiler::ANDBI(u32 rt, u32 ra, s32 i10)
 void SPURecompiler::AI(u32 rt, u32 ra, s32 i10)
 {
 	// add
-	const XmmLink& va = XmmGet(ra, rt);
+	const XmmLink& va = XmmGetEco(ra, rt);
+
 	c.paddd(va.get(), XmmConst(u128::from32p(i10)));
 	XmmFinalize(va, rt);
+
 	LOG_OPCODE();
 }
 
