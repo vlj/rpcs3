@@ -8,6 +8,7 @@
 #include "Emu/Cell/PPUDecoder.h"
 #include "Emu/Cell/PPUThread.h"
 #include "Emu/Cell/PPUInterpreter.h"
+#include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/IRBuilder.h"
@@ -741,9 +742,11 @@ namespace ppu_recompiler_llvm {
 
         /// The function that will be called to execute unknown functions
         llvm::Function * m_execute_unknown_function;
+        const Executable m_execute_unknow_function_executable;
 
         /// The executable that will be called to execute unknown blocks
         llvm::Function *  m_execute_unknown_block;
+        const Executable m_execute_unknow_block_executable;
 
         /// LLVM context
         llvm::LLVMContext * m_llvm_context;
@@ -754,11 +757,8 @@ namespace ppu_recompiler_llvm {
         /// Module to which all generated code is output to
         llvm::Module * m_module;
 
-        /// JIT execution engine
-        llvm::ExecutionEngine * m_execution_engine;
-
-        /// Function pass manager
-        llvm::FunctionPassManager * m_fpm;
+        /// Execution engine list. An execution engine is a JITed function
+        std::vector<llvm::ExecutionEngine *> m_execution_engines;
 
         /// LLVM type of the functions genreated by the compiler
         llvm::FunctionType * m_compiled_function_type;
