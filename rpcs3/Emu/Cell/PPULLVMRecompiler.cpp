@@ -43,13 +43,14 @@ Compiler::Compiler(RecompilationEngine & recompilation_engine, const Executable 
     m_module       = new llvm::Module("Module", *m_llvm_context);
     m_fpm          = new FunctionPassManager(m_module);
 
-    EngineBuilder engine_builder(m_module);
-    engine_builder.setMCPU(sys::getHostCPUName());
-    engine_builder.setEngineKind(EngineKind::JIT);
-    engine_builder.setOptLevel(CodeGenOpt::Default);
-    m_execution_engine = engine_builder.create();
+    m_execution_engine  =
+      EngineBuilder(std::unique_ptr<llvm::Module>(m_module))
+        .setMCPU(sys::getHostCPUName())
+        .setEngineKind(EngineKind::JIT)
+        .setOptLevel(CodeGenOpt::Default)
+        .create();
 
-    m_fpm->add(new DataLayoutPass(m_module));
+//    m_fpm->add(new DataLayoutPass(m_module));
     m_fpm->add(createNoAAPass());
     m_fpm->add(createBasicAliasAnalysisPass());
     m_fpm->add(createNoTargetTransformInfoPass());
@@ -247,13 +248,12 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     m_stats.optimization_time += std::chrono::duration_cast<std::chrono::nanoseconds>(optimize_end - ir_build_end);
 
     // Translate to machine code
-    MachineCodeInfo mci;
-    m_execution_engine->runJITOnFunction(m_state.function, &mci);
+    void *function = m_execution_engine->getPointerToFunction(m_state.function);
     auto translate_end        = std::chrono::high_resolution_clock::now();
     m_stats.translation_time += std::chrono::duration_cast<std::chrono::nanoseconds>(translate_end - optimize_end);
 
 #ifdef _DEBUG
-    m_recompilation_engine.Log() << "\nDisassembly:\n";
+/*    m_recompilation_engine.Log() << "\nDisassembly:\n";
     auto disassembler = LLVMCreateDisasm(sys::getProcessTriple().c_str(), nullptr, 0, nullptr, nullptr);
     for (size_t pc = 0; pc < mci.size();) {
         char str[1024];
@@ -263,19 +263,19 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
         pc += size;
     }
 
-    LLVMDisasmDispose(disassembler);
+    LLVMDisasmDispose(disassembler);*/
 #endif
 
     auto compilation_end  = std::chrono::high_resolution_clock::now();
     m_stats.total_time   += std::chrono::duration_cast<std::chrono::nanoseconds>(compilation_end - compilation_start);
 
-    return (Executable)mci.address();
+    return (Executable)function;
 }
 
 void Compiler::FreeExecutable(const std::string & name) {
     auto function = m_module->getFunction(name);
     if (function) {
-        m_execution_engine->freeMachineCodeForFunction(function);
+//        m_execution_engine->freeMachineCodeForFunction(function);
         function->eraseFromParent();
     }
 }
@@ -5658,7 +5658,7 @@ void RecompilationEngine::NotifyTrace(ExecutionTrace * execution_trace) {
 raw_fd_ostream & RecompilationEngine::Log() {
     if (!m_log) {
         std::string error;
-        m_log = new raw_fd_ostream("PPULLVMRecompiler.log", error, sys::fs::F_Text);
+//        m_log = new raw_fd_ostream("PPULLVMRecompiler.log", error, sys::fs::F_Text);
         m_log->SetUnbuffered();
     }
 
