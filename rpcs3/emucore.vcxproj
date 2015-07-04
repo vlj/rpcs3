@@ -669,7 +669,7 @@
       <Optimization>Disabled</Optimization>
       <SDLCheck>false</SDLCheck>
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PreprocessorDefinitions>_UNICODE;UNICODE;LLVM_AVAILABLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;LLVM_AVAILABLE;%(PreprocessorDefinitions);DX12_SUPPORT</PreprocessorDefinitions>
       <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
       <ExceptionHandling>Async</ExceptionHandling>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -745,7 +745,7 @@
     </Link>
     <Lib>
       <AdditionalLibraryDirectories>..\llvm_build\Release\lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>LLVMJIT.lib;LLVMVectorize.lib;LLVMX86CodeGen.lib;LLVMX86Disassembler.lib;LLVMExecutionEngine.lib;LLVMAsmPrinter.lib;LLVMSelectionDAG.lib;LLVMCodeGen.lib;LLVMScalarOpts.lib;LLVMInstCombine.lib;LLVMTransformUtils.lib;LLVMipa.lib;LLVMAnalysis.lib;LLVMTarget.lib;LLVMX86Desc.lib;LLVMX86AsmPrinter.lib;LLVMObject.lib;LLVMMCParser.lib;LLVMBitReader.lib;LLVMCore.lib;LLVMX86Utils.lib;LLVMMC.lib;LLVMX86Info.lib;LLVMSupport.lib;LLVMMCDisassembler.lib</AdditionalDependencies>
+      <AdditionalDependencies>LLVMMCJIT.lib;LLVMVectorize.lib;LLVMX86CodeGen.lib;LLVMX86Disassembler.lib;LLVMExecutionEngine.lib;LLVMAsmPrinter.lib;LLVMSelectionDAG.lib;LLVMCodeGen.lib;LLVMScalarOpts.lib;LLVMInstCombine.lib;LLVMTransformUtils.lib;LLVMipa.lib;LLVMAnalysis.lib;LLVMTarget.lib;LLVMX86Desc.lib;LLVMX86AsmPrinter.lib;LLVMObject.lib;LLVMMCParser.lib;LLVMBitReader.lib;LLVMCore.lib;LLVMX86Utils.lib;LLVMMC.lib;LLVMX86Info.lib;LLVMSupport.lib;LLVMMCDisassembler.lib</AdditionalDependencies>
     </Lib>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

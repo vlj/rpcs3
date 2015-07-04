@@ -248,6 +248,7 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     m_stats.optimization_time += std::chrono::duration_cast<std::chrono::nanoseconds>(optimize_end - ir_build_end);
 
     // Translate to machine code
+    m_execution_engine->finalizeObject();
     void *function = m_execution_engine->getPointerToFunction(m_state.function);
     auto translate_end        = std::chrono::high_resolution_clock::now();
     m_stats.translation_time += std::chrono::duration_cast<std::chrono::nanoseconds>(translate_end - optimize_end);
