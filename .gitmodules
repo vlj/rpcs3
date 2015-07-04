@@ -1,7 +1,6 @@
 [submodule "wxWidgets"]
 	path = wxWidgets
 	url = https://github.com/Zangetsu38/wxWidgets
-	ignore = dirty
 	branch = master
 [submodule "rpcs3-ffmpeg"]
 	path = ffmpeg

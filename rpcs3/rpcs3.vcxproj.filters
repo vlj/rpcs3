@@ -209,10 +209,10 @@
     <ClInclude Include="Gui\SaveDataDialog.h">
       <Filter>Gui</Filter>
     </ClInclude>
-    <ClInclude Include="resource.h" />
     <ClInclude Include="Gui\D3DGSFrame.h">
       <Filter>Gui</Filter>
     </ClInclude>
+    <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="rpcs3.ico" />
