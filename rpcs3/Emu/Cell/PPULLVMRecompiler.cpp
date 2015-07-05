@@ -44,14 +44,17 @@ Compiler::Compiler(RecompilationEngine & recompilation_engine, const Executable 
     m_module       = new llvm::Module("Module", *m_llvm_context);
     m_fpm          = new FunctionPassManager(m_module);
 
+    std::string targetTriple = "x86_64-pc-windows-elf";
+    m_module->setTargetTriple(targetTriple);
+
     m_execution_engine  =
       EngineBuilder(std::unique_ptr<llvm::Module>(m_module))
-        .setMCPU(sys::getHostCPUName())
         .setEngineKind(EngineKind::JIT)
-        .setOptLevel(CodeGenOpt::Default)
+        .setVerifyModules(true)
         .create();
+    m_module->setDataLayout(m_execution_engine->getDataLayout());
 
-//    m_fpm->add(new DataLayoutPass(m_module));
+
     m_fpm->add(createNoAAPass());
     m_fpm->add(createBasicAliasAnalysisPass());
     m_fpm->add(createNoTargetTransformInfoPass());
@@ -231,13 +234,13 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     }
 
 #ifdef _DEBUG
-    m_recompilation_engine.Log() << *m_state.function;
+/*    m_recompilation_engine.Log() << *m_state.function;
 
     std::string        verify;
     raw_string_ostream verify_ostream(verify);
     if (verifyFunction(*m_state.function, &verify_ostream)) {
         m_recompilation_engine.Log() << "Verification failed: " << verify << "\n";
-    }
+    }*/
 #endif
 
     auto ir_build_end      = std::chrono::high_resolution_clock::now();
@@ -4993,11 +4996,11 @@ BasicBlock * Compiler::GetBasicBlockFromAddress(u32 address, const std::string &
         }
 
 #ifdef _DEBUG
-        auto block_address = GetAddressFromBasicBlockName(i->getName());
+/*        auto block_address = GetAddressFromBasicBlockName(i->getName());
         if (block_address > address) {
             next_block = &(*i);
             break;
-        }
+        }*/
 #endif
     }
 
@@ -5661,7 +5664,7 @@ raw_fd_ostream & RecompilationEngine::Log() {
     if (!m_log) {
         std::string error;
 //        m_log = new raw_fd_ostream("PPULLVMRecompiler.log", error, sys::fs::F_Text);
-        m_log->SetUnbuffered();
+//        m_log->SetUnbuffered();
     }
 
     return *m_log;
@@ -5759,7 +5762,7 @@ void RecompilationEngine::ProcessExecutionTrace(const ExecutionTrace & execution
     auto processed_execution_trace_i = m_processed_execution_traces.find(execution_trace_id);
     if (processed_execution_trace_i == m_processed_execution_traces.end()) {
 #ifdef _DEBUG
-        Log() << "Trace: " << execution_trace.ToString() << "\n";
+//        Log() << "Trace: " << execution_trace.ToString() << "\n";
 #endif
         // Find the function block
         BlockEntry key(execution_trace.function_address, execution_trace.function_address);
@@ -5844,8 +5847,8 @@ void RecompilationEngine::UpdateControlFlowGraph(ControlFlowGraph & cfg, const E
 
 void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 #ifdef _DEBUG
-    Log() << "Compile: " << block_entry.ToString() << "\n";
-    Log() << "CFG: " << block_entry.cfg.ToString() << "\n";
+/*    Log() << "Compile: " << block_entry.ToString() << "\n";
+    Log() << "CFG: " << block_entry.cfg.ToString() << "\n";*/
 #endif
 
     auto ordinal    = AllocateOrdinal(block_entry.cfg.start_address, block_entry.IsFunction());
