@@ -234,13 +234,13 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     }
 
 #ifdef _DEBUG
-/*    m_recompilation_engine.Log() << *m_state.function;
+    m_recompilation_engine.Log() << *m_state.function;
 
     std::string        verify;
     raw_string_ostream verify_ostream(verify);
     if (verifyFunction(*m_state.function, &verify_ostream)) {
         m_recompilation_engine.Log() << "Verification failed: " << verify << "\n";
-    }*/
+    }
 #endif
 
     auto ir_build_end      = std::chrono::high_resolution_clock::now();
@@ -256,6 +256,9 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     void *function = m_execution_engine->getPointerToFunction(m_state.function);
     auto translate_end        = std::chrono::high_resolution_clock::now();
     m_stats.translation_time += std::chrono::duration_cast<std::chrono::nanoseconds>(translate_end - optimize_end);
+
+		if (function == nullptr)
+			m_recompilation_engine.Log() << "Failed to compile \n";
 
 #ifdef _DEBUG
 /*    m_recompilation_engine.Log() << "\nDisassembly:\n";
@@ -273,6 +276,8 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
 
     auto compilation_end  = std::chrono::high_resolution_clock::now();
     m_stats.total_time   += std::chrono::duration_cast<std::chrono::nanoseconds>(compilation_end - compilation_start);
+
+    assert(function != nullptr);
 
     return (Executable)function;
 }
@@ -4996,11 +5001,11 @@ BasicBlock * Compiler::GetBasicBlockFromAddress(u32 address, const std::string &
         }
 
 #ifdef _DEBUG
-/*        auto block_address = GetAddressFromBasicBlockName(i->getName());
+        auto block_address = GetAddressFromBasicBlockName(i->getName());
         if (block_address > address) {
             next_block = &(*i);
             break;
-        }*/
+        }
 #endif
     }
 
@@ -5662,9 +5667,9 @@ void RecompilationEngine::NotifyTrace(ExecutionTrace * execution_trace) {
 
 raw_fd_ostream & RecompilationEngine::Log() {
     if (!m_log) {
-        std::string error;
-//        m_log = new raw_fd_ostream("PPULLVMRecompiler.log", error, sys::fs::F_Text);
-//        m_log->SetUnbuffered();
+        std::error_code error;
+        m_log = new raw_fd_ostream("PPULLVMRecompiler.log", error, sys::fs::F_Text);
+        m_log->SetUnbuffered();
     }
 
     return *m_log;
@@ -5762,7 +5767,7 @@ void RecompilationEngine::ProcessExecutionTrace(const ExecutionTrace & execution
     auto processed_execution_trace_i = m_processed_execution_traces.find(execution_trace_id);
     if (processed_execution_trace_i == m_processed_execution_traces.end()) {
 #ifdef _DEBUG
-//        Log() << "Trace: " << execution_trace.ToString() << "\n";
+        Log() << "Trace: " << execution_trace.ToString() << "\n";
 #endif
         // Find the function block
         BlockEntry key(execution_trace.function_address, execution_trace.function_address);
@@ -5847,8 +5852,8 @@ void RecompilationEngine::UpdateControlFlowGraph(ControlFlowGraph & cfg, const E
 
 void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 #ifdef _DEBUG
-/*    Log() << "Compile: " << block_entry.ToString() << "\n";
-    Log() << "CFG: " << block_entry.cfg.ToString() << "\n";*/
+    Log() << "Compile: " << block_entry.ToString() << "\n";
+    Log() << "CFG: " << block_entry.cfg.ToString() << "\n";
 #endif
 
     auto ordinal    = AllocateOrdinal(block_entry.cfg.start_address, block_entry.IsFunction());
