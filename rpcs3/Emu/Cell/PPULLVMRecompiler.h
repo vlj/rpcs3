@@ -742,11 +742,12 @@ namespace ppu_recompiler_llvm {
 
         /// The function that will be called to execute unknown functions
         llvm::Function * m_execute_unknown_function;
-        const Executable m_execute_unknow_function_executable;
 
         /// The executable that will be called to execute unknown blocks
         llvm::Function *  m_execute_unknown_block;
-        const Executable m_execute_unknow_block_executable;
+
+        /// Maps function name to executable memory pointer
+        std::unordered_map<std::string, Executable> m_executableMap;
 
         /// LLVM context
         llvm::LLVMContext * m_llvm_context;

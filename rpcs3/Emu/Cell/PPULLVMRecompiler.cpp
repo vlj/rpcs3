@@ -35,9 +35,7 @@ bool Compiler::s_rotate_mask_inited = false;
 Compiler::Compiler(RecompilationEngine & recompilation_engine, const Executable execute_unknown_function,
                    const Executable execute_unknown_block, bool (*poll_status_function)(PPUThread * ppu_state))
     : m_recompilation_engine(recompilation_engine)
-    , m_poll_status_function(poll_status_function)
-    , m_execute_unknow_block_executable(execute_unknown_block)
-    , m_execute_unknow_function_executable(execute_unknown_function) {
+    , m_poll_status_function(poll_status_function) {
     InitializeNativeTarget();
     InitializeNativeTargetAsmPrinter();
     InitializeNativeTargetDisassembler();
@@ -47,9 +45,11 @@ Compiler::Compiler(RecompilationEngine & recompilation_engine, const Executable 
 
     std::vector<Type *> arg_types;
     arg_types.push_back(m_ir_builder->getInt8PtrTy());
-//    arg_types.push_back(m_ir_builder->getInt8PtrTy());
     arg_types.push_back(m_ir_builder->getInt64Ty());
     m_compiled_function_type = FunctionType::get(m_ir_builder->getInt32Ty(), arg_types, false);
+
+    m_executableMap["execute_unknown_function"] = execute_unknown_function;
+    m_executableMap["execute_unknown_block"] = execute_unknown_block;
 
     if (!s_rotate_mask_inited) {
         InitRotateMask();
@@ -67,22 +67,18 @@ Compiler::~Compiler() {
 
 class CustomSectionMemoryManager : public llvm::SectionMemoryManager {
 private:
-    const Executable m_execute_unknow_function_executable;
-		const Executable m_execute_unknow_block_executable;
+    std::unordered_map<std::string, Executable> &executableMap;
 public:
-    CustomSectionMemoryManager(const Executable &execute_unknown_function,
-      const Executable &m_execute_unknow_block_executable) :
-        m_execute_unknow_function_executable(execute_unknown_function),
-        m_execute_unknow_block_executable(m_execute_unknow_block_executable)
+    CustomSectionMemoryManager(std::unordered_map<std::string, Executable> &map) :
+      executableMap(map)
     {}
     ~CustomSectionMemoryManager() override {}
 
     virtual uint64_t getSymbolAddress(const std::string &Name)
     {
-      if (Name == "execute_unknown_function")
-        return (uint64_t)m_execute_unknow_function_executable;
-      if (Name == "execute_unknown_block")
-        return (uint64_t)m_execute_unknow_block_executable;
+      std::unordered_map<std::string, Executable>::const_iterator It = executableMap.find(Name);
+      if (It != executableMap.end())
+        return (uint64_t)It->second;
       return 0;
     }
 };
@@ -104,9 +100,7 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     llvm::ExecutionEngine *execution_engine =
       EngineBuilder(std::unique_ptr<llvm::Module>(m_module))
         .setEngineKind(EngineKind::JIT)
-        .setMCJITMemoryManager(std::unique_ptr<llvm::SectionMemoryManager>(
-          new CustomSectionMemoryManager(m_execute_unknow_function_executable, m_execute_unknow_block_executable))
-        )
+        .setMCJITMemoryManager(std::unique_ptr<llvm::SectionMemoryManager>(new CustomSectionMemoryManager(m_executableMap)))
         .create();
     m_module->setDataLayout(execution_engine->getDataLayout());
 
@@ -5583,7 +5577,7 @@ Value * Compiler::Call(const char * name, Func function, Args... args) {
         fn           = cast<Function>(m_module->getOrInsertFunction(name, fn_type));
         fn->setCallingConv(CallingConv::X86_64_Win64);
         // Note: not threadsafe
-        m_execution_engines.back()->addGlobalMapping(fn, (void *&)function);
+        m_executableMap[name] = (Executable)(void *&)function;
     }
 
     std::vector<Value *> fn_args = {args...};
