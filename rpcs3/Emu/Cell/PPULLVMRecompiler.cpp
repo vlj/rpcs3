@@ -46,7 +46,7 @@ Compiler::Compiler(RecompilationEngine & recompilation_engine, const Executable 
 
     std::vector<Type *> arg_types;
     arg_types.push_back(m_ir_builder->getInt8PtrTy());
-    arg_types.push_back(m_ir_builder->getInt8PtrTy());
+//    arg_types.push_back(m_ir_builder->getInt8PtrTy());
     arg_types.push_back(m_ir_builder->getInt64Ty());
     m_compiled_function_type = FunctionType::get(m_ir_builder->getInt32Ty(), arg_types, false);
 
