@@ -8,6 +8,7 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
+#include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Analysis/Passes.h"
@@ -63,6 +64,30 @@ Compiler::~Compiler() {
     delete m_llvm_context;
 }
 
+
+class CustomSectionMemoryManager : public llvm::SectionMemoryManager {
+private:
+    const Executable m_execute_unknow_function_executable;
+		const Executable m_execute_unknow_block_executable;
+public:
+    CustomSectionMemoryManager(const Executable &execute_unknown_function,
+      const Executable &m_execute_unknow_block_executable) :
+        m_execute_unknow_function_executable(execute_unknown_function),
+        m_execute_unknow_block_executable(m_execute_unknow_block_executable)
+    {}
+    ~CustomSectionMemoryManager() override {}
+
+    virtual uint64_t getSymbolAddress(const std::string &Name)
+    {
+      if (Name == "execute_unknown_function")
+        return (uint64_t)m_execute_unknow_function_executable;
+      if (Name == "execute_unknown_block")
+        return (uint64_t)m_execute_unknow_block_executable;
+      return 0;
+    }
+};
+
+
 Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & cfg, bool inline_all, bool generate_linkable_exits) {
     auto compilation_start = std::chrono::high_resolution_clock::now();
 
@@ -71,7 +96,7 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     m_execute_unknown_function->setCallingConv(CallingConv::X86_64_Win64);
 
     m_execute_unknown_block = (Function *)m_module->getOrInsertFunction("execute_unknown_block", m_compiled_function_type);
-     m_execute_unknown_block->setCallingConv(CallingConv::X86_64_Win64);
+    m_execute_unknown_block->setCallingConv(CallingConv::X86_64_Win64);
 
     std::string targetTriple = "x86_64-pc-windows-elf";
     m_module->setTargetTriple(targetTriple);
@@ -79,11 +104,11 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     llvm::ExecutionEngine *execution_engine =
       EngineBuilder(std::unique_ptr<llvm::Module>(m_module))
         .setEngineKind(EngineKind::JIT)
+        .setMCJITMemoryManager(std::unique_ptr<llvm::SectionMemoryManager>(
+          new CustomSectionMemoryManager(m_execute_unknow_function_executable, m_execute_unknow_block_executable))
+        )
         .create();
     m_module->setDataLayout(execution_engine->getDataLayout());
-
-    execution_engine->addGlobalMapping(m_execute_unknown_function, (void *)m_execute_unknow_function_executable);
-    execution_engine->addGlobalMapping(m_execute_unknown_block, (void *)m_execute_unknow_block_executable);
 
     llvm::FunctionPassManager *fpm = new llvm::FunctionPassManager(m_module);
     fpm->add(createNoAAPass());
