@@ -101,28 +101,15 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
       EngineBuilder(std::unique_ptr<llvm::Module>(m_module))
         .setEngineKind(EngineKind::JIT)
         .setMCJITMemoryManager(std::unique_ptr<llvm::SectionMemoryManager>(new CustomSectionMemoryManager(m_executableMap)))
+        .setOptLevel(llvm::CodeGenOpt::Aggressive)
+        .setMCPU("nehalem")
         .create();
     m_module->setDataLayout(execution_engine->getDataLayout());
 
     llvm::FunctionPassManager *fpm = new llvm::FunctionPassManager(m_module);
-    fpm->add(createNoAAPass());
     fpm->add(createBasicAliasAnalysisPass());
-    fpm->add(createNoTargetTransformInfoPass());
     fpm->add(createEarlyCSEPass());
-    fpm->add(createTailCallEliminationPass());
-    fpm->add(createReassociatePass());
     fpm->add(createInstructionCombiningPass());
-    fpm->add(new DominatorTreeWrapperPass());
-    fpm->add(new MemoryDependenceAnalysis());
-    fpm->add(createGVNPass());
-    fpm->add(createInstructionCombiningPass());
-    fpm->add(new MemoryDependenceAnalysis());
-    fpm->add(createDeadStoreEliminationPass());
-    fpm->add(new LoopInfo());
-    fpm->add(new ScalarEvolution());
-    fpm->add(createSLPVectorizerPass());
-    fpm->add(createInstructionCombiningPass());
-    fpm->add(createCFGSimplificationPass());
     fpm->doInitialization();
 
     m_state.cfg                     = &cfg;
@@ -254,7 +241,7 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     }
 
 
-    m_recompilation_engine.Log() << *m_state.function;
+    m_recompilation_engine.Log() << *m_module;
 
     std::string        verify;
     raw_string_ostream verify_ostream(verify);
@@ -267,7 +254,7 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     m_stats.ir_build_time += std::chrono::duration_cast<std::chrono::nanoseconds>(ir_build_end - compilation_start);
 
     // Optimize this function
-     fpm->run(*m_state.function);
+    fpm->run(*m_state.function);
     auto optimize_end          = std::chrono::high_resolution_clock::now();
     m_stats.optimization_time += std::chrono::duration_cast<std::chrono::nanoseconds>(optimize_end - ir_build_end);
 
