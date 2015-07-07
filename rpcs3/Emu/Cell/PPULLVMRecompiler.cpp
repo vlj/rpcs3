@@ -293,7 +293,6 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     auto compilation_end  = std::chrono::high_resolution_clock::now();
     m_stats.total_time   += std::chrono::duration_cast<std::chrono::nanoseconds>(compilation_end - compilation_start);
     delete fpm;
-    delete m_module;
 
     assert(function != nullptr);
     return (Executable)function;
