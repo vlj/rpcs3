@@ -273,6 +273,7 @@ RecompilationEngine::RecompilationEngine()
     : m_log(nullptr)
     , m_next_ordinal(0)
     , m_compiler(*this, CPUHybridDecoderRecompiler::ExecuteFunction, CPUHybridDecoderRecompiler::ExecuteTillReturn, CPUHybridDecoderRecompiler::PollStatus) {
+  memset(m_executable_engine, 0, sizeof(m_executable_engine) / sizeof(m_executable_engine[0]));
     m_compiler.RunAllTests();
 }
 
