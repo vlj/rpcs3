@@ -540,6 +540,7 @@ std::shared_ptr<RecompilationEngine> RecompilationEngine::GetInstance() {
 }
 
 void RecompilationEngine::FreeExecutable(u32 ordinal) {
+  std::lock_guard<std::mutex> lock(m_address_to_ordinal_lock);
   delete m_executable_engine[ordinal];
   m_executable_engine[ordinal] = nullptr;
 }
