@@ -58,8 +58,6 @@ Compiler::Compiler(RecompilationEngine & recompilation_engine, const Executable 
 }
 
 Compiler::~Compiler() {
-    for (auto execution_engine : m_execution_engines)
-      delete execution_engine;
     delete m_ir_builder;
     delete m_llvm_context;
 }
@@ -84,7 +82,7 @@ public:
 };
 
 
-Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & cfg, bool generate_linkable_exits) {
+std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::string & name, const ControlFlowGraph & cfg, bool generate_linkable_exits) {
     auto compilation_start = std::chrono::high_resolution_clock::now();
 
     m_module = new llvm::Module("Module", *m_llvm_context);
@@ -239,7 +237,6 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     void *function = execution_engine->getPointerToFunction(m_state.function);
     auto translate_end        = std::chrono::high_resolution_clock::now();
     m_stats.translation_time += std::chrono::duration_cast<std::chrono::nanoseconds>(translate_end - optimize_end);
-    m_execution_engines.push_back(execution_engine);
 
 /*    m_recompilation_engine.Log() << "\nDisassembly:\n";
     auto disassembler = LLVMCreateDisasm(sys::getProcessTriple().c_str(), nullptr, 0, nullptr, nullptr);
@@ -258,15 +255,7 @@ Executable Compiler::Compile(const std::string & name, const ControlFlowGraph & 
     delete fpm;
 
     assert(function != nullptr);
-    return (Executable)function;
-}
-
-void Compiler::FreeExecutable(const std::string & name) {
-    auto function = m_module->getFunction(name);
-    if (function) {
-//        m_execution_engine->freeMachineCodeForFunction(function);
-        function->eraseFromParent();
-    }
+    return std::make_pair((Executable)function, execution_engine);
 }
 
 Compiler::Stats Compiler::GetStats() {
@@ -529,9 +518,12 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
     Log() << "CFG: " << block_entry.cfg.ToString() << "\n";
 
     u32 ordinal    = AllocateOrdinal(block_entry.cfg.start_address, block_entry.IsFunction());
-    Executable executable = m_compiler.Compile(fmt::Format("fn_0x%08X_%u", block_entry.cfg.start_address, block_entry.revision++), block_entry.cfg,
-                                         block_entry.IsFunction() ? true : false /*generate_linkable_exits*/);
-    m_executable_lookup[ordinal]       = executable;
+
+    std::pair<Executable, llvm::ExecutionEngine *> compileResult =
+      m_compiler.Compile(fmt::Format("fn_0x%08X_%u", block_entry.cfg.start_address, block_entry.revision++), block_entry.cfg,
+                         block_entry.IsFunction() ? true : false /*generate_linkable_exits*/);
+    m_executable_lookup[ordinal] = (Executable)compileResult.first;
+    m_executable_engine[ordinal] = compileResult.second;
     block_entry.last_compiled_cfg_size = block_entry.cfg.GetSize();
     block_entry.is_compiled            = true;
 }
@@ -544,6 +536,11 @@ std::shared_ptr<RecompilationEngine> RecompilationEngine::GetInstance() {
     }
 
     return s_the_instance;
+}
+
+void RecompilationEngine::FreeExecutable(u32 ordinal) {
+  delete m_executable_engine[ordinal];
+  m_executable_engine[ordinal] = nullptr;
 }
 
 Tracer::Tracer()
@@ -651,8 +648,9 @@ void ppu_recompiler_llvm::CPUHybridDecoderRecompiler::RemoveUnusedEntriesFromCac
             i++;
             if (tmp->second.second == 0) {
                 m_address_to_ordinal.erase(tmp);
+                m_recompilation_engine->FreeExecutable(tmp->second.first);
             } else {
-                tmp->second.second = 0;
+              tmp->second.second = 0;
             }
         }
 

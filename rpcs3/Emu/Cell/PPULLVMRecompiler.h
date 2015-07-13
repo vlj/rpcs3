@@ -284,11 +284,11 @@ namespace ppu_recompiler_llvm {
         Compiler & operator = (const Compiler & other) = delete;
         Compiler & operator = (Compiler && other) = delete;
 
-        /// Compile a code fragment described by a cfg and return an executable
-        Executable Compile(const std::string & name, const ControlFlowGraph & cfg, bool generate_linkable_exits);
-
-        /// Free an executable earilier obtained via a call to Compile
-        void FreeExecutable(const std::string & name);
+        /**
+         * Compile a code fragment described by a cfg and return an executable and the ExecutionEngine storing it
+         * Pointer to function can be retrieved with getPointerToFunction
+         */
+        std::pair<Executable, llvm::ExecutionEngine *> Compile(const std::string & name, const ControlFlowGraph & cfg, bool generate_linkable_exits);
 
         /// Retrieve compiler stats
         Stats GetStats();
@@ -755,9 +755,6 @@ namespace ppu_recompiler_llvm {
         /// Module to which all generated code is output to
         llvm::Module * m_module;
 
-        /// Execution engine list. An execution engine is a JITed function
-        std::vector<llvm::ExecutionEngine *> m_execution_engines;
-
         /// LLVM type of the functions genreated by the compiler
         llvm::FunctionType * m_compiled_function_type;
 
@@ -1018,6 +1015,9 @@ namespace ppu_recompiler_llvm {
         /// Get a pointer to the instance of this class
         static std::shared_ptr<RecompilationEngine> GetInstance();
 
+        /// Free an executable earilier obtained via a call to Compile
+        void FreeExecutable(u32 ordinal);
+
     private:
         /// An entry in the block table
         struct BlockEntry {
@@ -1100,6 +1100,7 @@ namespace ppu_recompiler_llvm {
 
         /// Executable lookup table
         Executable m_executable_lookup[10000]; // TODO: Adjust size
+        llvm::ExecutionEngine *m_executable_engine[10000];
 
         RecompilationEngine();
 
