@@ -105,9 +105,24 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
     m_module->setDataLayout(execution_engine->getDataLayout());
 
     llvm::FunctionPassManager *fpm = new llvm::FunctionPassManager(m_module);
+    fpm->add(createNoAAPass());
     fpm->add(createBasicAliasAnalysisPass());
+    fpm->add(createNoTargetTransformInfoPass());
     fpm->add(createEarlyCSEPass());
+    fpm->add(createTailCallEliminationPass());
+    fpm->add(createReassociatePass());
     fpm->add(createInstructionCombiningPass());
+    fpm->add(new DominatorTreeWrapperPass());
+    fpm->add(new MemoryDependenceAnalysis());
+    fpm->add(createGVNPass());
+    fpm->add(createInstructionCombiningPass());
+    fpm->add(new MemoryDependenceAnalysis());
+    fpm->add(createDeadStoreEliminationPass());
+    fpm->add(new LoopInfo());
+    fpm->add(new ScalarEvolution());
+    fpm->add(createSLPVectorizerPass());
+    fpm->add(createInstructionCombiningPass());
+    fpm->add(createCFGSimplificationPass());
     fpm->doInitialization();
 
     m_state.cfg                     = &cfg;
@@ -540,6 +555,7 @@ std::shared_ptr<RecompilationEngine> RecompilationEngine::GetInstance() {
 }
 
 void RecompilationEngine::FreeExecutable(u32 ordinal) {
+  return;
   std::lock_guard<std::mutex> lock(m_address_to_ordinal_lock);
   delete m_executable_engine[ordinal];
   m_executable_engine[ordinal] = nullptr;
