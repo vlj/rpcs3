@@ -1,6 +1,6 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
-VisualStudioVersion = 14.0.22823.1
+VisualStudioVersion = 14.0.23107.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rpcs3", "rpcs3\rpcs3.vcxproj", "{70CD65B0-91D6-4FAE-9A7B-4AF55D0D1B12}"
 	ProjectSection(ProjectDependencies) = postProject
@@ -100,6 +100,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "wxexpat", "wxWidgets\build\
 	ProjectSection(ProjectDependencies) = postProject
 		{01F4CE10-2CFB-41A8-B41F-E54337868A1D} = {01F4CE10-2CFB-41A8-B41F-E54337868A1D}
 	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "webview", "wxWidgets\build\msw\wx_webview.vcxproj", "{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "wxjpeg", "wxWidgets\build\msw\wx_wxjpeg.vcxproj", "{6053CC38-CDEE-584C-8BC8-4B000D800FC7}"
 	ProjectSection(ProjectDependencies) = postProject
@@ -563,6 +565,20 @@ Global
 		{01F4CE10-2CFB-41A8-B41F-E54337868A1D}.Release - LLVM|x64.Build.0 = Release|x64
 		{01F4CE10-2CFB-41A8-B41F-E54337868A1D}.Release|x64.ActiveCfg = Release|x64
 		{01F4CE10-2CFB-41A8-B41F-E54337868A1D}.Release|x64.Build.0 = Release|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.Debug - LLVM|x64.ActiveCfg = Debug|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.Debug - LLVM|x64.Build.0 = Debug|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.Debug - MemLeak|x64.ActiveCfg = Debug|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.Debug - MemLeak|x64.Build.0 = Debug|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.Debug|x64.ActiveCfg = Debug|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.Debug|x64.Build.0 = Debug|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.DLL Debug|x64.ActiveCfg = DLL Debug|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.DLL Debug|x64.Build.0 = DLL Debug|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.DLL Release|x64.ActiveCfg = DLL Release|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.DLL Release|x64.Build.0 = DLL Release|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.Release - LLVM|x64.ActiveCfg = Release|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.Release - LLVM|x64.Build.0 = Release|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.Release|x64.ActiveCfg = Release|x64
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -593,5 +609,6 @@ Global
 		{AC40FF01-426E-4838-A317-66354CEFAE88} = {E2A982F2-4B1A-48B1-8D77-A17A589C58D7}
 		{8BC303AB-25BE-4276-8E57-73F171B2D672} = {C8068CE9-D626-4FEA-BEE7-893F06A25BF3}
 		{01F4CE10-2CFB-41A8-B41F-E54337868A1D} = {5812E712-6213-4372-B095-9EB9BAA1F2DF}
+		{A8E8442A-078A-5FC5-B495-8D71BA77EE6E} = {5812E712-6213-4372-B095-9EB9BAA1F2DF}
 	EndGlobalSection
 EndGlobal
