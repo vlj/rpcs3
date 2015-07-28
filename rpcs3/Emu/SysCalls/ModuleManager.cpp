@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "Modules.h"
 #include "ModuleManager.h"
 
 extern Module cellAdec;
@@ -45,15 +46,18 @@ extern Module cellVoice;
 extern Module cellVpost;
 extern Module libmixer;
 extern Module sceNp;
+extern Module sceNp2;
 extern Module sceNpClans;
 extern Module sceNpCommerce2;
 extern Module sceNpSns;
 extern Module sceNpTrophy;
 extern Module sceNpTus;
+extern Module sceNpUtil;
 extern Module sys_io;
 extern Module sys_net;
 extern Module sysPrxForUser;
 extern Module sys_libc;
+extern Module sys_lv2dbg;
 
 struct ModuleInfo
 {
@@ -106,7 +110,7 @@ static const g_module_list[] =
 	{ 0x0028, "cellAdecAtx", nullptr },
 	{ 0x0029, "cellAdecAt3", nullptr },
 	{ 0x002a, "cellDmuxPamf", nullptr },
-	{ 0x002e, "cellLv2dbg", nullptr },
+	{ 0x002e, "sys_lv2dbg", &sys_lv2dbg },
 	{ 0x0030, "cellUsbpspcm", nullptr },
 	{ 0x0031, "cellAvconfExt", &cellAvconfExt },
 	{ 0x0032, "cellUserInfo", &cellUserInfo },
@@ -115,9 +119,9 @@ static const g_module_list[] =
 	{ 0x0035, "cellSysutilRec", nullptr },
 	{ 0x0036, "cellVideoExport", nullptr },
 	{ 0x0037, "cellGameExec", nullptr },
-	{ 0x0038, "sceNp2", nullptr },
+	{ 0x0038, "sceNp2", &sceNp2 },
 	{ 0x0039, "cellSysutilAp", &cellSysutilAp },
-	{ 0x003a, "cellSysutilNpClans", nullptr },
+	{ 0x003a, "sceNpClans", &sceNpClans },
 	{ 0x003b, "cellSysutilOskExt", nullptr },
 	{ 0x003c, "cellVdecDivx", nullptr },
 	{ 0x003d, "cellJpgEnc", nullptr },
@@ -140,8 +144,8 @@ static const g_module_list[] =
 	{ 0x0052, "cellPngEnc", nullptr },
 	{ 0x0053, "cellMusicDecode2", nullptr },
 	{ 0x0055, "cellSync2", &cellSync2 },
-	{ 0x0056, "sceNpUtil", nullptr },
-	{ 0x0057, "cellRudp", nullptr },
+	{ 0x0056, "sceNpUtil", &sceNpUtil },
+	{ 0x0057, "cellRudp", &cellRudp },
 	{ 0x0059, "sceNpSns", &sceNpSns },
 	{ 0x005a, "cellGem", &cellGem },
 	{ 0xf00a, "cellCelpEnc", nullptr },

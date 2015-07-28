@@ -1,7 +1,8 @@
 #pragma once
+
 #include "Utilities/Thread.h"
 
-enum CPUThreadType : unsigned char
+enum CPUThreadType
 {
 	CPU_THREAD_PPU,
 	CPU_THREAD_SPU,
@@ -9,80 +10,117 @@ enum CPUThreadType : unsigned char
 	CPU_THREAD_ARMv7,
 };
 
-enum CPUThreadStatus
-{
-	CPUThread_Ready,
-	CPUThread_Running,
-	CPUThread_Paused,
-	CPUThread_Stopped,
-	CPUThread_Sleeping,
-	CPUThread_Break,
-	CPUThread_Step,
-};
-
-// CPU Thread Events
+// CPU Thread State Flags
 enum : u64
 {
-	CPU_EVENT_STOP = (1ull << 0),
+	CPU_STATE_STOPPED = (1ull << 0), // basic execution state (stopped by default), removed by Exec()
+	CPU_STATE_PAUSED  = (1ull << 1), // pauses thread execution, set by the debugger (manually or after step execution)
+	CPU_STATE_SLEEP   = (1ull << 2), // shouldn't affect thread execution, set by Sleep() call, removed by the latest Awake() call, may possibly indicate waiting state of the thread
+	CPU_STATE_STEP    = (1ull << 3), // forces the thread to pause after executing just one instruction or something appropriate, set by the debugger
+	CPU_STATE_DEAD    = (1ull << 4), // indicates irreversible exit of the thread
+	CPU_STATE_RETURN  = (1ull << 5), // used for callback return
+	CPU_STATE_SIGNAL  = (1ull << 6), // used for HLE signaling
+	CPU_STATE_INTR    = (1ull << 7), // thread interrupted
+
+	CPU_STATE_MAX     = (1ull << 8), // added to (subtracted from) m_state by Sleep()/Awake() calls to trigger status check
 };
+
+// "HLE return" exception event
+class CPUThreadReturn{};
+
+// CPUThread::Stop exception event
+class CPUThreadStop{};
+
+// CPUThread::Exit exception event
+class CPUThreadExit{};
 
 class CPUDecoder;
 
-class CPUThread : public ThreadBase
+class CPUThread : protected thread_t, public std::enable_shared_from_this<CPUThread>
 {
 protected:
-	std::atomic<u64> m_events; // flags
+	atomic_t<u64> m_state; // thread state flags
 
-	u32 m_status;
-	u32 m_id;
-	u64 m_prio;
-	CPUThreadType m_type;
-	bool m_joinable;
-	bool m_joining;
-	bool m_is_step;
+	std::unique_ptr<CPUDecoder> m_dec;
 
-	u32 m_stack_addr;
-	u32 m_stack_size;
-
-	u64 m_exit_status;
-
-	CPUDecoder* m_dec;
-
-	bool m_trace_call_stack;
-
-	virtual void DumpInformation() override;
+	const u32 m_id;
+	const CPUThreadType m_type;
+	const std::string m_name; // changing m_name would be terribly thread-unsafe in current implementation
 
 public:
-	void AddEvent(const u64 event) { m_events |= event; }
+	using thread_t::mutex;
+	using thread_t::cv;
+	using thread_t::is_current;
+	using thread_t::get_thread_ctrl;
 
-	virtual void InitRegs() = 0;
+protected:
+	CPUThread(CPUThreadType type, const std::string& name, std::function<std::string()> thread_name);
 
-	virtual void InitStack() = 0;
-	virtual void CloseStack() = 0;
+public:
+	virtual ~CPUThread() override;
 
-	u32 GetStackAddr() const { return m_stack_addr; }
-	u32 GetStackSize() const { return m_stack_size; }
+	u32 get_id() const { return m_id; }
+	CPUThreadType get_type() const { return m_type; }
+	std::string get_name() const { return m_name; }
 
-	void SetStackAddr(u32 stack_addr) { m_stack_addr = stack_addr; }
-	void SetStackSize(u32 stack_size) { m_stack_size = stack_size; }
+	bool is_alive() const { return (m_state.load() & CPU_STATE_DEAD) == 0; }
+	bool is_stopped() const { return (m_state.load() & CPU_STATE_STOPPED) != 0; }
+	virtual bool is_paused() const;
 
-	void SetId(const u32 id);
-	void SetName(const std::string& name);
-	void SetPrio(const u64 prio) { m_prio = prio; }
-	void SetExitStatus(const u64 status) { m_exit_status = status; }
+	virtual void dump_info() const;
+	virtual u32 get_pc() const = 0;
+	virtual u32 get_offset() const = 0;
+	virtual void do_run() = 0;
+	virtual void task() = 0;
 
-	u64 GetPrio() const { return m_prio; }
-	u64 GetExitStatus() const { return m_exit_status; }
+	virtual void init_regs() = 0;
+	virtual void init_stack() = 0;
+	virtual void close_stack() = 0;
 
-	std::string GetName() const { return NamedThreadBase::GetThreadName(); }
+	// initialize thread
+	void run();
+
+	// called by the debugger, don't use
+	void pause();
+
+	// called by the debugger, don't use
+	void resume();
+
+	// stop thread execution
+	void stop();
+
+	// start thread execution (removing STOP status)
+	void exec();
+
+	// exit thread execution
+	void exit();
+
+	// called by the debugger, don't use
+	void step();
+
+	// trigger thread status check
+	void sleep();
+
+	// untrigger thread status check
+	void awake();
+
+	// set SIGNAL and notify (returns true if set)
+	bool signal();
+
+	// test SIGNAL and reset
+	bool unsignal();
+
+	// process m_state flags, returns true if the checker must return
+	bool check_status();
+
 	std::string GetFName() const
 	{
-		return fmt::format("%s[0x%x] Thread (%s)", GetTypeString(), m_id, GetName());
+		return fmt::format("%s[0x%x] Thread (%s)", GetTypeString(), m_id, m_name);
 	}
 
-	static std::string CPUThreadTypeToString(CPUThreadType type)
+	static const char* CPUThreadTypeToString(CPUThreadType type)
 	{
-		switch(type)
+		switch (type)
 		{
 		case CPU_THREAD_PPU: return "PPU";
 		case CPU_THREAD_SPU: return "SPU";
@@ -93,143 +131,38 @@ public:
 		return "Unknown";
 	}
 
-	std::string ThreadStatusToString()
+	const char* ThreadStatusToString()
 	{
-		switch (ThreadStatus())
-		{
-		case CPUThread_Ready: return "Ready";
-		case CPUThread_Running: return "Running";
-		case CPUThread_Paused: return "Paused";
-		case CPUThread_Stopped: return "Stopped";
-		case CPUThread_Sleeping: return "Sleeping";
-		case CPUThread_Break: return "Break";
-		case CPUThread_Step: return "Step";
+		// TODO
 
-		default: return "Unknown status";
-		}
+		//switch (ThreadStatus())
+		//{
+		//case CPUThread_Ready: return "Ready";
+		//case CPUThread_Running: return "Running";
+		//case CPUThread_Paused: return "Paused";
+		//case CPUThread_Stopped: return "Stopped";
+		//case CPUThread_Sleeping: return "Sleeping";
+		//case CPUThread_Break: return "Break";
+		//case CPUThread_Step: return "Step";
+		//}
+
+		return "Unknown";
 	}
 
-	std::string GetTypeString() const { return CPUThreadTypeToString(m_type); }
-
-	virtual std::string GetThreadName() const
+	const char* GetTypeString() const
 	{
-		return fmt::format("%s[0x%08x]", GetFName(), PC);
+		return CPUThreadTypeToString(m_type);
 	}
 
-	CPUDecoder * GetDecoder() { return m_dec; };
-
-public:
-	u32 entry;
-	u32 PC;
-	u32 nPC;
-	u32 index;
-	u32 offset;
-	bool m_is_branch;
-	bool m_trace_enabled;
-	u64 m_last_syscall;
-
-protected:
-	CPUThread(CPUThreadType type);
-
-public:
-	virtual ~CPUThread();
-
-	int ThreadStatus();
-
-	void NextPc(u32 instr_size);
-	void SetBranch(const u32 pc, bool record_branch = false);
-	void SetPc(const u32 pc);
-	void SetEntry(const u32 entry);
-
-	bool IsRunning() const;
-	bool IsPaused() const;
-	bool IsStopped() const;
-
-	bool IsJoinable() const { return m_joinable; }
-	bool IsJoining() const { return m_joining; }
-	void SetJoinable(bool joinable) { m_joinable = joinable; }
-	void SetJoining(bool joining) { m_joining = joining; }
-
-	u32 GetId() const { return m_id; }
-	CPUThreadType GetType()	const { return m_type; }
-
-	void SetCallStackTracing(bool trace_call_stack) { m_trace_call_stack = trace_call_stack; }
-
-	void Reset();
-	void Close();
-	void Run();
-	void Pause();
-	void Resume();
-	void Stop();
-
-	virtual std::string RegsToString() = 0;
-	virtual std::string ReadRegString(const std::string& reg) = 0;
-	virtual bool WriteRegString(const std::string& reg, std::string value) = 0;
-
-	virtual void Exec();
-	void ExecOnce();
-
-	struct CallStackItem
+	CPUDecoder* GetDecoder()
 	{
-		u32 pc;
-		u32 branch_pc;
+		return m_dec.get();
 	};
 
-	std::vector<CallStackItem> m_call_stack;
-
-	std::string CallStackToString()
-	{
-		std::string ret = "Call Stack:\n==========\n";
-
-		for(uint i=0; i<m_call_stack.size(); ++i)
-		{
-			ret += fmt::Format("0x%x -> 0x%x\n", m_call_stack[i].pc, m_call_stack[i].branch_pc);
-		}
-
-		return ret;
-	}
-
-	void CallStackBranch(u32 pc)
-	{
-		//look if we're jumping back and if so pop the stack back to that position
-		auto res = std::find_if(m_call_stack.rbegin(), m_call_stack.rend(),
-			[&pc, this](CallStackItem &it)
-			{
-				return CallStackGetNextPC(it.pc) == pc;
-			});
-		if (res != m_call_stack.rend())
-		{
-			m_call_stack.erase((res + 1).base(), m_call_stack.end());
-			return;
-		}
-
-		//add a new entry otherwise
-		CallStackItem new_item;
-
-		new_item.branch_pc = pc;
-		new_item.pc = PC;
-
-		m_call_stack.push_back(new_item);
-	}
-
-	virtual u32 CallStackGetNextPC(u32 pc)
-	{
-		return pc + 4;
-	}
-
-protected:
-	virtual void DoReset()=0;
-	virtual void DoRun()=0;
-	virtual void DoPause()=0;
-	virtual void DoResume()=0;
-	virtual void DoStop()=0;
-
-protected:
-	virtual void Step() {}
-	virtual void Task();
+	virtual std::string RegsToString() const = 0;
+	virtual std::string ReadRegString(const std::string& reg) const = 0;
+	virtual bool WriteRegString(const std::string& reg, std::string value) = 0;
 };
-
-CPUThread* GetCurrentCPUThread();
 
 class cpu_thread
 {
@@ -237,35 +170,35 @@ protected:
 	std::shared_ptr<CPUThread> thread;
 
 public:
-	u32 get_entry() const
-	{
-		return thread->entry;
-	}
+	//u32 get_entry() const
+	//{
+	//	return thread->entry;
+	//}
 
 	virtual cpu_thread& args(std::initializer_list<std::string> values) = 0;
 
 	virtual cpu_thread& run() = 0;
 
-	u64 join()
-	{
-		if (!joinable())
-			throw "thread must be joinable for join";
+	//u64 join()
+	//{
+	//	if (!joinable())
+	//		throw EXCEPTION("thread must be joinable for join");
 
-		thread->SetJoinable(false);
+	//	thread->SetJoinable(false);
 
-		while (thread->IsRunning())
-			std::this_thread::sleep_for(std::chrono::milliseconds(1)); // hack
+	//	while (thread->IsRunning())
+	//		std::this_thread::sleep_for(std::chrono::milliseconds(1)); // hack
 
-		return thread->GetExitStatus();
-	}
+	//	return thread->GetExitStatus();
+	//}
 
-	bool joinable() const
-	{
-		return thread->IsJoinable();
-	}
+	//bool joinable() const
+	//{
+	//	return thread->IsJoinable();
+	//}
 
-	u32 get_id() const
-	{
-		return thread->GetId();
-	}
+	//u32 get_id() const
+	//{
+	//	return thread->GetId();
+	//}
 };

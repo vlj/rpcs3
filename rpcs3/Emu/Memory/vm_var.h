@@ -13,7 +13,7 @@ namespace vm
 		T* m_ptr;
 
 	public:
-		var(u32 size = sizeof(T), u32 align = sizeof(T))
+		var(u32 size = sizeof32(T), u32 align = alignof32(T))
 			: m_size(size)
 			, m_align(align)
 		{
@@ -35,7 +35,7 @@ namespace vm
 
 		void alloc()
 		{
-			m_addr = Memory.Alloc(size(), m_align);
+			m_addr = vm::alloc(size(), vm::main, std::max<u32>(m_align, 4096));
 			m_ptr = vm::get_ptr<T>(m_addr);
 		}
 
@@ -43,13 +43,13 @@ namespace vm
 		{
 			if (m_addr)
 			{
-				Memory.Free(m_addr);
+				vm::dealloc(m_addr);
 				m_addr = 0;
 				m_ptr = vm::get_ptr<T>(0u);
 			}
 		}
 		
-		static var make(u32 addr, u32 size = sizeof(T), u32 align = sizeof(T))
+		static var make(u32 addr, u32 size = sizeof32(T), u32 align = alignof32(T))
 		{
 			var res;
 
@@ -149,7 +149,7 @@ namespace vm
 		T* m_ptr;
 
 	public:
-		var(u32 count, u32 size = sizeof(T), u32 align = sizeof(T))
+		var(u32 count, u32 size = sizeof32(T), u32 align = alignof32(T))
 			: m_count(count)
 			, m_size(size)
 			, m_align(align)
@@ -172,7 +172,7 @@ namespace vm
 
 		void alloc()
 		{
-			m_addr = Memory.Alloc(size(), m_align);
+			m_addr = vm::alloc(size(), vm::main, std::max<u32>(m_align, 4096));
 			m_ptr = vm::get_ptr<T>(m_addr);
 		}
 
@@ -180,13 +180,13 @@ namespace vm
 		{
 			if (m_addr)
 			{
-				Memory.Free(m_addr);
+				vm::dealloc(m_addr);
 				m_addr = 0;
 				m_ptr = nullptr;
 			}
 		}
 
-		static var make(u32 addr, u32 count, u32 size = sizeof(T), u32 align = sizeof(T))
+		static var make(u32 addr, u32 count, u32 size = sizeof32(T), u32 align = alignof32(T))
 		{
 			var res;
 
@@ -344,7 +344,7 @@ namespace vm
 		T* m_ptr;
 
 	public:
-		var(u32 size = sizeof(T), u32 align = sizeof(T))
+		var(u32 size = sizeof32(T), u32 align = alignof32(T))
 			: m_size(size)
 			, m_align(align)
 		{
@@ -366,7 +366,7 @@ namespace vm
 
 		void alloc()
 		{
-			m_addr = (u32)Memory.Alloc(size(), m_align);
+			m_addr = vm::alloc(size(), vm::main, std::max<u32>(m_align, 4096));
 			m_ptr = vm::get_ptr<T>(m_addr);
 		}
 
@@ -374,7 +374,7 @@ namespace vm
 		{
 			if (m_addr)
 			{
-				Memory.Free(m_addr);
+				vm::dealloc(m_addr);
 				m_addr = 0;
 				m_ptr = vm::get_ptr<T>(0u);
 			}
@@ -539,7 +539,7 @@ namespace vm
 		CPUThread& m_thread;
 
 	public:
-		stackvar(CPUThread& CPU, u32 size = sizeof(T), u32 align = __alignof(T))
+		stackvar(CPUThread& CPU, u32 size = sizeof32(T), u32 align = alignof32(T))
 			: m_data(CPU, size, align)
 			, m_thread(CPU)
 		{
@@ -554,9 +554,12 @@ namespace vm
 
 		stackvar(stackvar&& r) = delete;
 
-		~stackvar()
+		~stackvar() noexcept(false) // allow exceptions
 		{
-			stack_pop(m_thread, m_data.addr, m_data.old_pos);
+			if (!std::uncaught_exception()) // don't call during stack unwinding
+			{
+				stack_pop(m_thread, m_data.addr, m_data.old_pos);
+			}
 		}
 
 		stackvar& operator = (const stackvar& r)
@@ -595,6 +598,16 @@ namespace vm
 		const T& value() const
 		{
 			return *m_data.ptr;
+		}
+
+		T& operator [](u32 index)
+		{
+			return m_data.ptr[index];
+		}
+
+		const T& operator [](u32 index) const
+		{
+			return m_data.ptr[index];
 		}
 
 		u32 addr() const

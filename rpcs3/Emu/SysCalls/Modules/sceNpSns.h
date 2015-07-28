@@ -1,5 +1,7 @@
 #pragma once
 
+namespace vm { using namespace ps3; }
+
 // Return codes
 enum
 {
@@ -22,6 +24,18 @@ enum
 	SCE_NP_SNS_FB_ERROR_UNLOADED_THROTTLE = 0x8002451b,
 	SCE_NP_SNS_FB_ERROR_ACCESS_NOT_ALLOWED = 0x8002451c,
 };
+
+struct SceNpSnsInternal
+{
+	bool m_bSceNpSnsInitialized;
+
+	SceNpSnsInternal()
+		: m_bSceNpSnsInitialized(false)
+	{
+	}
+};
+
+extern std::unique_ptr<SceNpSnsInternal> g_sceNpSns;
 
 // Constants for SNS functions
 enum
