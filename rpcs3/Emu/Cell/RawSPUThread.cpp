@@ -8,43 +8,26 @@
 
 thread_local spu_mfc_arg_t raw_spu_mfc[8] = {};
 
-RawSPUThread::RawSPUThread(CPUThreadType type)
-	: SPUThread(type)
+RawSPUThread::RawSPUThread(const std::string& name, u32 index)
+	: SPUThread(CPU_THREAD_RAW_SPU, name, COPY_EXPR(fmt::format("RawSPU%d[0x%x] Thread (%s)[0x%08x]", index, m_id, m_name.c_str(), PC)), index, RAW_SPU_BASE_ADDR + RAW_SPU_OFFSET * index)
 {
+	if (!vm::falloc(offset, 0x40000))
+	{
+		throw EXCEPTION("Failed to allocate RawSPU local storage");
+	}
 }
 
 RawSPUThread::~RawSPUThread()
 {
-}
+	join();
 
-void RawSPUThread::start()
-{
-	bool do_start;
-
-	status.atomic_op([&do_start](u32& status)
+	if (!vm::dealloc(offset))
 	{
-		if (status & SPU_STATUS_RUNNING)
-		{
-			do_start = false;
-		}
-		else
-		{
-			status = SPU_STATUS_RUNNING;
-			do_start = true;
-		}
-	});
-
-	if (do_start)
-	{
-		// starting thread directly in SIGSEGV handler may cause problems
-		Emu.GetCallbackManager().Async([this](PPUThread& PPU)
-		{
-			FastRun();
-		});
+		throw EXCEPTION("Failed to deallocate RawSPU local storage");
 	}
 }
 
-bool RawSPUThread::ReadReg(const u32 addr, u32& value)
+bool RawSPUThread::read_reg(const u32 addr, u32& value)
 {
 	const u32 offset = addr - RAW_SPU_BASE_ADDR - index * RAW_SPU_OFFSET - RAW_SPU_PROB_OFFSET;
 
@@ -64,7 +47,18 @@ bool RawSPUThread::ReadReg(const u32 addr, u32& value)
 
 	case SPU_Out_MBox_offs:
 	{
-		value = ch_out_mbox.pop_uncond();
+		bool notify;
+
+		std::tie(value, notify) = ch_out_mbox.pop();
+
+		if (notify)
+		{
+			// notify if necessary
+			std::lock_guard<std::mutex> lock(mutex);
+
+			cv.notify_one();
+		}
+
 		return true;
 	}
 
@@ -76,7 +70,7 @@ bool RawSPUThread::ReadReg(const u32 addr, u32& value)
 		
 	case SPU_Status_offs:
 	{
-		value = status.read_relaxed();
+		value = status.load();
 		return true;
 	}
 	}
@@ -85,8 +79,27 @@ bool RawSPUThread::ReadReg(const u32 addr, u32& value)
 	return false;
 }
 
-bool RawSPUThread::WriteReg(const u32 addr, const u32 value)
+bool RawSPUThread::write_reg(const u32 addr, const u32 value)
 {
+	auto try_start = [this]()
+	{
+		if (status.atomic_op([](u32& status) -> bool
+		{
+			if (status & SPU_STATUS_RUNNING)
+			{
+				return false;
+			}
+			else
+			{
+				status = SPU_STATUS_RUNNING;
+				return true;
+			}
+		}))
+		{
+			exec();
+		}
+	};
+
 	const u32 offset = addr - RAW_SPU_BASE_ADDR - index * RAW_SPU_OFFSET - RAW_SPU_PROB_OFFSET;
 
 	switch (offset)
@@ -132,7 +145,7 @@ bool RawSPUThread::WriteReg(const u32 addr, const u32 value)
 
 		if (value & MFC_START_MASK)
 		{
-			start();
+			try_start();
 		}
 
 		return true;
@@ -151,7 +164,7 @@ bool RawSPUThread::WriteReg(const u32 addr, const u32 value)
 
 		if (value)
 		{
-			int2.set(SPU_INT2_STAT_DMA_TAG_GROUP_COMPLETION_INT); // TODO
+			int_ctrl[2].set(SPU_INT2_STAT_DMA_TAG_GROUP_COMPLETION_INT); // TODO
 		}
 
 		return true;
@@ -165,7 +178,14 @@ bool RawSPUThread::WriteReg(const u32 addr, const u32 value)
 
 	case SPU_In_MBox_offs:
 	{
-		ch_in_mbox.push_uncond(value); 
+		if (ch_in_mbox.push(value))
+		{
+			// notify if necessary
+			std::lock_guard<std::mutex> lock(mutex);
+
+			cv.notify_one();
+		}
+
 		return true;
 	}
 
@@ -173,19 +193,19 @@ bool RawSPUThread::WriteReg(const u32 addr, const u32 value)
 	{
 		if (value == SPU_RUNCNTL_RUN_REQUEST)
 		{
-			start();
+			try_start();
 		}
 		else if (value == SPU_RUNCNTL_STOP_REQUEST)
 		{
 			status &= ~SPU_STATUS_RUNNING;
-			FastStop();
+			stop();
 		}
 		else
 		{
 			break;
 		}
 
-		run_ctrl.write_relaxed(value);
+		run_ctrl.store(value);
 		return true;
 	}
 
@@ -196,19 +216,19 @@ bool RawSPUThread::WriteReg(const u32 addr, const u32 value)
 			break;
 		}
 
-		npc.write_relaxed(value);
+		npc.store(value);
 		return true;
 	}
 
 	case SPU_RdSigNotify1_offs:
 	{
-		write_snr(0, value);
+		push_snr(0, value);
 		return true;
 	}
 
 	case SPU_RdSigNotify2_offs:
 	{
-		write_snr(1, value);
+		push_snr(1, value);
 		return true;
 	}
 	}
@@ -217,11 +237,17 @@ bool RawSPUThread::WriteReg(const u32 addr, const u32 value)
 	return false;
 }
 
-void RawSPUThread::Task()
+void RawSPUThread::task()
 {
-	PC = npc.exchange(0) & ~3;
+	// get next PC and SPU Interrupt status
+	PC = npc.exchange(0);
 
-	SPUThread::Task();
+	set_interrupt_status((PC & 1) != 0);
 
-	npc.write_relaxed(PC | 1);
+	PC &= 0x3FFFC;
+
+	SPUThread::task();
+
+	// save next PC and current SPU Interrupt status
+	npc.store(PC | ((ch_event_stat.load() & SPU_EVENT_INTR_ENABLED) != 0));
 }

@@ -1,4 +1,7 @@
 #pragma once
+
+namespace vm { using namespace ps3; }
+
 #include "cellRtc.h"
 
 // Error Codes
@@ -28,6 +31,7 @@ enum
 	SCE_NP_ERROR_ALREADY_USED               = 0x8002aa15,
 	SCE_NP_ERROR_DIFFERENT_USER             = 0x8002aa16,
 	SCE_NP_ERROR_ALREADY_DONE               = 0x8002aa17,
+
 	// NP Basic Utility
 	SCE_NP_BASIC_ERROR_ALREADY_INITIALIZED      = 0x8002a661,
 	SCE_NP_BASIC_ERROR_NOT_INITIALIZED          = 0x8002a662,
@@ -62,6 +66,7 @@ enum
 	SCE_NP_EXT_ERROR_CONTEXT_ALREADY_EXISTS     = 0x8002a6a2,
 	SCE_NP_EXT_ERROR_NO_CONTEXT                 = 0x8002a6a3,
 	SCE_NP_EXT_ERROR_NO_ORIGIN                  = 0x8002a6a4,
+
 	// NP Community Utility
 	SCE_NP_COMMUNITY_ERROR_ALREADY_INITIALIZED          = 0x8002a101,
 	SCE_NP_COMMUNITY_ERROR_NOT_INITIALIZED              = 0x8002a102,
@@ -94,9 +99,125 @@ enum
 	SCE_NP_COMMUNITY_ERROR_TOO_LARGE_RANGE              = 0x8002a1ae,
 	SCE_NP_COMMUNITY_ERROR_INVALID_PARTITION            = 0x8002a1af,
 	SCE_NP_COMMUNITY_ERROR_TOO_MANY_SLOTID              = 0x8002a1b1,
+
+	// NP Matching 2 Utility
+	SCE_NP_MATCHING2_ERROR_OUT_OF_MEMORY               = 0x80022301,
+	SCE_NP_MATCHING2_ERROR_ALREADY_INITIALIZED         = 0x80022302,
+	SCE_NP_MATCHING2_ERROR_NOT_INITIALIZED             = 0x80022303,
+	SCE_NP_MATCHING2_ERROR_CONTEXT_MAX                 = 0x80022304,
+	SCE_NP_MATCHING2_ERROR_CONTEXT_ALREADY_EXISTS      = 0x80022305,
+	SCE_NP_MATCHING2_ERROR_CONTEXT_NOT_FOUND           = 0x80022306,
+	SCE_NP_MATCHING2_ERROR_CONTEXT_ALREADY_STARTED     = 0x80022307,
+	SCE_NP_MATCHING2_ERROR_CONTEXT_NOT_STARTED         = 0x80022308,
+	SCE_NP_MATCHING2_ERROR_SERVER_NOT_FOUND            = 0x80022309,
+	SCE_NP_MATCHING2_ERROR_INVALID_ARGUMENT            = 0x8002230a,
+	SCE_NP_MATCHING2_ERROR_INVALID_CONTEXT_ID          = 0x8002230b,
+	SCE_NP_MATCHING2_ERROR_INVALID_SERVER_ID           = 0x8002230c,
+	SCE_NP_MATCHING2_ERROR_INVALID_WORLD_ID            = 0x8002230d,
+	SCE_NP_MATCHING2_ERROR_INVALID_LOBBY_ID            = 0x8002230e,
+	SCE_NP_MATCHING2_ERROR_INVALID_ROOM_ID             = 0x8002230f,
+	SCE_NP_MATCHING2_ERROR_INVALID_MEMBER_ID           = 0x80022310,
+	SCE_NP_MATCHING2_ERROR_INVALID_ATTRIBUTE_ID        = 0x80022311,
+	SCE_NP_MATCHING2_ERROR_INVALID_CASTTYPE            = 0x80022312,
+	SCE_NP_MATCHING2_ERROR_INVALID_SORT_METHOD         = 0x80022313,
+	SCE_NP_MATCHING2_ERROR_INVALID_MAX_SLOT            = 0x80022314,
+	SCE_NP_MATCHING2_ERROR_INVALID_MATCHING_SPACE      = 0x80022316,
+	SCE_NP_MATCHING2_ERROR_INVALID_BLOCK_KICK_FLAG     = 0x80022318,
+	SCE_NP_MATCHING2_ERROR_INVALID_MESSAGE_TARGET      = 0x80022319,
+	SCE_NP_MATCHING2_ERROR_RANGE_FILTER_MAX            = 0x8002231a,
+	SCE_NP_MATCHING2_ERROR_INSUFFICIENT_BUFFER         = 0x8002231b,
+	SCE_NP_MATCHING2_ERROR_DESTINATION_DISAPPEARED     = 0x8002231c,
+	SCE_NP_MATCHING2_ERROR_REQUEST_TIMEOUT             = 0x8002231d,
+	SCE_NP_MATCHING2_ERROR_INVALID_ALIGNMENT           = 0x8002231e,
+	SCE_NP_MATCHING2_ERROR_REQUEST_CB_QUEUE_OVERFLOW   = 0x8002231f,
+	SCE_NP_MATCHING2_ERROR_EVENT_CB_QUEUE_OVERFLOW     = 0x80022320,
+	SCE_NP_MATCHING2_ERROR_MSG_CB_QUEUE_OVERFLOW       = 0x80022321,
+	SCE_NP_MATCHING2_ERROR_CONNECTION_CLOSED_BY_SERVER = 0x80022322,
+	SCE_NP_MATCHING2_ERROR_SSL_VERIFY_FAILED           = 0x80022323,
+	SCE_NP_MATCHING2_ERROR_SSL_HANDSHAKE               = 0x80022324,
+	SCE_NP_MATCHING2_ERROR_SSL_SEND                    = 0x80022325,
+	SCE_NP_MATCHING2_ERROR_SSL_RECV                    = 0x80022326,
+	SCE_NP_MATCHING2_ERROR_JOINED_SESSION_MAX          = 0x80022327,
+	SCE_NP_MATCHING2_ERROR_ALREADY_JOINED              = 0x80022328,
+	SCE_NP_MATCHING2_ERROR_INVALID_SESSION_TYPE        = 0x80022329,
+	SCE_NP_MATCHING2_ERROR_CLAN_LOBBY_NOT_EXIST        = 0x8002232a,
+	SCE_NP_MATCHING2_ERROR_NP_SIGNED_OUT               = 0x8002232b,
+	SCE_NP_MATCHING2_ERROR_CONTEXT_UNAVAILABLE         = 0x8002232c,
+	SCE_NP_MATCHING2_ERROR_SERVER_NOT_AVAILABLE        = 0x8002232d,
+	SCE_NP_MATCHING2_ERROR_NOT_ALLOWED                 = 0x8002232e,
+	SCE_NP_MATCHING2_ERROR_ABORTED                     = 0x8002232f,
+	SCE_NP_MATCHING2_ERROR_REQUEST_NOT_FOUND           = 0x80022330,
+	SCE_NP_MATCHING2_ERROR_SESSION_DESTROYED           = 0x80022331,
+	SCE_NP_MATCHING2_ERROR_CONTEXT_STOPPED             = 0x80022332,
+	SCE_NP_MATCHING2_ERROR_INVALID_REQUEST_PARAMETER   = 0x80022333,
+	SCE_NP_MATCHING2_ERROR_NOT_NP_SIGN_IN              = 0x80022334,
+	SCE_NP_MATCHING2_ERROR_ROOM_NOT_FOUND              = 0x80022335,
+	SCE_NP_MATCHING2_ERROR_ROOM_MEMBER_NOT_FOUND       = 0x80022336,
+	SCE_NP_MATCHING2_ERROR_LOBBY_NOT_FOUND             = 0x80022337,
+	SCE_NP_MATCHING2_ERROR_LOBBY_MEMBER_NOT_FOUND      = 0x80022338,
+	SCE_NP_MATCHING2_ERROR_EVENT_DATA_NOT_FOUND        = 0x80022339,
+	SCE_NP_MATCHING2_ERROR_KEEPALIVE_TIMEOUT           = 0x8002233a,
+	SCE_NP_MATCHING2_ERROR_TIMEOUT_TOO_SHORT           = 0x8002233b,
+	SCE_NP_MATCHING2_ERROR_TIMEDOUT                    = 0x8002233c,
+	SCE_NP_MATCHING2_ERROR_CREATE_HEAP                 = 0x8002233d,
+	SCE_NP_MATCHING2_ERROR_INVALID_ATTRIBUTE_SIZE      = 0x8002233e,
+	SCE_NP_MATCHING2_ERROR_CANNOT_ABORT                = 0x8002233f,
+
+	SCE_NP_MATCHING2_RESOLVER_ERROR_NO_DNS_SERVER       = 0x800223a2,
+	SCE_NP_MATCHING2_RESOLVER_ERROR_INVALID_PACKET      = 0x800223ad,
+	SCE_NP_MATCHING2_RESOLVER_ERROR_TIMEOUT             = 0x800223b0,
+	SCE_NP_MATCHING2_RESOLVER_ERROR_NO_RECORD           = 0x800223b1,
+	SCE_NP_MATCHING2_RESOLVER_ERROR_RES_PACKET_FORMAT   = 0x800223b2,
+	SCE_NP_MATCHING2_RESOLVER_ERROR_RES_SERVER_FAILURE  = 0x800223b3,
+	SCE_NP_MATCHING2_RESOLVER_ERROR_NO_HOST             = 0x800223b4,
+	SCE_NP_MATCHING2_RESOLVER_ERROR_RES_NOT_IMPLEMENTED = 0x800223b5,
+	SCE_NP_MATCHING2_RESOLVER_ERROR_RES_SERVER_REFUSED  = 0x800223b6,
+	SCE_NP_MATCHING2_RESOLVER_ERROR_RESP_TRUNCATED      = 0x800223bc,
+
+	SCE_NP_MATCHING2_SERVER_ERROR_BAD_REQUEST               = 0x80022b01,
+	SCE_NP_MATCHING2_SERVER_ERROR_SERVICE_UNAVAILABLE       = 0x80022b02,
+	SCE_NP_MATCHING2_SERVER_ERROR_BUSY                      = 0x80022b03,
+	SCE_NP_MATCHING2_SERVER_ERROR_END_OF_SERVICE            = 0x80022b04,
+	SCE_NP_MATCHING2_SERVER_ERROR_INTERNAL_SERVER_ERROR     = 0x80022b05,
+	SCE_NP_MATCHING2_SERVER_ERROR_PLAYER_BANNED             = 0x80022b06,
+	SCE_NP_MATCHING2_SERVER_ERROR_FORBIDDEN                 = 0x80022b07,
+	SCE_NP_MATCHING2_SERVER_ERROR_BLOCKED                   = 0x80022b08,
+	SCE_NP_MATCHING2_SERVER_ERROR_UNSUPPORTED_NP_ENV        = 0x80022b09,
+	SCE_NP_MATCHING2_SERVER_ERROR_INVALID_TICKET            = 0x80022b0a,
+	SCE_NP_MATCHING2_SERVER_ERROR_INVALID_SIGNATURE         = 0x80022b0b,
+	SCE_NP_MATCHING2_SERVER_ERROR_EXPIRED_TICKET            = 0x80022b0c,
+	SCE_NP_MATCHING2_SERVER_ERROR_ENTITLEMENT_REQUIRED      = 0x80022b0d,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_CONTEXT           = 0x80022b0e,
+	SCE_NP_MATCHING2_SERVER_ERROR_CLOSED                    = 0x80022b0f,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_TITLE             = 0x80022b10,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_WORLD             = 0x80022b11,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_LOBBY             = 0x80022b12,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_ROOM              = 0x80022b13,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_LOBBY_INSTANCE    = 0x80022b14,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_ROOM_INSTANCE     = 0x80022b15,
+	SCE_NP_MATCHING2_SERVER_ERROR_PASSWORD_MISMATCH         = 0x80022b17,
+	SCE_NP_MATCHING2_SERVER_ERROR_LOBBY_FULL                = 0x80022b18,
+	SCE_NP_MATCHING2_SERVER_ERROR_ROOM_FULL                 = 0x80022b19,
+	SCE_NP_MATCHING2_SERVER_ERROR_GROUP_FULL                = 0x80022b1b,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_USER              = 0x80022b1c,
+	SCE_NP_MATCHING2_SERVER_ERROR_TITLE_PASSPHRASE_MISMATCH = 0x80022b1e,
+	SCE_NP_MATCHING2_SERVER_ERROR_DUPLICATE_LOBBY           = 0x80022b25,
+	SCE_NP_MATCHING2_SERVER_ERROR_DUPLICATE_ROOM            = 0x80022b26,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_JOIN_GROUP_LABEL       = 0x80022b29,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_SUCH_GROUP             = 0x80022b2a,
+	SCE_NP_MATCHING2_SERVER_ERROR_NO_PASSWORD               = 0x80022b2b,
+	SCE_NP_MATCHING2_SERVER_ERROR_MAX_OVER_SLOT_GROUP       = 0x80022b2c,
+	SCE_NP_MATCHING2_SERVER_ERROR_MAX_OVER_PASSWORD_MASK    = 0x80022b2d,
+	SCE_NP_MATCHING2_SERVER_ERROR_DUPLICATE_GROUP_LABEL     = 0x80022b2e,
+	SCE_NP_MATCHING2_SERVER_ERROR_REQUEST_OVERFLOW          = 0x80022b2f,
+	SCE_NP_MATCHING2_SERVER_ERROR_ALREADY_JOINED            = 0x80022b30,
+	SCE_NP_MATCHING2_SERVER_ERROR_NAT_TYPE_MISMATCH         = 0x80022b31,
+	SCE_NP_MATCHING2_SERVER_ERROR_ROOM_INCONSISTENCY        = 0x80022b32,
+	// SCE_NP_MATCHING2_NET_ERRNO_BASE   = 0x800224XX,
+	// SCE_NP_MATCHING2_NET_H_ERRNO_BASE = 0x800225XX,
 };
 
-typedef int(*SceNpBasicEventHandler)(s32 event, s32 retCode, u32 reqId, vm::ptr<void> arg);
+using SceNpBasicEventHandler = func_def<s32(s32 event, s32 retCode, u32 reqId, vm::ptr<void> arg)>;
 
 // NP Manager Utility statuses
 enum
@@ -686,44 +807,75 @@ enum
 	SCE_NP_SIGNALING_CTX_MAX = 8,
 };
 
+struct SceNpInternal
+{
+	bool m_bSceNpInitialized;
+	bool m_bScoreInitialized;
+	bool m_bLookupInitialized;
+
+	SceNpInternal()
+		: m_bSceNpInitialized(false),
+		  m_bScoreInitialized(false),
+		  m_bLookupInitialized(false)
+	{
+	}
+};
+
+struct SceNp2Internal
+{
+	bool m_bSceNp2Initialized;
+	bool m_bSceNp2Matching2Initialized;
+	bool m_bSceNp2Matching2Initialized2;
+
+	SceNp2Internal()
+		: m_bSceNp2Initialized(false),
+		  m_bSceNp2Matching2Initialized(false),
+		  m_bSceNp2Matching2Initialized2(false)
+	{
+	}
+};
+
+extern std::unique_ptr<SceNpInternal> g_sceNp;
+extern std::unique_ptr<SceNp2Internal> g_sceNp2;
+
 // NP communication ID structure
 struct SceNpCommunicationId
 {
-	s8 data[9];
-	s8 term;
+	char data[9];
+	char term;
 	u8 num;
-	//s8 dummy;
+	char dummy;
 };
 
 // OnlineId structure
 struct SceNpOnlineId
 {
-	s8 data[16];
-	s8 term;
-	//s8 dummy[3];
+	char data[16];
+	char term;
+	char dummy[3];
 };
 
 // NP ID structure
 struct SceNpId
 {
 	SceNpOnlineId handle;
-	//u8 opt[8];
-	//u8 reserved[8];
+	u8 opt[8];
+	u8 reserved[8];
 };
 
 // Online Name structure
 struct SceNpOnlineName
 {
-	s8 data[48];
-	s8 term;
-	s8 padding[3];
+	char data[48];
+	char term;
+	char padding[3];
 };
 
 // Avatar structure
 struct SceNpAvatarUrl
 {
-	s8 data[127];
-	s8 term;
+	char data[127];
+	char term;
 };
 
 // Avatar image structure
@@ -731,14 +883,14 @@ struct SceNpAvatarImage
 {
 	u8 data[SCE_NET_NP_AVATAR_IMAGE_MAX_SIZE];
 	be_t<u32> size;
-	//u8 reserved[12];
+	u8 reserved[12];
 };
 
 // Self introduction structure
 struct SceNpAboutMe
 {
-	s8 data[SCE_NET_NP_ABOUT_ME_MAX_LENGTH];
-	s8 term;
+	char data[SCE_NET_NP_ABOUT_ME_MAX_LENGTH];
+	char term;
 };
 
 // User information structure
@@ -749,12 +901,12 @@ struct SceNpUserInfo
 	SceNpAvatarUrl icon;
 };
 
-// User information structure (pointer version)
+// User information structure
 struct SceNpUserInfo2
 {
 	SceNpId npId;
-	SceNpOnlineName onlineName;
-	SceNpAvatarUrl avatarUrl;
+	vm::bptr<SceNpOnlineName> onlineName;
+	vm::bptr<SceNpAvatarUrl> avatarUrl;
 };
 
 // Often used languages structure
@@ -781,6 +933,7 @@ struct SceNpCommunicationSignature
 // NP cache information structure
 struct SceNpManagerCacheParam
 {
+	be_t<u32> size;
 	SceNpOnlineId onlineId;
 	SceNpId npId;
 	SceNpOnlineName onlineName;
@@ -790,7 +943,7 @@ struct SceNpManagerCacheParam
 // Message attachment data
 struct SceNpBasicAttachmentData
 {
-	be_t<u32> id;
+	be_t<u32> id; // SceNpBasicAttachmentDataId
 	be_t<u32> size;
 };
 
@@ -870,8 +1023,7 @@ typedef void(SceNpManagerCallback)(s32 event, s32 result, u32 arg_addr);
 
 // Request callback function
 typedef void(*SceNpMatching2RequestCallback)(u16 ctxId, u32 reqId, u16 event,
-	                                         u32 eventKey, s32 errorCode, u32 dataSize, u32 *arg
-	);
+	                                         u32 eventKey, s32 errorCode, u32 dataSize, u32 *arg);
 
 // NOTE: Use SceNpCommunicationPassphrase instead
 // Np communication passphrase
@@ -1063,10 +1215,13 @@ struct SceNpMatching2LobbyDataInternal
 union SceNpMatching2LobbyMessageDestination
 {
 	be_t<u16> unicastTarget;
-	struct multicastTarget {
-		be_t<u16> *memberId;
+
+	struct
+	{
+		vm::bptr<u16> memberId;
 		be_t<u32> memberIdNum;
-	};
+	}
+	multicastTarget;
 };
 
 // Group label
@@ -1230,7 +1385,7 @@ struct SceNpMatching2SignalingOptParam
 	u8 type;
 	u8 reserved1[1];
 	be_t<u16> hubMemberId;
-	//u8 reserved2[4];
+	u8 reserved2[4];
 };
 
 // Option parameters for requests
@@ -1691,7 +1846,7 @@ struct SceNpMatching2GetLobbyMemberDataInternalListResponse
 struct SceNpMatching2SignalingGetPingInfoRequest
 {
 	be_t<u64> roomId;
-	//u8 reserved[16];
+	u8 reserved[16];
 };
 
 // Response data for obtaining Ping information
@@ -1702,7 +1857,7 @@ struct SceNpMatching2SignalingGetPingInfoResponse
 	be_t<u32> worldId;
 	be_t<u64> roomId;
 	be_t<u32> rtt;
-	//u8 reserved[20];
+	u8 reserved[20];
 };
 
 // Join request parameters for room in prohibitive mode
@@ -1845,7 +2000,7 @@ struct SceNpMatching2UtilityInitParam
 	be_t<u32> requestCbQueueLen;
 	be_t<u32> sessionEventCbQueueLen;;
 	be_t<u32> sessionMsgCbQueueLen;;
-	//u8 reserved[16];
+	u8 reserved[16];
 };
 
 // Matching2 memory information
@@ -1854,7 +2009,7 @@ struct SceNpMatching2MemoryInfo
 	be_t<u32> totalMemSize;
 	be_t<u32> curMemUsage;;
 	be_t<u32> maxMemUsage;;
-	//u8 reserved[12];
+	u8 reserved[12];
 };
 
 // Matching2 information on the event data queues in the system
@@ -1869,7 +2024,7 @@ struct SceNpMatching2CbQueueInfo
 	be_t<u32> sessionMsgCbQueueLen;;
 	be_t<u32> curSessionMsgCbQueueLen;;
 	be_t<u32> maxSessionMsgCbQueueLen;;
-	//u8 reserved[12];
+	u8 reserved[12];
 };
 
 // Score data unique to the application
@@ -1927,7 +2082,7 @@ struct SceNpScoreNpIdPcId
 {
 	SceNpId npId;
 	be_t<s32> pcId;
-	//u8 pad[4];
+	u8 pad[4];
 };
 
 // Basic clan information to be used in raking
@@ -1935,7 +2090,7 @@ struct SceNpScoreClanBasicInfo
 {
 	s8 clanName[SCE_NP_CLANS_CLAN_NAME_MAX_LENGTH + 1];
 	s8 clanTag[SCE_NP_CLANS_CLAN_TAG_MAX_LENGTH + 1];
-	//u8 reserved[10];
+	u8 reserved[10];
 };
 
 // Clan member information handled in ranking
@@ -1969,7 +2124,8 @@ struct SceNpScoreClanIdRankData
 };
 
 // Union for connection information
-union SceNpSignalingConnectionInfo {
+union SceNpSignalingConnectionInfo
+{
 	be_t<u32> rtt;
 	be_t<u32> bandwidth;
 	SceNpId npId;

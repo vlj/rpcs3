@@ -63,7 +63,7 @@ std::string SysCalls::GetFuncName(const u64 fid)
 	case 81: return "sys_interrupt_tag_destroy";
 	case 82: return "sys_event_flag_create";
 	case 83: return "sys_event_flag_destroy";
-	case 84: return "sys_interrupt_thread_establish";
+	case 84: return "_sys_interrupt_thread_establish";
 	case 85: return "sys_event_flag_wait";
 	case 86: return "sys_event_flag_trywait";
 	case 87: return "sys_event_flag_set";
@@ -125,7 +125,7 @@ std::string SysCalls::GetFuncName(const u64 fid)
 	case 145: return "sys_time_get_current_time";
 	case 146: return "sys_time_get_system_time";
 	case 147: return "sys_time_get_timebase_frequency";
-	case 148: return "sys_rwlock_trywlock";
+	case 148: return "_sys_rwlock_trywlock";
 	case 150: return "sys_raw_spu_create_interrupt_tag";
 	case 151: return "sys_raw_spu_set_int_mask";
 	case 152: return "sys_raw_spu_get_int_mask";

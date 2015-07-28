@@ -2,35 +2,31 @@
 #include "Emu/CPU/CPUThread.h"
 #include "ARMv7Context.h"
 
-class ARMv7Thread : public CPUThread
+class ARMv7Thread final : public CPUThread, public ARMv7Context
 {
 public:
-	ARMv7Context context;
-
-	ARMv7Thread();
-	~ARMv7Thread();
+	std::function<void(ARMv7Thread&)> custom_task;
 
 public:
-	virtual void InitRegs(); 
-	virtual void InitStack();
-	virtual void CloseStack();
-	u32 GetStackArg(u32 pos);
-	void FastCall(u32 addr);
-	void FastStop();
-	virtual void DoRun();
+	ARMv7Thread(const std::string& name);
+	virtual ~ARMv7Thread() override;
 
-public:
-	virtual std::string RegsToString();
-	virtual std::string ReadRegString(const std::string& reg);
-	virtual bool WriteRegString(const std::string& reg, std::string value);
+	virtual void dump_info() const override;
+	virtual u32 get_pc() const override { return PC; }
+	virtual u32 get_offset() const override { return 0; }
+	virtual void do_run() override;
+	virtual void task() override;
 
-protected:
-	virtual void DoReset();
-	virtual void DoPause();
-	virtual void DoResume();
-	virtual void DoStop();
+	virtual void init_regs() override; 
+	virtual void init_stack() override;
+	virtual void close_stack() override;
+	u32 get_stack_arg(u32 pos);
+	void fast_call(u32 addr);
+	void fast_stop();
 
-	virtual void DoCode();
+	virtual std::string RegsToString() const override;
+	virtual std::string ReadRegString(const std::string& reg) const override;
+	virtual bool WriteRegString(const std::string& reg, std::string value) override;
 };
 
 class armv7_thread : cpu_thread

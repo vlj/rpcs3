@@ -34,6 +34,7 @@
     <ClCompile Include="..\Utilities\StrFmt.cpp" />
     <ClCompile Include="..\Utilities\Thread.cpp" />
     <ClCompile Include="Emu\Cell\PPUInterpreter.cpp" />
+    <ClCompile Include="Emu\Cell\PPULLVMRecompilerCore.cpp" />
     <ClCompile Include="Emu\Cell\SPUInterpreter.cpp" />
     <ClCompile Include="Emu\RSX\CgBinaryFragmentProgram.cpp" />
     <ClCompile Include="Emu\RSX\CgBinaryVertexProgram.cpp" />
@@ -50,6 +51,7 @@
     <ClCompile Include="Emu\RSX\D3D12\D3D12VertexProgramDecompiler.cpp" />
     <ClCompile Include="Emu\RSX\D3D12\D3D12CommonDecompiler.cpp" />
     <ClCompile Include="Emu\RSX\GL\GLCommonDecompiler.cpp" />
+    <ClCompile Include="Emu\SysCalls\lv2\sys_dbg.cpp" />
     <ClCompile Include="Emu\SysCalls\lv2\sys_fs.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellFs.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellSpursSpu.cpp" />
@@ -152,7 +154,6 @@
     <ClCompile Include="Emu\Cell\PPUThread.cpp" />
     <ClCompile Include="Emu\Cell\RawSPUThread.cpp" />
     <ClCompile Include="Emu\Cell\SPURecompilerCore.cpp" />
-    <ClCompile Include="Emu\Cell\SPURSManager.cpp" />
     <ClCompile Include="Emu\Cell\SPUThread.cpp" />
     <ClCompile Include="Emu\CPU\CPUThread.cpp" />
     <ClCompile Include="Emu\CPU\CPUThreadManager.cpp" />
@@ -183,7 +184,6 @@
     <ClCompile Include="Emu\RSX\GL\OpenGL.cpp" />
     <ClCompile Include="Emu\RSX\GSManager.cpp" />
     <ClCompile Include="Emu\RSX\GSRender.cpp" />
-    <ClCompile Include="Emu\RSX\RSXDMA.cpp" />
     <ClCompile Include="Emu\RSX\RSXTexture.cpp" />
     <ClCompile Include="Emu\RSX\RSXThread.cpp" />
     <ClCompile Include="Emu\Memory\vm.cpp" />
@@ -236,7 +236,6 @@
     <ClCompile Include="Emu\SysCalls\Modules\cellJpgEnc.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellKey2char.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellL10n.cpp" />
-    <ClCompile Include="Emu\SysCalls\Modules\cellLv2dbg.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellMic.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellMsgDialog.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellMusicDecode.cpp" />
@@ -278,6 +277,7 @@
     <ClCompile Include="Emu\SysCalls\Modules\libsnd3.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\libsynth2.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\sceNp.cpp" />
+    <ClCompile Include="Emu\SysCalls\Modules\sceNp2.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\sceNpClans.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\sceNpCommerce2.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\sceNpSns.cpp" />
@@ -286,7 +286,9 @@
     <ClCompile Include="Emu\SysCalls\Modules\cellKb.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellMouse.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\cellPad.cpp" />
+    <ClCompile Include="Emu\SysCalls\Modules\sceNpUtil.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\sysPrxForUser.cpp" />
+    <ClCompile Include="Emu\SysCalls\Modules\sys_lv2dbg.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\sys_http.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\sys_io.cpp" />
     <ClCompile Include="Emu\SysCalls\Modules\sys_libc.cpp" />
@@ -352,14 +354,64 @@
     <ClInclude Include="Emu\ARMv7\Modules\psv_event_flag.h" />
     <ClInclude Include="Emu\ARMv7\Modules\psv_mutex.h" />
     <ClInclude Include="Emu\ARMv7\Modules\psv_sema.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceAppMgr.h" />
     <ClInclude Include="Emu\ARMv7\Modules\sceAppUtil.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceAudio.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceAudiodec.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceAudioenc.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceAudioIn.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceCamera.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceCodecEngine.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceCommonDialog.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceCtrl.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceDbg.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceDeci4p.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceDeflt.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceDisplay.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceFiber.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceFios.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceFpu.h" />
     <ClInclude Include="Emu\ARMv7\Modules\sceGxm.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceHttp.h" />
     <ClInclude Include="Emu\ARMv7\Modules\sceIme.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceJpeg.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceJpegEnc.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceLibc.h" />
     <ClInclude Include="Emu\ARMv7\Modules\sceLibKernel.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceLibm.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceLibstdcxx.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceLiveArea.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceLocation.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceMd5.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceMotion.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceMt19937.h" />
     <ClInclude Include="Emu\ARMv7\Modules\sceNet.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceNetCtl.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceNgs.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceNpBasic.h" />
     <ClInclude Include="Emu\ARMv7\Modules\sceNpCommon.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceNpManager.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceNpMatching.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceNpScore.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceNpUtility.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\scePerf.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\scePgf.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\scePhotoExport.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceRazorCapture.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceRtc.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceSas.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceScreenShot.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceSqlite.h" />
     <ClInclude Include="Emu\ARMv7\Modules\sceSsl.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceSulpha.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceSysmodule.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceSystemGesture.h" />
     <ClInclude Include="Emu\ARMv7\Modules\sceTouch.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceUlt.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceVideodec.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceVoice.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceVoiceQoS.h" />
+    <ClInclude Include="Emu\ARMv7\Modules\sceXml.h" />
     <ClInclude Include="Emu\ARMv7\PSVFuncList.h" />
     <ClInclude Include="Emu\ARMv7\PSVObjectList.h" />
     <ClInclude Include="Emu\Audio\AL\OpenALThread.h" />
@@ -388,7 +440,6 @@
     <ClInclude Include="Emu\Cell\SPUInterpreter2.h" />
     <ClInclude Include="Emu\Cell\SPUOpcodes.h" />
     <ClInclude Include="Emu\Cell\SPURecompiler.h" />
-    <ClInclude Include="Emu\Cell\SPURSManager.h" />
     <ClInclude Include="Emu\Cell\SPUThread.h" />
     <ClInclude Include="Emu\CPU\CPUDecoder.h" />
     <ClInclude Include="Emu\CPU\CPUDisAsm.h" />
@@ -450,7 +501,6 @@
     <ClInclude Include="Emu\RSX\GSManager.h" />
     <ClInclude Include="Emu\RSX\GSRender.h" />
     <ClInclude Include="Emu\RSX\Null\NullGSRender.h" />
-    <ClInclude Include="Emu\RSX\RSXDMA.h" />
     <ClInclude Include="Emu\RSX\RSXFragmentProgram.h" />
     <ClInclude Include="Emu\RSX\RSXTexture.h" />
     <ClInclude Include="Emu\RSX\RSXThread.h" />
@@ -466,6 +516,7 @@
     <ClInclude Include="Emu\SysCalls\LogBase.h" />
     <ClInclude Include="Emu\SysCalls\lv2\sleep_queue.h" />
     <ClInclude Include="Emu\SysCalls\lv2\sys_cond.h" />
+    <ClInclude Include="Emu\SysCalls\lv2\sys_dbg.h" />
     <ClInclude Include="Emu\SysCalls\lv2\sys_event.h" />
     <ClInclude Include="Emu\SysCalls\lv2\sys_event_flag.h" />
     <ClInclude Include="Emu\SysCalls\lv2\sys_fs.h" />
@@ -492,6 +543,8 @@
     <ClInclude Include="Emu\SysCalls\Modules\cellAdec.h" />
     <ClInclude Include="Emu\SysCalls\Modules\cellAtrac.h" />
     <ClInclude Include="Emu\SysCalls\Modules\cellAudio.h" />
+    <ClInclude Include="Emu\SysCalls\Modules\cellAudioIn.h" />
+    <ClInclude Include="Emu\SysCalls\Modules\cellAudioOut.h" />
     <ClInclude Include="Emu\SysCalls\Modules\cellCamera.h" />
     <ClInclude Include="Emu\SysCalls\Modules\cellDmux.h" />
     <ClInclude Include="Emu\SysCalls\Modules\cellFiber.h" />
@@ -539,7 +592,9 @@
     <ClInclude Include="Emu\SysCalls\Modules\sceNpTus.h" />
     <ClInclude Include="Emu\SysCalls\Modules\cellKb.h" />
     <ClInclude Include="Emu\SysCalls\Modules\cellMouse.h" />
+    <ClInclude Include="Emu\SysCalls\Modules\sceNpUtil.h" />
     <ClInclude Include="Emu\SysCalls\Modules\sysPrxForUser.h" />
+    <ClInclude Include="Emu\SysCalls\Modules\sys_lv2dbg.h" />
     <ClInclude Include="Emu\SysCalls\Modules\sys_net.h" />
     <ClInclude Include="Emu\SysCalls\SC_FUNC.h" />
     <ClInclude Include="Emu\SysCalls\SysCalls.h" />
@@ -592,6 +647,9 @@
     <PlatformToolset>v140</PlatformToolset>
     <WholeProgramOptimization>false</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug - MemLeak|Win32'">
+    <PlatformToolset>v140</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">

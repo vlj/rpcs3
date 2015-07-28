@@ -9,6 +9,11 @@ AudioManager::AudioManager() : m_audio_out(nullptr)
 {
 }
 
+AudioManager::~AudioManager()
+{
+	Close();
+}
+
 void AudioManager::Init()
 {
 	if (m_audio_out) return;
@@ -30,9 +35,4 @@ void AudioManager::Close()
 {
 	delete m_audio_out;
 	m_audio_out = nullptr;
-}
-
-u8 AudioManager::GetState()
-{
-	return CELL_AUDIO_OUT_OUTPUT_STATE_ENABLED;
 }

@@ -2,112 +2,262 @@
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
 #include "Emu/SysCalls/Modules.h"
+#include "Utilities/Log.h"
 
+#include "rpcs3/Ini.h"
 #include "cellSysutil.h"
 #include "cellNetCtl.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <iphlpapi.h>
+
+#pragma comment(lib, "iphlpapi.lib")
+#else
+#include <unistd.h>
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <netinet/in.h>
+#include <net/if.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <ifaddrs.h>
+#endif
+
 extern Module cellNetCtl;
 
-struct cellNetCtlInternal
-{
-	bool m_bInitialized;
+std::unique_ptr<CellNetCtlInternal> g_netCtl;
 
-	cellNetCtlInternal()
-		: m_bInitialized(false)
+s32 cellNetCtlInit()
+{
+	cellNetCtl.Log("cellNetCtlInit()");
+
+	if (g_netCtl->m_bInitialized)
 	{
-	}
-};
-
-cellNetCtlInternal cellNetCtlInstance;
-
-int cellNetCtlInit()
-{
-	cellNetCtl.Warning("cellNetCtlInit()");
-
-	if (cellNetCtlInstance.m_bInitialized)
 		return CELL_NET_CTL_ERROR_NOT_TERMINATED;
+	}
 
-	cellNetCtlInstance.m_bInitialized = true;
+	g_netCtl->m_bInitialized = true;
 
 	return CELL_OK;
 }
 
-int cellNetCtlTerm()
+s32 cellNetCtlTerm()
 {
-	cellNetCtl.Warning("cellNetCtlTerm()");
+	cellNetCtl.Log("cellNetCtlTerm()");
 
-	if (!cellNetCtlInstance.m_bInitialized)
+	if (!g_netCtl->m_bInitialized)
+	{
 		return CELL_NET_CTL_ERROR_NOT_INITIALIZED;
+	}
 
-	cellNetCtlInstance.m_bInitialized = false;
+	g_netCtl->m_bInitialized = false;
 
 	return CELL_OK;
 }
 
-int cellNetCtlGetState(vm::ptr<u32> state)
+s32 cellNetCtlGetState(vm::ptr<u32> state)
 {
-	cellNetCtl.Warning("cellNetCtlGetState(state_addr=0x%x)", state.addr());
+	cellNetCtl.Log("cellNetCtlGetState(state=*0x%x)", state);
 
-	*state = CELL_NET_CTL_STATE_Disconnected; // TODO: Allow other states
+	if (Ini.NETStatus.GetValue() == 0)
+	{
+		*state = CELL_NET_CTL_STATE_IPObtained;
+	}
+	else if (Ini.NETStatus.GetValue() == 1)
+	{
+		*state = CELL_NET_CTL_STATE_IPObtaining;
+	}
+	else if (Ini.NETStatus.GetValue() == 2)
+	{
+		*state = CELL_NET_CTL_STATE_Connecting;
+	}
+	else
+	{
+		*state = CELL_NET_CTL_STATE_Disconnected;
+	}
 
 	return CELL_OK;
 }
 
-int cellNetCtlAddHandler(vm::ptr<cellNetCtlHandler> handler, vm::ptr<void> arg, vm::ptr<s32> hid)
+s32 cellNetCtlAddHandler(vm::ptr<cellNetCtlHandler> handler, vm::ptr<void> arg, vm::ptr<s32> hid)
 {
-	cellNetCtl.Todo("cellNetCtlAddHandler(handler_addr=0x%x, arg_addr=0x%x, hid_addr=0x%x)", handler.addr(), arg.addr(), hid.addr());
+	cellNetCtl.Todo("cellNetCtlAddHandler(handler=*0x%x, arg=*0x%x, hid=*0x%x)", handler, arg, hid);
 
 	return CELL_OK;
 }
 
-int cellNetCtlDelHandler(s32 hid)
+s32 cellNetCtlDelHandler(s32 hid)
 {
 	cellNetCtl.Todo("cellNetCtlDelHandler(hid=0x%x)", hid);
 
 	return CELL_OK;
 }
 
-int cellNetCtlGetInfo(s32 code, vm::ptr<CellNetCtlInfo> info)
+s32 cellNetCtlGetInfo(s32 code, vm::ptr<CellNetCtlInfo> info)
 {
-	cellNetCtl.Todo("cellNetCtlGetInfo(code=0x%x, info_addr=0x%x)", code, info.addr());
+	cellNetCtl.Todo("cellNetCtlGetInfo(code=0x%x (%s), info=*0x%x)", code, InfoCodeToName(code), info);
 
 	if (code == CELL_NET_CTL_INFO_IP_ADDRESS)
 	{
-		strcpy_trunc(info->ip_address, "192.168.1.1");
+#ifdef _WIN32
+		PIP_ADAPTER_INFO pAdapterInfo;
+		pAdapterInfo = (IP_ADAPTER_INFO*) malloc(sizeof(IP_ADAPTER_INFO));
+		ULONG buflen = sizeof(IP_ADAPTER_INFO);
+
+		if (GetAdaptersInfo(pAdapterInfo, &buflen) == ERROR_BUFFER_OVERFLOW)
+		{
+			free(pAdapterInfo);
+			pAdapterInfo = (IP_ADAPTER_INFO*) malloc(buflen);
+		}
+
+		if (GetAdaptersInfo(pAdapterInfo, &buflen) == NO_ERROR)
+		{
+			PIP_ADAPTER_INFO pAdapter = pAdapterInfo;
+
+			for (int c = 0; c < Ini.NETInterface.GetValue(); c++)
+			{
+				pAdapter = pAdapter->Next;
+			}
+
+			strcpy_trunc(info->ip_address, pAdapter->IpAddressList.IpAddress.String);
+		}
+		else
+		{
+			cellNetCtl.Error("cellNetCtlGetInfo(IP_ADDRESS): Call to GetAdaptersInfo failed.");
+			// 0.0.0.0 seems to be the default address when no ethernet cables are connected to the PS3
+			strcpy_trunc(info->ip_address, "0.0.0.0");
+		}
+#else
+		struct ifaddrs *ifaddr, *ifa;
+		int family, s, n;
+		char host[NI_MAXHOST];
+
+		if (getifaddrs(&ifaddr) == -1)
+		{
+			LOG_ERROR(HLE, "Call to getifaddrs returned negative.");
+		}
+
+		for (ifa = ifaddr, n = 0; ifa != NULL; ifa = ifa->ifa_next, n++)
+		{
+			if (ifa->ifa_addr == NULL)
+			{
+				continue;
+			}
+
+			if (n < Ini.NETInterface.GetValue())
+			{
+				continue;
+			}
+
+			family = ifa->ifa_addr->sa_family;
+
+			if (family == AF_INET)
+			{
+				strcpy_trunc(info->ip_address, ifa->ifa_addr->sa_data);
+			}
+		}
+
+		freeifaddrs(ifaddr);
+#endif
+	}
+	else if (code == CELL_NET_CTL_INFO_NETMASK)
+	{
+#ifdef _WIN32
+		PIP_ADAPTER_INFO pAdapterInfo;
+		pAdapterInfo = (IP_ADAPTER_INFO*)malloc(sizeof(IP_ADAPTER_INFO));
+		ULONG buflen = sizeof(IP_ADAPTER_INFO);
+
+		if (GetAdaptersInfo(pAdapterInfo, &buflen) == ERROR_BUFFER_OVERFLOW)
+		{
+			free(pAdapterInfo);
+			pAdapterInfo = (IP_ADAPTER_INFO*)malloc(buflen);
+		}
+
+		if (GetAdaptersInfo(pAdapterInfo, &buflen) == NO_ERROR)
+		{
+			PIP_ADAPTER_INFO pAdapter = pAdapterInfo;
+
+			for (int c = 0; c < Ini.NETInterface.GetValue(); c++)
+			{
+				pAdapter = pAdapter->Next;
+			}
+
+			strcpy_trunc(info->ip_address, pAdapter->IpAddressList.IpMask.String);
+		}
+		else
+		{
+			cellNetCtl.Error("cellNetCtlGetInfo(INFO_NETMASK): Call to GetAdaptersInfo failed.");
+			// TODO: What would be the default netmask? 255.255.255.0?
+		}
+#else
+		struct ifaddrs *ifaddr, *ifa;
+		int family, s, n;
+		char host[NI_MAXHOST];
+
+		if (getifaddrs(&ifaddr) == -1)
+		{
+			LOG_ERROR(HLE, "Call to getifaddrs returned negative.");
+		}
+
+		for (ifa = ifaddr, n = 0; ifa != NULL; ifa = ifa->ifa_next, n++)
+		{
+			if (ifa->ifa_addr == NULL)
+			{
+				continue;
+			}
+
+			if (n < Ini.NETInterface.GetValue())
+			{
+				continue;
+			}
+
+			family = ifa->ifa_addr->sa_family;
+
+			if (family == AF_INET)
+			{
+				strcpy_trunc(info->ip_address, ifa->ifa_netmask->sa_data);
+			}
+	}
+
+		freeifaddrs(ifaddr);
+#endif
 	}
 
 	return CELL_OK;
 }
 
-int cellNetCtlNetStartDialogLoadAsync(vm::ptr<CellNetCtlNetStartDialogParam> param)
+s32 cellNetCtlNetStartDialogLoadAsync(vm::ptr<CellNetCtlNetStartDialogParam> param)
 {
-	cellNetCtl.Warning("cellNetCtlNetStartDialogLoadAsync(param_addr=0x%x)", param.addr());
+	cellNetCtl.Warning("cellNetCtlNetStartDialogLoadAsync(param=*0x%x)", param);
 
-	// TODO: Actually sign into PSN
+	// TODO: Actually sign into PSN or an emulated network similar to PSN
 	sysutilSendSystemCommand(CELL_SYSUTIL_NET_CTL_NETSTART_FINISHED, 0);
 
 	return CELL_OK;
 }
 
-int cellNetCtlNetStartDialogAbortAsync()
+s32 cellNetCtlNetStartDialogAbortAsync()
 {
 	cellNetCtl.Todo("cellNetCtlNetStartDialogAbortAsync()");
 
 	return CELL_OK;
 }
 
-int cellNetCtlNetStartDialogUnloadAsync(vm::ptr<CellNetCtlNetStartDialogResult> result)
+s32 cellNetCtlNetStartDialogUnloadAsync(vm::ptr<CellNetCtlNetStartDialogResult> result)
 {
-	cellNetCtl.Warning("cellNetCtlNetStartDialogUnloadAsync(result_addr=0x%x)", result.addr());
+	cellNetCtl.Warning("cellNetCtlNetStartDialogUnloadAsync(result=*0x%x)", result);
 
 	sysutilSendSystemCommand(CELL_SYSUTIL_NET_CTL_NETSTART_UNLOADED, 0);
 
 	return CELL_OK;
 }
 
-int cellNetCtlGetNatInfo(vm::ptr<CellNetCtlNatInfo> natInfo)
+s32 cellNetCtlGetNatInfo(vm::ptr<CellNetCtlNatInfo> natInfo)
 {
-	cellNetCtl.Todo("cellNetCtlGetNatInfo(natInfo_addr=0x%x)", natInfo.addr());
+	cellNetCtl.Todo("cellNetCtlGetNatInfo(natInfo=*0x%x)", natInfo);
 
 	if (natInfo->size == 0)
 	{
@@ -120,7 +270,7 @@ int cellNetCtlGetNatInfo(vm::ptr<CellNetCtlNatInfo> natInfo)
 
 Module cellNetCtl("cellNetCtl", []()
 {
-	cellNetCtlInstance.m_bInitialized = false;
+	g_netCtl = std::make_unique<CellNetCtlInternal>();
 
 	REG_FUNC(cellNetCtl, cellNetCtlInit);
 	REG_FUNC(cellNetCtl, cellNetCtlTerm);

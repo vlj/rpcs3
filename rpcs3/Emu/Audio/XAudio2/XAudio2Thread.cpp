@@ -8,14 +8,17 @@
 
 XAudio2Thread::~XAudio2Thread()
 {
-	if (m_source_voice) Quit();
+	Quit();
+}
+
+XAudio2Thread::XAudio2Thread() : m_xaudio2_instance(nullptr), m_master_voice(nullptr), m_source_voice(nullptr)
+{
 }
 
 void XAudio2Thread::Init()
 {
 	HRESULT hr = S_OK;
 
-#if (FORCED_WINVER < 0x0602)
 	hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 	if (FAILED(hr))
 	{
@@ -23,7 +26,6 @@ void XAudio2Thread::Init()
 		Emu.Pause();
 		return;
 	}
-#endif
 
 	hr = XAudio2Create(&m_xaudio2_instance, 0, XAUDIO2_DEFAULT_PROCESSOR);
 	if (FAILED(hr))
@@ -44,18 +46,25 @@ void XAudio2Thread::Init()
 
 void XAudio2Thread::Quit()
 {
-	Stop();
-	m_source_voice->DestroyVoice();
-	m_source_voice = nullptr;
-	m_master_voice->DestroyVoice();
-	m_master_voice = nullptr;
-	m_xaudio2_instance->StopEngine();
-	m_xaudio2_instance->Release();
-	m_xaudio2_instance = nullptr;
+	if (m_source_voice != nullptr) 
+	{
+		Stop();
+		m_source_voice->DestroyVoice();
+		m_source_voice = nullptr;
+	}
+	if (m_master_voice != nullptr)
+	{
+		m_master_voice->DestroyVoice();
+		m_master_voice = nullptr;
+	}
+	if (m_xaudio2_instance != nullptr)
+	{
+		m_xaudio2_instance->StopEngine();
+		m_xaudio2_instance->Release();
+		m_xaudio2_instance = nullptr;
+	}
 
-#if (FORCED_WINVER < 0x0602)
 	CoUninitialize();
-#endif
 }
 
 void XAudio2Thread::Play()

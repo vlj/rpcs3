@@ -1,8 +1,7 @@
 #pragma once
 #include "Emu/RSX/GSRender.h"
 
-class NullGSRender
-	: public GSRender
+class NullGSRender final : public GSRender
 {
 public:
 
@@ -10,24 +9,28 @@ public:
 	{
 	}
 
-	virtual ~NullGSRender()
+	virtual ~NullGSRender() override
 	{
+		if (joinable())
+		{
+			throw EXCEPTION("Thread not joined");
+		}
 	}
 
 private:
-	virtual void OnInit()
+	virtual void OnInit() override
 	{
 	}
 
-	virtual void OnInitThread()
+	virtual void OnInitThread() override
 	{
 	}
 
-	virtual void OnExitThread()
+	virtual void OnExitThread() override
 	{
 	}
 
-	virtual void OnReset()
+	virtual void OnReset() override
 	{
 	}
 
@@ -39,12 +42,16 @@ private:
 	{
 	}
 
-	virtual void Flip()
+	virtual void Flip() override
 	{
 	}
 
-	virtual void Close()
+	virtual void Close() override
 	{
+		if (joinable())
+		{
+			join();
+		}
 	}
 
 	virtual void semaphorePGRAPHTextureReadRelease(u32 offset, u32 value) override

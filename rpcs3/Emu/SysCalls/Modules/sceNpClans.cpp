@@ -8,428 +8,498 @@
 
 extern Module sceNpClans;
 
-struct sceNpClansInternal
-{
-	bool m_bSceNpClansInitialized;
+std::unique_ptr<SceNpClansInternal> g_sceNpClans;
 
-	sceNpClansInternal()
-		: m_bSceNpClansInitialized(false)
+s32 sceNpClansInit(vm::ptr<SceNpCommunicationId> commId, vm::ptr<SceNpCommunicationPassphrase> passphrase, vm::ptr<void> pool, vm::ptr<u32> poolSize, u32 flags)
+{
+	sceNpClans.Warning("sceNpClansInit(commId=*0x%x, passphrase=*0x%x, pool=*0x%x, poolSize=*0x%x, flags=0x%x)", commId, passphrase, pool, poolSize, flags);
+
+	if (g_sceNpClans->m_bSceNpClansInitialized)
 	{
-	}
-};
-
-sceNpClansInternal sceNpClansInstance;
-
-int sceNpClansInit(vm::ptr<SceNpCommunicationId> commId, vm::ptr<SceNpCommunicationPassphrase> passphrase, vm::ptr<void> pool, vm::ptr<u32> poolSize, u32 flags)
-{
-	sceNpClans.Warning("sceNpClansInit(commId_addr=0x%x, passphrase_addr=0x%x, pool_addr=0x%x,poolSize_addr=0x%x, flags=%d)", commId.addr(), passphrase.addr(), pool.addr(), poolSize.addr(), flags);
-
-	if (sceNpClansInstance.m_bSceNpClansInitialized)
 		return SCE_NP_CLANS_ERROR_ALREADY_INITIALIZED;
+	}
 
 	if (flags != 0)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_SUPPORTED;
+	}
 
-	sceNpClansInstance.m_bSceNpClansInitialized = true;
+	g_sceNpClans->m_bSceNpClansInitialized = true;
 
 	return CELL_OK;
 }
 
-int sceNpClansTerm()
+s32 sceNpClansTerm()
 {
 	sceNpClans.Warning("sceNpClansTerm()");
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
-	sceNpClansInstance.m_bSceNpClansInitialized = false;
+	g_sceNpClans->m_bSceNpClansInitialized = false;
 
 	return CELL_OK;
 }
 
-int sceNpClansCreateRequest(vm::ptr<SceNpClansRequestHandle> handle,u64 flags)
+s32 sceNpClansCreateRequest(vm::ptr<SceNpClansRequestHandle> handle, u64 flags)
 {
-	sceNpClans.Todo("sceNpClansCreateRequest(handle_addr=0x%x, flags=0x%llx)", handle.addr(), flags);
+	sceNpClans.Todo("sceNpClansCreateRequest(handle=*0x%x, flags=0x%llx)", handle, flags);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	if (flags != 0)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_SUPPORTED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansDestroyRequest(vm::ptr<SceNpClansRequestHandle> handle)
+s32 sceNpClansDestroyRequest(vm::ptr<SceNpClansRequestHandle> handle)
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansAbortRequest(vm::ptr<SceNpClansRequestHandle> handle)
+s32 sceNpClansAbortRequest(vm::ptr<SceNpClansRequestHandle> handle)
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansCreateClan(vm::ptr<SceNpClansRequestHandle> handle, vm::ptr<const char> name, vm::ptr<const char> tag, vm::ptr<u32> clanId)
+s32 sceNpClansCreateClan(vm::ptr<SceNpClansRequestHandle> handle, vm::cptr<char> name, vm::cptr<char> tag, vm::ptr<u32> clanId)
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansDisbandClan(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId)
+s32 sceNpClansDisbandClan(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId)
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansGetClanList(vm::ptr<SceNpClansRequestHandle> handle, vm::ptr<const SceNpClansPagingRequest> paging, vm::ptr<SceNpClansEntry> clanList, vm::ptr<SceNpClansPagingResult> pageResult)
+s32 sceNpClansGetClanList(vm::ptr<SceNpClansRequestHandle> handle, vm::cptr<SceNpClansPagingRequest> paging, vm::ptr<SceNpClansEntry> clanList, vm::ptr<SceNpClansPagingResult> pageResult)
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansGetClanListByNpId()
+s32 sceNpClansGetClanListByNpId()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansSearchByProfile()
+s32 sceNpClansSearchByProfile()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansSearchByName()
+s32 sceNpClansSearchByName()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansGetClanInfo()
+s32 sceNpClansGetClanInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansUpdateClanInfo()
+s32 sceNpClansUpdateClanInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansGetMemberList()
+s32 sceNpClansGetMemberList()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansGetMemberInfo()
+s32 sceNpClansGetMemberInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansUpdateMemberInfo()
+s32 sceNpClansUpdateMemberInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansChangeMemberRole()
+s32 sceNpClansChangeMemberRole()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansGetAutoAcceptStatus()
+s32 sceNpClansGetAutoAcceptStatus()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansUpdateAutoAcceptStatus()
+s32 sceNpClansUpdateAutoAcceptStatus()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansJoinClan()
+s32 sceNpClansJoinClan()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansLeaveClan()
+s32 sceNpClansLeaveClan()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansKickMember(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId, vm::ptr<u32> npid, vm::ptr<SceNpClansMessage> message)
+s32 sceNpClansKickMember(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId, vm::ptr<u32> npid, vm::ptr<SceNpClansMessage> message)
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansSendInvitation(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId, vm::ptr<u32> npid, vm::ptr<SceNpClansMessage> message)
+s32 sceNpClansSendInvitation(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId, vm::ptr<u32> npid, vm::ptr<SceNpClansMessage> message)
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansCancelInvitation()
+s32 sceNpClansCancelInvitation()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansSendInvitationResponse(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId, vm::ptr<SceNpClansMessage> message, bool accept)
+s32 sceNpClansSendInvitationResponse(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId, vm::ptr<SceNpClansMessage> message, bool accept)
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansSendMembershipRequest(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId, vm::ptr<SceNpClansMessage> message)
+s32 sceNpClansSendMembershipRequest(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId, vm::ptr<SceNpClansMessage> message)
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansCancelMembershipRequest()
+s32 sceNpClansCancelMembershipRequest()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansSendMembershipResponse()
+s32 sceNpClansSendMembershipResponse()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansGetBlacklist()
+s32 sceNpClansGetBlacklist()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansAddBlacklistEntry()
+s32 sceNpClansAddBlacklistEntry()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansRemoveBlacklistEntry()
+s32 sceNpClansRemoveBlacklistEntry()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansRetrieveAnnouncements()
+s32 sceNpClansRetrieveAnnouncements()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansPostAnnouncement()
+s32 sceNpClansPostAnnouncement()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansRemoveAnnouncement()
+s32 sceNpClansRemoveAnnouncement()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansPostChallenge(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId, u32 targetClan, vm::ptr<SceNpClansMessage> message, vm::ptr<SceNpClansMessageData> data, u32 duration, vm::ptr<u32> mId)
+s32 sceNpClansPostChallenge(vm::ptr<SceNpClansRequestHandle> handle, u32 clanId, u32 targetClan, vm::ptr<SceNpClansMessage> message, vm::ptr<SceNpClansMessageData> data, u32 duration, vm::ptr<u32> mId)
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	if (data)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_SUPPORTED;
-
-	//todo
-
-	return CELL_OK;
-}
-
-int sceNpClansRetrievePostedChallenges()
-{
-	UNIMPLEMENTED_FUNC(sceNpClans);
-
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
-		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
-
-	//todo
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansRemovePostedChallenge()
+s32 sceNpClansRetrievePostedChallenges()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansRetrieveChallenges()
+s32 sceNpClansRemovePostedChallenge()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
-int sceNpClansRemoveChallenge()
+s32 sceNpClansRetrieveChallenges()
 {
 	UNIMPLEMENTED_FUNC(sceNpClans);
 
-	if (!sceNpClansInstance.m_bSceNpClansInitialized)
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
 		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
+
+	return CELL_OK;
+}
+
+s32 sceNpClansRemoveChallenge()
+{
+	UNIMPLEMENTED_FUNC(sceNpClans);
+
+	if (!g_sceNpClans->m_bSceNpClansInitialized)
+	{
+		return SCE_NP_CLANS_ERROR_NOT_INITIALIZED;
+	}
 
 	return CELL_OK;
 }
 
 Module sceNpClans("sceNpClans", []()
 {
-	sceNpClansInstance.m_bSceNpClansInitialized = false;
+	g_sceNpClans = std::make_unique<SceNpClansInternal>();
 
 	REG_FUNC(sceNpClans, sceNpClansInit);
 	REG_FUNC(sceNpClans, sceNpClansTerm);

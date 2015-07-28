@@ -148,6 +148,8 @@ public:
 
 	// HLE/Miscs
 	IniEntry<u8>   HLELogLvl;
+	IniEntry<u8>   NETStatus;
+	IniEntry<u8>   NETInterface;
 	IniEntry<bool> HLELogging;
 	IniEntry<bool> RSXLogging;
 	IniEntry<bool> HLEHookStFunc;
@@ -155,11 +157,11 @@ public:
 	IniEntry<bool> HLEExitOnStop;
 	IniEntry<bool> HLEAlwaysStart;
 
-	//Auto Pause
+	// Auto Pause
 	IniEntry<bool> DBGAutoPauseSystemCall;
 	IniEntry<bool> DBGAutoPauseFunctionCall;
 
-	//Customed EmulationDir
+	// Custom EmulationDir
 	IniEntry<std::string> SysEmulationDirPath;
 	IniEntry<bool> SysEmulationDirPathEnable;
 
@@ -232,6 +234,8 @@ public:
 		// HLE/Misc
 		HLELogging.Init("HLE_HLELogging", path);
 		RSXLogging.Init("RSX_Logging", path);
+		NETStatus.Init("NET_Status", path);
+		NETInterface.Init("NET_Interface", path);
 		HLEHookStFunc.Init("HLE_HLEHookStFunc", path);
 		HLESaveTTY.Init("HLE_HLESaveTTY", path);
 		HLEExitOnStop.Init("HLE_HLEExitOnStop", path);
@@ -311,6 +315,8 @@ public:
 		// HLE/Miscs
 		HLELogging.Load(false);
 		RSXLogging.Load(false);
+		NETStatus.Load(0);
+		NETInterface.Load(0);
 		HLEHookStFunc.Load(false);
 		HLESaveTTY.Load(false);
 		HLEExitOnStop.Load(false);
@@ -390,6 +396,8 @@ public:
 		// HLE/Miscs
 		HLELogging.Save();
 		RSXLogging.Save();
+		NETStatus.Save();
+		NETInterface.Save();
 		HLEHookStFunc.Save();
 		HLESaveTTY.Save();
 		HLEExitOnStop.Save();

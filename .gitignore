@@ -40,6 +40,8 @@
 
 /wxWidgets/lib
 /bin/rpcs3.ini
+/bin/rpcs3.ipdb
+/bin/rpcs3.iobj
 /bin/FragmentProgram.txt
 /bin/VertexProgram.txt
 /bin/*.hlsl
@@ -71,3 +73,6 @@ rpcs3/x64/*
 
 .DS_Store
 rpcs3/Emu/SysCalls/Modules/prx_*.h
+
+/CMakeFiles/
+CMakeCache.txt

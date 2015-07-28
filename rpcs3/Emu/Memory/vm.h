@@ -1,20 +1,25 @@
 #pragma once
-#include "Memory.h"
+
+#include "stdafx.h"
+
+const class thread_ctrl_t* get_current_thread_ctrl();
 
 class CPUThread;
 
 namespace vm
 {
-	extern void* g_base_addr; // base address of ps3/psv virtual memory for common access
+	extern void* const g_base_addr; // base address of ps3/psv virtual memory for common access
 	extern void* g_priv_addr; // base address of ps3/psv virtual memory for privileged access
 
-	enum memory_location : uint
+	enum memory_location_t : uint
 	{
 		main,
 		user_space,
+		video,
 		stack,
-
-		memory_location_count
+		
+		memory_location_max,
+		any = 0xffffffff,
 	};
 
 	enum page_info_t : u8
@@ -29,184 +34,310 @@ namespace vm
 		page_allocated          = (1 << 7),
 	};
 
-	static void set_stack_size(u32 size) {}
-	static void initialize_stack() {}
+	struct waiter_t
+	{
+		u32 addr = 0;
+		u32 mask = ~0;
+		CPUThread* thread = nullptr;
+		
+		std::function<bool()> pred;
 
-	// break the reservation, return true if it was successfully broken
-	bool reservation_break(u32 addr);
-	// read memory and reserve it for further atomic update, return true if the previous reservation was broken
-	bool reservation_acquire(void* data, u32 addr, u32 size, const std::function<void()>& callback = nullptr);
-	// same as reservation_acquire but does not have the callback argument
-	// used by the PPU LLVM JIT since creating a std::function object in LLVM IR is too complicated
-	bool reservation_acquire_no_cb(void* data, u32 addr, u32 size);
-	// attempt to atomically update reserved memory
+		waiter_t() = default;
+
+		waiter_t* reset(u32 addr, u32 size, CPUThread& thread)
+		{
+			this->addr = addr;
+			this->mask = ~(size - 1);
+			this->thread = &thread;
+
+			// must be null at this point
+			if (pred)
+			{
+				throw EXCEPTION("Unexpected");
+			}
+
+			return this;
+		}
+
+		bool try_notify();
+	};
+
+	class waiter_lock_t
+	{
+		waiter_t* m_waiter;
+		std::unique_lock<std::mutex> m_lock;
+
+	public:
+		waiter_lock_t() = delete;
+
+		waiter_lock_t(CPUThread& thread, u32 addr, u32 size);
+
+		waiter_t* operator ->() const
+		{
+			return m_waiter;
+		}
+
+		void wait();
+
+		~waiter_lock_t();
+	};
+
+	// wait until pred() returns true, addr must be aligned to size which must be a power of 2, pred() may be called by any thread
+	template<typename F, typename... Args> auto wait_op(CPUThread& thread, u32 addr, u32 size, F pred, Args&&... args) -> decltype(static_cast<void>(pred(args...)))
+	{
+		// return immediately if condition passed (optimistic case)
+		if (pred(args...)) return;
+
+		// initialize waiter and locker
+		waiter_lock_t lock(thread, addr, size);
+
+		// initialize predicate
+		lock->pred = WRAP_EXPR(pred(args...));
+
+		// start waiting
+		lock.wait();
+	}
+
+	// notify waiters on specific addr, addr must be aligned to size which must be a power of 2
+	void notify_at(u32 addr, u32 size);
+
+	// try to poll each waiter's condition (false if try_lock failed)
+	bool notify_all();
+
+	// This flag is changed by various reservation functions and may have different meaning.
+	// reservation_break() - true if the reservation was successfully broken.
+	// reservation_acquire() - true if another existing reservation was broken.
+	// reservation_free() - true if this thread's reservation was successfully removed.
+	// reservation_op() - false if reservation_update() would succeed if called instead.
+	// Write access to reserved memory - only set to true if the reservation was broken.
+	extern thread_local bool g_tls_did_break_reservation;
+
+	// Unconditionally break the reservation at specified address
+	void reservation_break(u32 addr);
+
+	// Reserve memory at the specified address for further atomic update
+	void reservation_acquire(void* data, u32 addr, u32 size);
+
+	// Attempt to atomically update previously reserved memory
 	bool reservation_update(u32 addr, const void* data, u32 size);
-	// for internal use
+
+	// Process a memory access error if it's caused by the reservation
 	bool reservation_query(u32 addr, u32 size, bool is_writing, std::function<bool()> callback);
-	// for internal use
+
+	// Returns true if the current thread owns reservation
+	bool reservation_test(const thread_ctrl_t* current = get_current_thread_ctrl());
+
+	// Break all reservations created by the current thread
 	void reservation_free();
-	// perform complete operation
+
+	// Perform atomic operation unconditionally
 	void reservation_op(u32 addr, u32 size, std::function<void()> proc);
 
-	// for internal use
-	void page_map(u32 addr, u32 size, u8 flags);
-	// for internal use
+	// Change memory protection of specified memory region
 	bool page_protect(u32 addr, u32 size, u8 flags_test = 0, u8 flags_set = 0, u8 flags_clear = 0);
-	// for internal use
-	void page_unmap(u32 addr, u32 size);
 
-	// unsafe address check
+	// Check if existing memory range is allocated. Checking address before using it is very unsafe.
+	// Return value may be wrong. Even if it's true and correct, actual memory protection may be read-only and no-access.
 	bool check_addr(u32 addr, u32 size = 1);
 
-	bool map(u32 addr, u32 size, u32 flags);
-	bool unmap(u32 addr, u32 size = 0, u32 flags = 0);
-	u32 alloc(u32 size, memory_location location = user_space);
-	u32 alloc(u32 addr, u32 size, memory_location location = user_space);
-	void dealloc(u32 addr, memory_location location = user_space);
+	// Search and map memory in specified memory location (don't pass alignment smaller than 4096)
+	u32 alloc(u32 size, memory_location_t location, u32 align = 4096);
+
+	// Map memory at specified address (in optionally specified memory location)
+	u32 falloc(u32 addr, u32 size, memory_location_t location = any);
+
+	// Unmap memory at specified address (in optionally specified memory location)
+	bool dealloc(u32 addr, memory_location_t location = any);
+
+	// Object that handles memory allocations inside specific constant bounds ("location"), currently non-virtual
+	class block_t final
+	{
+		std::map<u32, u32> m_map; // addr -> size mapping of mapped locations
+		std::mutex m_mutex;
+
+		bool try_alloc(u32 addr, u32 size);
+
+	public:
+		block_t() = delete;
+
+		block_t(u32 addr, u32 size, u64 flags = 0)
+			: addr(addr)
+			, size(size)
+			, flags(flags)
+		{
+		}
+
+		~block_t();
+
+	public:
+		const u32 addr; // start address
+		const u32 size; // total size
+		const u64 flags; // currently unused
+
+		atomic_t<u32> used{}; // amount of memory used, may be increased manually prevent some memory from allocating
+
+		// Search and map memory (don't pass alignment smaller than 4096)
+		u32 alloc(u32 size, u32 align = 4096);
+
+		// Try to map memory at fixed location
+		u32 falloc(u32 addr, u32 size);
+
+		// Unmap memory at specified location previously returned by alloc()
+		bool dealloc(u32 addr);
+	};
+
+	// create new memory block with specified parameters and return it
+	std::shared_ptr<block_t> map(u32 addr, u32 size, u64 flags = 0);
+
+	// delete existing memory block with specified start address
+	std::shared_ptr<block_t> unmap(u32 addr);
+
+	// get memory block associated with optionally specified memory location or optionally specified address
+	std::shared_ptr<block_t> get(memory_location_t location, u32 addr = 0);
 	
-	template<typename T = void>
-	T* get_ptr(u32 addr)
+	template<typename T = void> T* get_ptr(u32 addr)
 	{
 		return reinterpret_cast<T*>(static_cast<u8*>(g_base_addr) + addr);
 	}
 
-	template<typename T>
-	T& get_ref(u32 addr)
+	template<typename T> T& get_ref(u32 addr)
 	{
 		return *get_ptr<T>(addr);
 	}
 
-	template<typename T = void>
-	T* priv_ptr(u32 addr)
+	template<typename T = void> T* priv_ptr(u32 addr)
 	{
 		return reinterpret_cast<T*>(static_cast<u8*>(g_priv_addr) + addr);
 	}
 
-	template<typename T>
-	T& priv_ref(u32 addr)
+	template<typename T> T& priv_ref(u32 addr)
 	{
 		return *priv_ptr<T>(addr);
 	}
 
-	u32 get_addr(const void* real_pointer);
-
-	never_inline void error(const u64 addr, const char* func);
-
-	template<typename T>
-	struct cast_ptr
+	inline u32 get_addr(const void* real_pointer)
 	{
-		static_assert(std::is_same<T, u32>::value, "Unsupported vm::cast() type");
+		const std::uintptr_t diff = reinterpret_cast<std::uintptr_t>(real_pointer) - reinterpret_cast<std::uintptr_t>(g_base_addr);
+		const u32 res = static_cast<u32>(diff);
 
-		force_inline static u32 cast(const T& addr, const char* func)
+		if (res == diff)
+		{
+			return res;
+		}
+
+		if (real_pointer)
+		{
+			throw EXCEPTION("Not a virtual memory pointer (%p)", real_pointer);
+		}
+
+		return 0;
+	}
+
+	template<typename T> struct cast_ptr
+	{
+		static_assert(std::is_same<T, u32>::value, "Unsupported VM_CAST() type");
+
+		force_inline static u32 cast(const T& addr, const char* file, int line, const char* func)
 		{
 			return 0;
 		}
 	};
 
-	template<>
-	struct cast_ptr<u32>
+	template<> struct cast_ptr<u32>
 	{
-		force_inline static u32 cast(const u32 addr, const char* func)
+		force_inline static u32 cast(const u32 addr, const char* file, int line, const char* func)
 		{
 			return addr;
 		}
 	};
 
-	template<>
-	struct cast_ptr<u64>
+	template<> struct cast_ptr<u64>
 	{
-		force_inline static u32 cast(const u64 addr, const char* func)
+		force_inline static u32 cast(const u64 addr, const char* file, int line, const char* func)
 		{
 			const u32 res = static_cast<u32>(addr);
+
 			if (res != addr)
 			{
-				vm::error(addr, func);
+				throw fmt::exception(file, line, func, "VM_CAST failed (addr=0x%llx)", addr);
 			}
 
 			return res;
 		}
 	};
 
-	template<typename T>
-	struct cast_ptr<be_t<T>>
+	template<typename T> struct cast_ptr<be_t<T>>
 	{
-		force_inline static u32 cast(const be_t<T>& addr, const char* func)
+		force_inline static u32 cast(const be_t<T>& addr, const char* file, int line, const char* func)
 		{
-			return cast_ptr<T>::cast(addr.value(), func);
+			return cast_ptr<T>::cast(addr.value(), file, line, func);
 		}
 	};
 
-	template<typename T>
-	force_inline static u32 cast(const T& addr, const char* func = "vm::cast")
+	template<typename T> struct cast_ptr<le_t<T>>
 	{
-		return cast_ptr<T>::cast(addr, func);
+		force_inline static u32 cast(const le_t<T>& addr, const char* file, int line, const char* func)
+		{
+			return cast_ptr<T>::cast(addr.value(), file, line, func);
+		}
+	};
+
+	// function for VM_CAST
+	template<typename T> force_inline static u32 impl_cast(const T& addr, const char* file, int line, const char* func)
+	{
+		return cast_ptr<T>::cast(addr, file, line, func);
+	}
+
+	static const u8& read8(u32 addr)
+	{
+		return get_ref<const u8>(addr);
+	}
+
+	static void write8(u32 addr, u8 value)
+	{
+		get_ref<u8>(addr) = value;
 	}
 
 	namespace ps3
 	{
 		void init();
 
-		static u8 read8(u32 addr)
+		inline const be_t<u16>& read16(u32 addr)
 		{
-			return get_ref<u8>(addr);
+			return get_ref<const be_t<u16>>(addr);
 		}
 
-		static void write8(u32 addr, u8 value)
-		{
-			get_ref<u8>(addr) = value;
-		}
-
-		static u16 read16(u32 addr)
-		{
-			return get_ref<be_t<u16>>(addr);
-		}
-
-		static void write16(u32 addr, be_t<u16> value)
+		inline void write16(u32 addr, be_t<u16> value)
 		{
 			get_ref<be_t<u16>>(addr) = value;
 		}
 
-		static u32 read32(u32 addr)
+		inline const be_t<u32>& read32(u32 addr)
 		{
-			return get_ref<be_t<u32>>(addr);
+			return get_ref<const be_t<u32>>(addr);
 		}
 
-		static void write32(u32 addr, be_t<u32> value)
+		inline void write32(u32 addr, be_t<u32> value)
 		{
 			get_ref<be_t<u32>>(addr) = value;
 		}
 
-		static u64 read64(u32 addr)
+		inline const be_t<u64>& read64(u32 addr)
 		{
-			return get_ref<be_t<u64>>(addr);
+			return get_ref<const be_t<u64>>(addr);
 		}
 
-		static void write64(u32 addr, be_t<u64> value)
+		inline void write64(u32 addr, be_t<u64> value)
 		{
 			get_ref<be_t<u64>>(addr) = value;
 		}
 
-		static void write16(u32 addr, u16 value)
+		inline const be_t<u128>& read128(u32 addr)
 		{
-			write16(addr, be_t<u16>::make(value));
+			return get_ref<const be_t<u128>>(addr);
 		}
 
-		static void write32(u32 addr, u32 value)
-		{
-			write32(addr, be_t<u32>::make(value));
-		}
-
-		static void write64(u32 addr, u64 value)
-		{
-			write64(addr, be_t<u64>::make(value));
-		}
-
-		static u128 read128(u32 addr)
-		{
-			return get_ref<be_t<u128>>(addr);
-		}
-
-		static void write128(u32 addr, u128 value)
+		inline void write128(u32 addr, be_t<u128> value)
 		{
 			get_ref<be_t<u128>>(addr) = value;
 		}
@@ -216,54 +347,44 @@ namespace vm
 	{
 		void init();
 
-		static u8 read8(u32 addr)
+		inline const le_t<u16>& read16(u32 addr)
 		{
-			return get_ref<u8>(addr);
+			return get_ref<const le_t<u16>>(addr);
 		}
 
-		static void write8(u32 addr, u8 value)
+		inline void write16(u32 addr, le_t<u16> value)
 		{
-			get_ref<u8>(addr) = value;
+			get_ref<le_t<u16>>(addr) = value;
 		}
 
-		static u16 read16(u32 addr)
+		inline const le_t<u32>& read32(u32 addr)
 		{
-			return get_ref<u16>(addr);
+			return get_ref<const le_t<u32>>(addr);
 		}
 
-		static void write16(u32 addr, u16 value)
+		inline void write32(u32 addr, le_t<u32> value)
 		{
-			get_ref<u16>(addr) = value;
+			get_ref<le_t<u32>>(addr) = value;
 		}
 
-		static u32 read32(u32 addr)
+		inline const le_t<u64>& read64(u32 addr)
 		{
-			return get_ref<u32>(addr);
+			return get_ref<const le_t<u64>>(addr);
 		}
 
-		static void write32(u32 addr, u32 value)
+		inline void write64(u32 addr, le_t<u64> value)
 		{
-			get_ref<u32>(addr) = value;
+			get_ref<le_t<u64>>(addr) = value;
 		}
 
-		static u64 read64(u32 addr)
+		inline const le_t<u128>& read128(u32 addr)
 		{
-			return get_ref<u64>(addr);
+			return get_ref<const le_t<u128>>(addr);
 		}
 
-		static void write64(u32 addr, u64 value)
+		inline void write128(u32 addr, le_t<u128> value)
 		{
-			get_ref<u64>(addr) = value;
-		}
-
-		static u128 read128(u32 addr)
-		{
-			return get_ref<u128>(addr);
-		}
-
-		static void write128(u32 addr, u128 value)
-		{
-			get_ref<u128>(addr) = value;
+			get_ref<le_t<u128>>(addr) = value;
 		}
 	}
 
@@ -286,39 +407,6 @@ namespace vm
 
 namespace vm
 {
-	struct location_info
-	{
-		u32 addr_offset;
-		u32 size;
-
-		u32(*allocator)(u32 size);
-		u32(*fixed_allocator)(u32 addr, u32 size);
-		void(*deallocator)(u32 addr);
-
-		u32 alloc_offset;
-
-		template<typename T = char>
-		ptr<T> alloc(u32 count = 1) const
-		{
-			return ptr<T>::make(allocator(count * sizeof(T)));
-		}
-
-		template<typename T = char>
-		ptr<T> fixed_alloc(u32 addr, u32 count = 1) const
-		{
-			return ptr<T>::make(fixed_allocator(addr, count * sizeof(T)));
-		}
-	};
-
-	extern location_info g_locations[memory_location_count];
-
-	template<memory_location location = main>
-	location_info& get()
-	{
-		assert(location < memory_location_count);
-		return g_locations[location];
-	}
-
 	class stack
 	{
 		u32 m_begin;

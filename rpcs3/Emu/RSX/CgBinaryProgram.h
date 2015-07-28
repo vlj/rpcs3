@@ -317,7 +317,7 @@ public:
 
 					size_t size = f.size();
 					vm::ps3::init();
-					ptr = vm::alloc(size);
+					ptr = vm::alloc(size, vm::main);
 					f.read(vm::get_ptr(ptr), size);
 				}
 				
@@ -366,7 +366,7 @@ public:
 			assert((m_buffer_size - m_offset) % sizeof(u32) == 0);
 			for (u32 i = 0; i < (m_buffer_size - m_offset) / sizeof(u32); i++)
 			{
-				vdata[i] = re32(vdata[i]);
+				vdata[i] = _byteswap_ulong(vdata[i]); // WTF, cannot use be_t<> there?
 			}
 
 			for (u32 i = 0; i < prog.ucodeSize / sizeof(u32); i++)
