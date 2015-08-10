@@ -29,8 +29,6 @@
 #pragma warning(pop)
 #endif
 
-#define USE_INTERP
-
 using namespace llvm;
 using namespace ppu_recompiler_llvm;
 
@@ -1687,9 +1685,6 @@ void Compiler::SUBFIC(u32 rd, u32 ra, s32 simm16) {
 }
 
 void Compiler::CMPLI(u32 crfd, u32 l, u32 ra, u32 uimm16) {
-#ifdef USE_INTERP
-	Call<void>("CMPLI", PPUInterpreter::CMPLI_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(crfd), m_ir_builder->getInt32(l), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(uimm16));
-#else
 	Value * ra_i64;
 	if (l == 0) {
 		ra_i64 = m_ir_builder->CreateZExt(GetGpr(ra, 32), m_ir_builder->getInt64Ty());
@@ -1699,13 +1694,9 @@ void Compiler::CMPLI(u32 crfd, u32 l, u32 ra, u32 uimm16) {
 	}
 
 	SetCrFieldUnsignedCmp(crfd, ra_i64, m_ir_builder->getInt64(uimm16));
-#endif
 }
 
 void Compiler::CMPI(u32 crfd, u32 l, u32 ra, s32 simm16) {
-#ifdef USE_INTERP
-	Call<void>("CMPI", PPUInterpreter::CMPI_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(crfd), m_ir_builder->getInt32(l), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(simm16));
-#else
 	Value * ra_i64;
 	if (l == 0) {
 		ra_i64 = m_ir_builder->CreateSExt(GetGpr(ra, 32), m_ir_builder->getInt64Ty());
@@ -1715,7 +1706,6 @@ void Compiler::CMPI(u32 crfd, u32 l, u32 ra, s32 simm16) {
 	}
 
 	SetCrFieldSignedCmp(crfd, ra_i64, m_ir_builder->getInt64((s64)simm16));
-#endif
 }
 
 void Compiler::ADDIC(u32 rd, u32 ra, s32 simm16) {
@@ -1733,9 +1723,6 @@ void Compiler::ADDIC_(u32 rd, u32 ra, s32 simm16) {
 }
 
 void Compiler::ADDI(u32 rd, u32 ra, s32 simm16) {
-#ifdef USE_INTERP
-	Call<void>("ADDI", PPUInterpreter::ADDI_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(simm16));
-#else
 	if (ra == 0) {
 		SetGpr(rd, m_ir_builder->getInt64((s64)simm16));
 	}
@@ -1744,13 +1731,9 @@ void Compiler::ADDI(u32 rd, u32 ra, s32 simm16) {
 		auto sum_i64 = m_ir_builder->CreateAdd(ra_i64, m_ir_builder->getInt64((s64)simm16));
 		SetGpr(rd, sum_i64);
 	}
-#endif
 }
 
 void Compiler::ADDIS(u32 rd, u32 ra, s32 simm16) {
-#ifdef USE_INTERP
-	Call<void>("ADDIS", PPUInterpreter::ADDIS_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(simm16));
-#else
 	if (ra == 0) {
 		SetGpr(rd, m_ir_builder->getInt64((s64)simm16 << 16));
 	}
@@ -1759,7 +1742,6 @@ void Compiler::ADDIS(u32 rd, u32 ra, s32 simm16) {
 		auto sum_i64 = m_ir_builder->CreateAdd(ra_i64, m_ir_builder->getInt64((s64)simm16 << 16));
 		SetGpr(rd, sum_i64);
 	}
-#endif
 }
 
 void Compiler::BC(u32 bo, u32 bi, s32 bd, u32 aa, u32 lk) {
@@ -1948,9 +1930,6 @@ void Compiler::RLWIMI(u32 ra, u32 rs, u32 sh, u32 mb, u32 me, u32 rc) {
 }
 
 void Compiler::RLWINM(u32 ra, u32 rs, u32 sh, u32 mb, u32 me, u32 rc) {
-#ifdef USE_INTERP
-	Call<void>("RLWINM", PPUInterpreter::RLWINM_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rs), m_ir_builder->getInt32(sh), m_ir_builder->getInt32(mb), m_ir_builder->getInt32(me), m_ir_builder->getInt32(rc));
-#else
 	auto rs_i32 = GetGpr(rs, 32);
 	auto rs_i64 = m_ir_builder->CreateZExt(rs_i32, m_ir_builder->getInt64Ty());
 	auto rsh_i64 = m_ir_builder->CreateShl(rs_i64, 32);
@@ -1968,7 +1947,6 @@ void Compiler::RLWINM(u32 ra, u32 rs, u32 sh, u32 mb, u32 me, u32 rc) {
 	if (rc) {
 		SetCrFieldSignedCmp(0, res_i64, m_ir_builder->getInt64(0));
 	}
-#endif
 }
 
 void Compiler::RLWNM(u32 ra, u32 rs, u32 rb, u32 mb, u32 me, u32 rc) {
@@ -1991,13 +1969,9 @@ void Compiler::RLWNM(u32 ra, u32 rs, u32 rb, u32 mb, u32 me, u32 rc) {
 }
 
 void Compiler::ORI(u32 ra, u32 rs, u32 uimm16) {
-#ifdef USE_INTERP
-	Call<void>("ORI", PPUInterpreter::ORI_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rs), m_ir_builder->getInt32(uimm16));
-#else
 	auto rs_i64 = GetGpr(rs);
 	auto res_i64 = m_ir_builder->CreateOr(rs_i64, uimm16);
 	SetGpr(ra, res_i64);
-#endif
 }
 
 void Compiler::ORIS(u32 ra, u32 rs, u32 uimm16) {
@@ -2033,9 +2007,6 @@ void Compiler::ANDIS_(u32 ra, u32 rs, u32 uimm16) {
 }
 
 void Compiler::RLDICL(u32 ra, u32 rs, u32 sh, u32 mb, u32 rc) {
-#ifdef USE_INTERP
-	Call<void>("RLDICL", PPUInterpreter::RLDICL_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rs), m_ir_builder->getInt32(sh), m_ir_builder->getInt32(mb), m_ir_builder->getInt32(rc));
-#else
 	auto rs_i64 = GetGpr(rs);
 	auto res_i64 = rs_i64;
 	if (sh) {
@@ -2050,7 +2021,6 @@ void Compiler::RLDICL(u32 ra, u32 rs, u32 sh, u32 mb, u32 rc) {
 	if (rc) {
 		SetCrFieldSignedCmp(0, res_i64, m_ir_builder->getInt64(0));
 	}
-#endif
 }
 
 void Compiler::RLDICR(u32 ra, u32 rs, u32 sh, u32 me, u32 rc) {
@@ -2132,9 +2102,6 @@ void Compiler::RLDC_LR(u32 ra, u32 rs, u32 rb, u32 m_eb, u32 is_r, u32 rc) {
 }
 
 void Compiler::CMP(u32 crfd, u32 l, u32 ra, u32 rb) {
-#ifdef USE_INTERP
-	Call<void>("CMP", PPUInterpreter::CMP_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(crfd), m_ir_builder->getInt32(l), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rb));
-#else
 	Value * ra_i64;
 	Value * rb_i64;
 	if (l == 0) {
@@ -2147,7 +2114,6 @@ void Compiler::CMP(u32 crfd, u32 l, u32 ra, u32 rb) {
 	}
 
 	SetCrFieldSignedCmp(crfd, ra_i64, rb_i64);
-#endif
 }
 
 void Compiler::TW(u32 to, u32 ra, u32 rb) {
@@ -2270,13 +2236,9 @@ void Compiler::MULHWU(u32 rd, u32 ra, u32 rb, u32 rc) {
 }
 
 void Compiler::MFOCRF(u32 a, u32 rd, u32 crm) {
-#ifdef USE_INTERP
-	Call<u32>("MFOCRF", PPUInterpreter::MFOCRF_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(a), m_ir_builder->getInt32(rd), m_ir_builder->getInt32(crm));
-#else
 	auto cr_i32 = GetCr();
 	auto cr_i64 = m_ir_builder->CreateZExt(cr_i32, m_ir_builder->getInt64Ty());
 	SetGpr(rd, cr_i64);
-#endif
 }
 
 void Compiler::LWARX(u32 rd, u32 ra, u32 rb) {
@@ -2362,9 +2324,6 @@ void Compiler::SLD(u32 ra, u32 rs, u32 rb, u32 rc) {
 }
 
 void Compiler::AND(u32 ra, u32 rs, u32 rb, u32 rc) {
-#ifdef USE_INTERP
-	Call<void>("AND", PPUInterpreter::AND_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rs), m_ir_builder->getInt32(rb), m_ir_builder->getInt32(rc));
-#else
 	auto rs_i64 = GetGpr(rs);
 	auto rb_i64 = GetGpr(rb);
 	auto res_i64 = m_ir_builder->CreateAnd(rs_i64, rb_i64);
@@ -2373,13 +2332,9 @@ void Compiler::AND(u32 ra, u32 rs, u32 rb, u32 rc) {
 	if (rc) {
 		SetCrFieldSignedCmp(0, res_i64, m_ir_builder->getInt64(0));
 	}
-#endif
 }
 
 void Compiler::CMPL(u32 crfd, u32 l, u32 ra, u32 rb) {
-#ifdef USE_INTERP
-	Call<void>("CMPL", PPUInterpreter::CMPL_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(crfd), m_ir_builder->getInt32(l), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rb));
-#else
 	Value * ra_i64;
 	Value * rb_i64;
 	if (l == 0) {
@@ -2392,7 +2347,6 @@ void Compiler::CMPL(u32 crfd, u32 l, u32 ra, u32 rb) {
 	}
 
 	SetCrFieldUnsignedCmp(crfd, ra_i64, rb_i64);
-#endif
 }
 
 void Compiler::LVSR(u32 vd, u32 ra, u32 rb) {
@@ -2446,9 +2400,6 @@ void Compiler::LVEHX(u32 vd, u32 ra, u32 rb) {
 }
 
 void Compiler::SUBF(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
-#ifdef USE_INTERP
-	Call<void>("SUBF", PPUInterpreter::SUBF_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rb), m_ir_builder->getInt32(oe), m_ir_builder->getInt32(rc));
-#else
 	auto ra_i64 = GetGpr(ra);
 	auto rb_i64 = GetGpr(rb);
 	auto diff_i64 = m_ir_builder->CreateSub(rb_i64, ra_i64);
@@ -2462,7 +2413,6 @@ void Compiler::SUBF(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
 		// TODO: Implement this
 		CompilationError("SUBFO");
 	}
-#endif
 }
 
 void Compiler::LDUX(u32 rd, u32 ra, u32 rb) {
@@ -2609,9 +2559,6 @@ void Compiler::LVX(u32 vd, u32 ra, u32 rb) {
 }
 
 void Compiler::NEG(u32 rd, u32 ra, u32 oe, u32 rc) {
-#ifdef USE_INTERP
-	Call<void>("NEG", PPUInterpreter::NEG_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(oe), m_ir_builder->getInt32(rc));
-#else
 	auto ra_i64 = GetGpr(ra);
 	auto diff_i64 = m_ir_builder->CreateSub(m_ir_builder->getInt64(0), ra_i64);
 	SetGpr(rd, diff_i64);
@@ -2624,7 +2571,6 @@ void Compiler::NEG(u32 rd, u32 ra, u32 oe, u32 rc) {
 		// TODO: Implement this
 		CompilationError("NEGO");
 	}
-#endif
 }
 
 void Compiler::LBZUX(u32 rd, u32 ra, u32 rb) {
@@ -2714,9 +2660,6 @@ void Compiler::ADDE(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
 }
 
 void Compiler::MTOCRF(u32 l, u32 crm, u32 rs) {
-#ifdef USE_INTERP
-	Call<void>("MTOCRF", PPUInterpreter::MTOCRF_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(l), m_ir_builder->getInt32(crm), m_ir_builder->getInt32(rs));
-#else
 	auto rs_i32 = GetGpr(rs, 32);
 	auto cr_i32 = GetCr();
 	u32  mask = 0;
@@ -2734,7 +2677,6 @@ void Compiler::MTOCRF(u32 l, u32 crm, u32 rs) {
 	rs_i32 = m_ir_builder->CreateAnd(rs_i32, mask);  // null everything except ith nibble
 	cr_i32 = m_ir_builder->CreateOr(cr_i32, rs_i32); // now ith cr nibble == ith rs nibble
 	SetCr(cr_i32);
-#endif
 }
 
 void Compiler::STDX(u32 rs, u32 ra, u32 rb) {
@@ -2971,9 +2913,6 @@ void Compiler::ADDME(u32 rd, u32 ra, u32 oe, u32 rc) {
 }
 
 void Compiler::MULLW(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
-#ifdef USE_INTERP
-	Call<void>("MULLW", PPUInterpreter::MULLW_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rb), m_ir_builder->getInt32(oe), m_ir_builder->getInt32(rc));
-#else
 	auto ra_i32 = GetGpr(ra, 32);
 	auto rb_i32 = GetGpr(rb, 32);
 	auto ra_i64 = m_ir_builder->CreateSExt(ra_i32, m_ir_builder->getInt64Ty());
@@ -2989,7 +2928,6 @@ void Compiler::MULLW(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
 		// TODO implement oe
 		CompilationError("MULLWO");
 	}
-#endif
 }
 
 void Compiler::DCBTST(u32 ra, u32 rb, u32 th) {
@@ -3007,9 +2945,6 @@ void Compiler::STBUX(u32 rs, u32 ra, u32 rb) {
 }
 
 void Compiler::ADD(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
-#ifdef USE_INTERP
-	Call<void>("ADD", PPUInterpreter::ADD_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rb), m_ir_builder->getInt32(oe), m_ir_builder->getInt32(rc));
-#else
 	auto ra_i64 = GetGpr(ra);
 	auto rb_i64 = GetGpr(rb);
 	auto sum_i64 = m_ir_builder->CreateAdd(ra_i64, rb_i64);
@@ -3023,7 +2958,6 @@ void Compiler::ADD(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
 		// TODO: Implement this
 		CompilationError("ADDO");
 	}
-#endif
 }
 
 void Compiler::DCBT(u32 ra, u32 rb, u32 th) {
@@ -3090,48 +3024,7 @@ void Compiler::XOR(u32 ra, u32 rs, u32 rb, u32 rc) {
 	}
 }
 
-#ifdef USE_INTERP
-static
-u64 ReadSPR(PPUThread *CPU, u32 spr)
-{
-	const u32 n = (spr >> 5) | ((spr & 0x1f) << 5);
-
-	switch (n)
-	{
-	case 0x001: return CPU->XER.XER;
-	case 0x008: return CPU->LR;
-	case 0x009: return CPU->CTR;
-	case 0x100: return CPU->VRSAVE;
-	case 0x103: return CPU->SPRG[3];
-
-	case 0x10C: CPU->TB = get_timebased_time(); return CPU->TB;
-	case 0x10D: CPU->TB = get_timebased_time(); return CPU->TB >> 32;
-
-	case 0x110:
-	case 0x111:
-	case 0x112:
-	case 0x113:
-	case 0x114:
-	case 0x115:
-	case 0x116:
-	case 0x117: return CPU->SPRG[n - 0x110];
-	}
-
-	throw EXCEPTION("Unknown SPR (spr=0x%x, n=0x%x)", spr, n);
-}
-
-static
-u32 InterpMFSPR(PPUThread *CPU, u32 rd, u32 spr)
-{
-	CPU->GPR[rd] = ReadSPR(CPU, spr);
-	return 0;
-}
-#endif
-
 void Compiler::MFSPR(u32 rd, u32 spr) {
-#ifdef USE_INTERP
-	Call<u32>("MFSPR", InterpMFSPR, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(spr));
-#else
 	Value * rd_i64;
 	auto    n = (spr >> 5) | ((spr & 0x1f) << 5);
 
@@ -3161,7 +3054,6 @@ void Compiler::MFSPR(u32 rd, u32 spr) {
 	}
 
 	SetGpr(rd, rd_i64);
-#endif
 }
 
 void Compiler::LWAX(u32 rd, u32 ra, u32 rb) {
@@ -3278,9 +3170,6 @@ void Compiler::STHUX(u32 rs, u32 ra, u32 rb) {
 }
 
 void Compiler::OR(u32 ra, u32 rs, u32 rb, u32 rc) {
-#ifdef USE_INTERP
-	Call<u32>("OR", PPUInterpreter::OR_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rs), m_ir_builder->getInt32(rb), m_ir_builder->getInt32(rc));
-#else
 	auto rs_i64 = GetGpr(rs);
 	auto rb_i64 = GetGpr(rb);
 	auto res_i64 = m_ir_builder->CreateOr(rs_i64, rb_i64);
@@ -3289,7 +3178,6 @@ void Compiler::OR(u32 ra, u32 rs, u32 rb, u32 rc) {
 	if (rc) {
 		SetCrFieldSignedCmp(0, res_i64, m_ir_builder->getInt64(0));
 	}
-#endif
 }
 
 void Compiler::DIVDU(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
@@ -3311,9 +3199,6 @@ void Compiler::DIVDU(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
 }
 
 void Compiler::DIVWU(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
-#ifdef USE_INTERP
-	Call<void>("DIVWU", PPUInterpreter::DIVWU_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rb), m_ir_builder->getInt32(oe), m_ir_builder->getInt32(rc));
-#else
 	auto ra_i32 = GetGpr(ra, 32);
 	auto rb_i32 = GetGpr(rb, 32);
 	auto res_i32 = m_ir_builder->CreateUDiv(ra_i32, rb_i32);
@@ -3330,51 +3215,9 @@ void Compiler::DIVWU(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
 	}
 
 	// TODO make sure an exception does not occur on divide by 0 and overflow
-#endif
 }
-
-#ifdef USE_INTERP
-static
-void WriteSPR(PPUThread *CPU, u32 spr, u64 value)
-{
-	const u32 n = (spr >> 5) | ((spr & 0x1f) << 5);
-
-	switch (n)
-	{
-	case 0x001: CPU->XER.XER = value; return;
-	case 0x008: CPU->LR = value; return;
-	case 0x009: CPU->CTR = value; return;
-	case 0x100: CPU->VRSAVE = (u32)value; return;
-	case 0x103: throw EXCEPTION("WriteSPR(0x103, 0x%llx): Write to read-only SPR", value);
-
-	case 0x10C: throw EXCEPTION("WriteSPR(0x10C, 0x%llx): Write to time-based SPR", value);
-	case 0x10D: throw EXCEPTION("WriteSPR(0x10D, 0x%llx): Write to time-based SPR", value);
-
-	case 0x110:
-	case 0x111:
-	case 0x112:
-	case 0x113:
-	case 0x114:
-	case 0x115:
-	case 0x116:
-	case 0x117: CPU->SPRG[n - 0x110] = value; return;
-	}
-
-	throw EXCEPTION("Unknown SPR (spr=0x%x, n=0x%x, value=0x%llx)", spr, n, value);
-}
-
-static
-u32 InterpMTSPR(PPUThread *CPU, u32 spr, u32 rs)
-{
-	WriteSPR(CPU, spr, CPU->GPR[rs]);
-	return 0;
-}
-#endif
 
 void Compiler::MTSPR(u32 spr, u32 rs) {
-#ifdef USE_INTERP
-	Call<u32>("MTSPR", InterpMTSPR, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(spr), m_ir_builder->getInt32(rs));
-#else
 	auto rs_i64 = GetGpr(rs);
 	auto n = (spr >> 5) | ((spr & 0x1f) << 5);
 
@@ -3395,7 +3238,6 @@ void Compiler::MTSPR(u32 spr, u32 rs) {
 		assert(0);
 		break;
 	}
-#endif
 }
 
 void Compiler::NAND(u32 ra, u32 rs, u32 rb, u32 rc) {
@@ -3433,9 +3275,6 @@ void Compiler::DIVD(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
 }
 
 void Compiler::DIVW(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
-#ifdef USE_INTERP
-	Call<void>("DIVW", PPUInterpreter::DIVW_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rb), m_ir_builder->getInt32(oe), m_ir_builder->getInt32(rc));
-#else
 	auto ra_i32 = GetGpr(ra, 32);
 	auto rb_i32 = GetGpr(rb, 32);
 	auto res_i32 = m_ir_builder->CreateSDiv(ra_i32, rb_i32);
@@ -3452,7 +3291,6 @@ void Compiler::DIVW(u32 rd, u32 ra, u32 rb, u32 oe, u32 rc) {
 	}
 
 	// TODO make sure an exception does not occur on divide by 0 and overflow
-#endif
 }
 
 void Compiler::LVLX(u32 vd, u32 ra, u32 rb) {
@@ -3835,9 +3673,6 @@ void Compiler::DSS(u32 strm, u32 a) {
 }
 
 void Compiler::SRAWI(u32 ra, u32 rs, u32 sh, u32 rc) {
-#ifdef USE_INTERP
-	Call<u32>("SRAWI", PPUInterpreter::SRAWI_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rs), m_ir_builder->getInt32(sh), m_ir_builder->getInt32(rc));
-#else
 	auto rs_i32 = GetGpr(rs, 32);
 	auto rs_i64 = m_ir_builder->CreateZExt(rs_i32, m_ir_builder->getInt64Ty());
 	rs_i64 = m_ir_builder->CreateShl(rs_i64, 32);
@@ -3854,7 +3689,6 @@ void Compiler::SRAWI(u32 ra, u32 rs, u32 sh, u32 rc) {
 	if (rc) {
 		SetCrFieldSignedCmp(0, ra_i64, m_ir_builder->getInt64(0));
 	}
-#endif
 }
 
 void Compiler::SRADI1(u32 ra, u32 rs, u32 sh, u32 rc) {
@@ -3914,9 +3748,6 @@ void Compiler::STVRXL(u32 vs, u32 ra, u32 rb) {
 }
 
 void Compiler::EXTSB(u32 ra, u32 rs, u32 rc) {
-#ifdef USE_INTERP
-	Call<void>("EXTSB", PPUInterpreter::EXTSB_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rs), m_ir_builder->getInt32(rc));
-#else
 	auto rs_i8 = GetGpr(rs, 8);
 	auto rs_i64 = m_ir_builder->CreateSExt(rs_i8, m_ir_builder->getInt64Ty());
 	SetGpr(ra, rs_i64);
@@ -3924,7 +3755,6 @@ void Compiler::EXTSB(u32 ra, u32 rs, u32 rc) {
 	if (rc) {
 		SetCrFieldSignedCmp(0, rs_i64, m_ir_builder->getInt64(0));
 	}
-#endif
 }
 
 void Compiler::STFIWX(u32 frs, u32 ra, u32 rb) {
@@ -3940,9 +3770,6 @@ void Compiler::STFIWX(u32 frs, u32 ra, u32 rb) {
 }
 
 void Compiler::EXTSW(u32 ra, u32 rs, u32 rc) {
-#ifdef USE_INTERP
-	Call<u32>("EXTSW", PPUInterpreter::EXTSW_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rs), m_ir_builder->getInt32(rc));
-#else
 	auto rs_i32 = GetGpr(rs, 32);
 	auto rs_i64 = m_ir_builder->CreateSExt(rs_i32, m_ir_builder->getInt64Ty());
 	SetGpr(ra, rs_i64);
@@ -3950,7 +3777,6 @@ void Compiler::EXTSW(u32 ra, u32 rs, u32 rc) {
 	if (rc) {
 		SetCrFieldSignedCmp(0, rs_i64, m_ir_builder->getInt64(0));
 	}
-#endif
 }
 
 void Compiler::ICBI(u32 ra, u32 rs) {
@@ -3975,9 +3801,6 @@ void Compiler::DCBZ(u32 ra, u32 rb) {
 }
 
 void Compiler::LWZ(u32 rd, u32 ra, s32 d) {
-#ifdef USE_INTERP
-	Call<u32>("LWZ", PPUInterpreter::LWZ_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(d));
-#else
 	auto addr_i64 = (Value *)m_ir_builder->getInt64((s64)d);
 	if (ra) {
 		auto ra_i64 = GetGpr(ra);
@@ -3987,7 +3810,6 @@ void Compiler::LWZ(u32 rd, u32 ra, s32 d) {
 	auto mem_i32 = ReadMemory(addr_i64, 32);
 	auto mem_i64 = m_ir_builder->CreateZExt(mem_i32, m_ir_builder->getInt64Ty());
 	SetGpr(rd, mem_i64);
-#endif
 }
 
 void Compiler::LWZU(u32 rd, u32 ra, s32 d) {
@@ -4002,9 +3824,6 @@ void Compiler::LWZU(u32 rd, u32 ra, s32 d) {
 }
 
 void Compiler::LBZ(u32 rd, u32 ra, s32 d) {
-#ifdef USE_INTERP
-	Call<u32>("LBZ", PPUInterpreter::LBZ_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(d));
-#else
 	auto addr_i64 = (Value *)m_ir_builder->getInt64((s64)d);
 	if (ra) {
 		auto ra_i64 = GetGpr(ra);
@@ -4014,7 +3833,6 @@ void Compiler::LBZ(u32 rd, u32 ra, s32 d) {
 	auto mem_i8 = ReadMemory(addr_i64, 8);
 	auto mem_i64 = m_ir_builder->CreateZExt(mem_i8, m_ir_builder->getInt64Ty());
 	SetGpr(rd, mem_i64);
-#endif
 }
 
 void Compiler::LBZU(u32 rd, u32 ra, s32 d) {
@@ -4029,9 +3847,6 @@ void Compiler::LBZU(u32 rd, u32 ra, s32 d) {
 }
 
 void Compiler::STW(u32 rs, u32 ra, s32 d) {
-#ifdef USE_INTERP
-	Call<void>("STW", PPUInterpreter::STW_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rs), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(d));
-#else
 	auto addr_i64 = (Value *)m_ir_builder->getInt64((s64)d);
 	if (ra) {
 		auto ra_i64 = GetGpr(ra);
@@ -4039,7 +3854,6 @@ void Compiler::STW(u32 rs, u32 ra, s32 d) {
 	}
 
 	WriteMemory(addr_i64, GetGpr(rs, 32));
-#endif
 }
 
 void Compiler::STWU(u32 rs, u32 ra, s32 d) {
@@ -4163,9 +3977,6 @@ void Compiler::STMW(u32 rs, u32 ra, s32 d) {
 }
 
 void Compiler::LFS(u32 frd, u32 ra, s32 d) {
-#ifdef USE_INTERP
-	Call<void>("LFS", PPUInterpreter::LFS_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(frd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(d));
-#else
 	auto addr_i64 = (Value *)m_ir_builder->getInt64((s64)d);
 	if (ra) {
 		auto ra_i64 = GetGpr(ra);
@@ -4174,7 +3985,6 @@ void Compiler::LFS(u32 frd, u32 ra, s32 d) {
 
 	auto mem_i32 = ReadMemory(addr_i64, 32);
 	SetFpr(frd, mem_i32);
-#endif
 }
 
 void Compiler::LFSU(u32 frd, u32 ra, s32 ds) {
@@ -4208,9 +4018,6 @@ void Compiler::LFDU(u32 frd, u32 ra, s32 ds) {
 }
 
 void Compiler::STFS(u32 frs, u32 ra, s32 d) {
-#ifdef USE_INTERP
-	Call<void>("STFS", PPUInterpreter::STFS_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(frs), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(d));
-#else
 	auto addr_i64 = (Value *)m_ir_builder->getInt64((s64)d);
 	if (ra) {
 		auto ra_i64 = GetGpr(ra);
@@ -4219,7 +4026,6 @@ void Compiler::STFS(u32 frs, u32 ra, s32 d) {
 
 	auto frs_i32 = m_ir_builder->CreateBitCast(GetFpr(frs, 32), m_ir_builder->getInt32Ty());
 	WriteMemory(addr_i64, frs_i32);
-#endif
 }
 
 void Compiler::STFSU(u32 frs, u32 ra, s32 d) {
@@ -4254,9 +4060,6 @@ void Compiler::STFDU(u32 frs, u32 ra, s32 d) {
 }
 
 void Compiler::LD(u32 rd, u32 ra, s32 ds) {
-#ifdef USE_INTERP
-	Call<void>("LD", PPUInterpreter::LD_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(ds));
-#else
 	auto addr_i64 = (Value *)m_ir_builder->getInt64((s64)ds);
 	if (ra) {
 		auto ra_i64 = GetGpr(ra);
@@ -4265,7 +4068,6 @@ void Compiler::LD(u32 rd, u32 ra, s32 ds) {
 
 	auto mem_i64 = ReadMemory(addr_i64, 64);
 	SetGpr(rd, mem_i64);
-#endif
 }
 
 void Compiler::LDU(u32 rd, u32 ra, s32 ds) {
@@ -4320,66 +4122,7 @@ void Compiler::FSUBS(u32 frd, u32 fra, u32 frb, u32 rc) {
 	// TODO: Set flags
 }
 
-#ifdef USE_INTERP
-static
-u32 InterpFADDS(PPUThread *CPU, u32 frd, u32 fra, u32 frb, u32 rc)
-{
-	bool single = true;
-	SetHostRoundingMode(CPU->FPSCR.RN);
-	const double a = CPU->FPR[fra];
-	const double b = CPU->FPR[frb];
-	if (FPRdouble::IsSNaN(a) || FPRdouble::IsSNaN(b))
-	{
-		CPU->SetFPSCRException(FPSCR_VXSNAN);
-		CPU->FPSCR.FR = 0;
-		CPU->FPSCR.FI = 0;
-		if (CPU->FPSCR.VE)
-		{
-			if (rc) CPU->UpdateCR1();
-			return 0;
-		}
-	}
-	if (FPRdouble::IsNaN(a))
-	{
-		CPU->FPR[frd] = SilenceNaN(a);
-	}
-	else if (FPRdouble::IsNaN(b))
-	{
-		CPU->FPR[frd] = SilenceNaN(b);
-	}
-	else if (FPRdouble::IsINF(a) && FPRdouble::IsINF(b) && a != b)
-	{
-		CPU->SetFPSCRException(FPSCR_VXISI);
-		CPU->FPSCR.FR = 0;
-		CPU->FPSCR.FI = 0;
-		if (CPU->FPSCR.VE)
-		{
-			if (rc) CPU->UpdateCR1();
-			return 0;
-		}
-		CPU->FPR[frd] = FPR_NAN;
-	}
-	else
-	{
-		feclearexcept(FE_ALL_EXCEPT);
-		const double res = a + b;
-		if (single) CPU->FPR[frd] = (float)res;
-		else       CPU->FPR[frd] = res;
-//		CheckHostFPExceptions();
-		CPU->SetFPSCR_FI(fetestexcept(FE_INEXACT) != 0);
-		if (fetestexcept(FE_UNDERFLOW)) CPU->SetFPSCRException(FPSCR_UX);
-		if (fetestexcept(FE_OVERFLOW)) CPU->SetFPSCRException(FPSCR_OX);
-	}
-	CPU->FPSCR.FPRF = CPU->FPR[frd].GetType();
-	if (rc) CPU->UpdateCR1();
-	return 0;
-}
-#endif
-
 void Compiler::FADDS(u32 frd, u32 fra, u32 frb, u32 rc) {
-#ifdef USE_INTERP
-	Call<u32>("FADDS", InterpFADDS, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(frd), m_ir_builder->getInt32(fra), m_ir_builder->getInt32(frb), m_ir_builder->getInt32(rc));
-#else
 	auto ra_f64 = GetFpr(fra);
 	auto rb_f64 = GetFpr(frb);
 	auto res_f64 = m_ir_builder->CreateFAdd(ra_f64, rb_f64);
@@ -4392,7 +4135,6 @@ void Compiler::FADDS(u32 frd, u32 fra, u32 frb, u32 rc) {
 	}
 
 	// TODO: Set flags
-#endif
 }
 
 void Compiler::FSQRTS(u32 frd, u32 frb, u32 rc) {
@@ -4507,9 +4249,6 @@ void Compiler::FNMADDS(u32 frd, u32 fra, u32 frc, u32 frb, u32 rc) {
 }
 
 void Compiler::STD(u32 rs, u32 ra, s32 d) {
-#ifdef USE_INTERP
-	Call<void>("STD", PPUInterpreter::STD_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rs), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(d));
-#else
 	auto addr_i64 = (Value *)m_ir_builder->getInt64((s64)d);
 	if (ra) {
 		auto ra_i64 = GetGpr(ra);
@@ -4517,20 +4256,15 @@ void Compiler::STD(u32 rs, u32 ra, s32 d) {
 	}
 
 	WriteMemory(addr_i64, GetGpr(rs, 64));
-#endif
 }
 
 void Compiler::STDU(u32 rs, u32 ra, s32 ds) {
-#ifdef USE_INTERP
-	Call<u32>("STDU", PPUInterpreter::STDU_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rs), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(ds));
-#else
 	auto addr_i64 = (Value *)m_ir_builder->getInt64((s64)ds);
 	auto ra_i64 = GetGpr(ra);
 	addr_i64 = m_ir_builder->CreateAdd(ra_i64, addr_i64);
 
 	WriteMemory(addr_i64, GetGpr(rs, 64));
 	SetGpr(ra, addr_i64);
-#endif
 }
 
 void Compiler::MTFSB1(u32 crbd, u32 rc) {
