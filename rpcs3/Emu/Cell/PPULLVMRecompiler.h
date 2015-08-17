@@ -292,10 +292,17 @@ namespace ppu_recompiler_llvm {
 		Compiler & operator = (Compiler && other) = delete;
 
 		/**
+		 * Set m_module and create an execution engine owning it.
+		 */
+		llvm::ExecutionEngine *InitializeModuleAndExecutionEngine();
+		static llvm::FunctionPassManager *createFunctionPassManager(llvm::Module *);
+
+		/**
 		 * Compile a code fragment described by a cfg and return an executable and the ExecutionEngine storing it
 		 * Pointer to function can be retrieved with getPointerToFunction
 		 */
-		std::pair<Executable, llvm::ExecutionEngine *> Compile(const std::string & name, const ControlFlowGraph & cfg, bool generate_linkable_exits);
+		std::pair<Executable, llvm::ExecutionEngine *> CompileBlock(const std::string & name, const ControlFlowGraph & cfg);
+		std::pair<Executable, llvm::ExecutionEngine *> CompileFunction(u32 address, u32 instruction_count);
 
 		/// Retrieve compiler stats
 		Stats GetStats();
@@ -736,6 +743,12 @@ namespace ppu_recompiler_llvm {
 
 			/// Create code such that exit points can be linked to other blocks
 			bool generate_linkable_exits;
+
+			/// True if the compiled entry is a function that can be completly compiled (ie with clean ret)
+			bool m_is_function_completly_compilable;
+
+			/// If the function can be completly compiled, num of instructions
+			u32 m_instruction_count;
 		};
 
 		/// Recompilation engine
@@ -1056,11 +1069,23 @@ namespace ppu_recompiler_llvm {
 			/// Indicates whether the block has been compiled or not
 			bool is_compiled;
 
+			/// Indicate wheter the block is a function that can be completly compiled
+			/// that is, that has a clear "return" semantic.
+			bool is_compilable_function;
+
+			/// If the function is compilable, how long is it.
+			u32 instructionCount;
+
+			/// If the function is compilable, which function does it call.
+			std::set<u32> calledFunctions;
+
 			BlockEntry(u32 start_address, u32 function_address)
 				: num_hits(0)
 				, revision(0)
 				, last_compiled_cfg_size(0)
 				, is_compiled(false)
+				, is_compilable_function(false)
+				, instructionCount(0)
 				, cfg(start_address, function_address) {
 			}
 
@@ -1129,6 +1154,12 @@ namespace ppu_recompiler_llvm {
 
 		RecompilationEngine & operator = (const RecompilationEngine & other) = delete;
 		RecompilationEngine & operator = (RecompilationEngine && other) = delete;
+
+		/**
+		* This code is inspired from Dolphin PPC Analyst
+		* Return true if analysis is successful.
+		*/
+		bool AnalyseFunction(BlockEntry &functionData, u32 maxSize = 1000);
 
 		/// Process an execution trace.
 		void ProcessExecutionTrace(const ExecutionTrace & execution_trace);

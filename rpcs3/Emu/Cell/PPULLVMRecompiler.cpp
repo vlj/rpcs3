@@ -69,9 +69,8 @@ Compiler::~Compiler() {
 	delete m_llvm_context;
 }
 
-std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::string & name, const ControlFlowGraph & cfg, bool generate_linkable_exits) {
-	auto compilation_start = std::chrono::high_resolution_clock::now();
-
+llvm::ExecutionEngine *Compiler::InitializeModuleAndExecutionEngine()
+{
 	m_module = new llvm::Module("Module", *m_llvm_context);
 	m_execute_unknown_function = (Function *)m_module->getOrInsertFunction("execute_unknown_function", m_compiled_function_type);
 	m_execute_unknown_function->setCallingConv(CallingConv::X86_64_Win64);
@@ -91,7 +90,12 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 		.create();
 	m_module->setDataLayout(execution_engine->getDataLayout());
 
-	llvm::FunctionPassManager *fpm = new llvm::FunctionPassManager(m_module);
+	return execution_engine;
+}
+
+llvm::FunctionPassManager *Compiler::createFunctionPassManager(llvm::Module *module)
+{
+	llvm::FunctionPassManager *fpm = new llvm::FunctionPassManager(module);
 	fpm->add(createNoAAPass());
 	fpm->add(createBasicAliasAnalysisPass());
 	fpm->add(createNoTargetTransformInfoPass());
@@ -112,8 +116,20 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 	fpm->add(createCFGSimplificationPass());
 	fpm->doInitialization();
 
+	return fpm;
+}
+
+std::pair<Executable, llvm::ExecutionEngine *> Compiler::CompileBlock(const std::string & name, const ControlFlowGraph & cfg) {
+	auto compilation_start = std::chrono::high_resolution_clock::now();
+
+	llvm::ExecutionEngine *execution_engine = InitializeModuleAndExecutionEngine();
+	llvm::FunctionPassManager *fpm = createFunctionPassManager(m_module);
+
 	m_state.cfg = &cfg;
-	m_state.generate_linkable_exits = generate_linkable_exits;
+	m_state.generate_linkable_exits = false;
+
+	m_state.m_instruction_count = 0;
+	m_state.m_is_function_completly_compilable = false;
 
 	// Create the function
 	m_state.function = (Function *)m_module->getOrInsertFunction(name, m_compiled_function_type);
@@ -136,6 +152,7 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 
 	// Convert each instruction in the CFG to LLVM IR
 	std::vector<PHINode *> exit_instr_list;
+
 	for (u32 instr_i : cfg.instruction_addresses) {
 		m_state.hit_branch_instruction = false;
 		m_state.current_instruction_address = instr_i;
@@ -171,27 +188,7 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 
 		SetPc(m_ir_builder->getInt32(m_state.current_instruction_address));
 
-		if (generate_linkable_exits) {
-			Value *context_i64 = m_ir_builder->CreateZExt(exit_instr_i32, m_ir_builder->getInt64Ty());
-			context_i64 = m_ir_builder->CreateOr(context_i64, (u64)cfg.function_address << 32);
-			Value *ret_i32 = IndirectCall(m_state.current_instruction_address, context_i64, false);
-			Value *cmp_i1 = m_ir_builder->CreateICmpNE(ret_i32, m_ir_builder->getInt32(0));
-			BasicBlock *then_bb = GetBasicBlockFromAddress(m_state.current_instruction_address, "then_0");
-			BasicBlock *merge_bb = GetBasicBlockFromAddress(m_state.current_instruction_address, "merge_0");
-			m_ir_builder->CreateCondBr(cmp_i1, then_bb, merge_bb);
-
-			m_ir_builder->SetInsertPoint(then_bb);
-			context_i64 = m_ir_builder->CreateZExt(ret_i32, m_ir_builder->getInt64Ty());
-			context_i64 = m_ir_builder->CreateOr(context_i64, (u64)cfg.function_address << 32);
-			m_ir_builder->CreateCall2(m_execute_unknown_block, m_state.args[CompileTaskState::Args::State], context_i64);
-			m_ir_builder->CreateBr(merge_bb);
-
-			m_ir_builder->SetInsertPoint(merge_bb);
-			m_ir_builder->CreateRet(m_ir_builder->getInt32(0));
-		}
-		else {
-			m_ir_builder->CreateRet(exit_instr_i32);
-		}
+		m_ir_builder->CreateRet(exit_instr_i32);
 	}
 
 	// If the function has a default exit block then generate code for it
@@ -201,24 +198,7 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 		PHINode *exit_instr_i32 = m_ir_builder->CreatePHI(m_ir_builder->getInt32Ty(), 0);
 		exit_instr_list.push_back(exit_instr_i32);
 
-		if (generate_linkable_exits) {
-			Value *cmp_i1 = m_ir_builder->CreateICmpNE(exit_instr_i32, m_ir_builder->getInt32(0));
-			BasicBlock *then_bb = GetBasicBlockFromAddress(0xFFFFFFFF, "then_0");
-			BasicBlock *merge_bb = GetBasicBlockFromAddress(0xFFFFFFFF, "merge_0");
-			m_ir_builder->CreateCondBr(cmp_i1, then_bb, merge_bb);
-
-			m_ir_builder->SetInsertPoint(then_bb);
-			Value *context_i64 = m_ir_builder->CreateZExt(exit_instr_i32, m_ir_builder->getInt64Ty());
-			context_i64 = m_ir_builder->CreateOr(context_i64, (u64)cfg.function_address << 32);
-			m_ir_builder->CreateCall2(m_execute_unknown_block, m_state.args[CompileTaskState::Args::State], context_i64);
-			m_ir_builder->CreateBr(merge_bb);
-
-			m_ir_builder->SetInsertPoint(merge_bb);
-			m_ir_builder->CreateRet(m_ir_builder->getInt32(0));
-		}
-		else {
-			m_ir_builder->CreateRet(exit_instr_i32);
-		}
+		m_ir_builder->CreateRet(exit_instr_i32);
 	}
 
 	// Add incoming values for all exit instr PHI nodes
@@ -264,6 +244,89 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 		}
 
 		LLVMDisasmDispose(disassembler);*/
+
+	auto compilation_end = std::chrono::high_resolution_clock::now();
+	m_stats.total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(compilation_end - compilation_start);
+	delete fpm;
+
+	assert(function != nullptr);
+	return std::make_pair((Executable)function, execution_engine);
+}
+
+
+std::pair<Executable, llvm::ExecutionEngine *> Compiler::CompileFunction(u32 address, u32 instruction_count) {
+	auto compilation_start = std::chrono::high_resolution_clock::now();
+
+	llvm::ExecutionEngine *execution_engine = InitializeModuleAndExecutionEngine();
+	llvm::FunctionPassManager *fpm = createFunctionPassManager(m_module);
+
+	m_state.cfg = nullptr;
+	m_state.generate_linkable_exits = false;
+
+	m_state.m_instruction_count = instruction_count;
+	m_state.m_is_function_completly_compilable = true;
+
+	// Create the function
+	std::string name = fmt::Format("fonction_0x%08X", address);
+	m_state.function = (Function *)m_module->getOrInsertFunction(name, m_compiled_function_type);
+	m_state.function->setCallingConv(CallingConv::X86_64_Win64);
+	auto arg_i = m_state.function->arg_begin();
+	arg_i->setName("ppu_state");
+	m_state.args[CompileTaskState::Args::State] = arg_i;
+	(++arg_i)->setName("context");
+	m_state.args[CompileTaskState::Args::Context] = arg_i;
+
+	// Create the entry block and add code to branch to the first instruction
+	m_ir_builder->SetInsertPoint(GetBasicBlockFromAddress(0));
+	m_ir_builder->CreateBr(GetBasicBlockFromAddress(address));
+
+	// Used to decode instructions
+	PPUDisAsm dis_asm(CPUDisAsm_DumpMode);
+	dis_asm.offset = vm::get_ptr<u8>(address);
+
+	m_recompilation_engine.Log() << "Recompiling block :\n\n";
+
+	// Convert each instruction in the CFG to LLVM IR
+	for (u32 instructionAddress = address; instructionAddress < address + instruction_count * 4; instructionAddress += 4) {
+		m_state.hit_branch_instruction = false;
+		m_state.current_instruction_address = instructionAddress;
+		BasicBlock *instr_bb = GetBasicBlockFromAddress(instructionAddress);
+		m_ir_builder->SetInsertPoint(instr_bb);
+
+		u32 instr = vm::ps3::read32(instructionAddress);
+
+		// Dump PPU opcode
+		dis_asm.dump_pc = instructionAddress;
+		(*PPU_instr::main_list)(&dis_asm, instr);
+		m_recompilation_engine.Log() << dis_asm.last_opcode;
+
+		Decode(instr);
+		if (!m_state.hit_branch_instruction)
+			m_ir_builder->CreateBr(GetBasicBlockFromAddress(instructionAddress + 4));
+	}
+
+	m_recompilation_engine.Log() << "LLVM bytecode:\n";
+	m_recompilation_engine.Log() << *m_module;
+
+	std::string        verify;
+	raw_string_ostream verify_ostream(verify);
+	if (verifyFunction(*m_state.function, &verify_ostream)) {
+		m_recompilation_engine.Log() << "Verification failed: " << verify << "\n";
+	}
+
+	auto ir_build_end = std::chrono::high_resolution_clock::now();
+	m_stats.ir_build_time += std::chrono::duration_cast<std::chrono::nanoseconds>(ir_build_end - compilation_start);
+
+	// Optimize this function
+	fpm->run(*m_state.function);
+	auto optimize_end = std::chrono::high_resolution_clock::now();
+	m_stats.optimization_time += std::chrono::duration_cast<std::chrono::nanoseconds>(optimize_end - ir_build_end);
+
+	// Translate to machine code
+	execution_engine->finalizeObject();
+	void *function = execution_engine->getPointerToFunction(m_state.function);
+	auto translate_end = std::chrono::high_resolution_clock::now();
+	m_stats.translation_time += std::chrono::duration_cast<std::chrono::nanoseconds>(translate_end - optimize_end);
 
 	auto compilation_end = std::chrono::high_resolution_clock::now();
 	m_stats.total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(compilation_end - compilation_start);
@@ -351,6 +414,69 @@ raw_fd_ostream & RecompilationEngine::Log() {
 	}
 
 	return *m_log;
+}
+
+/**
+ * This code is inspired from Dolphin PPC Analyst
+ */
+inline s32 SignExt16(s16 x) { return (s32)(s16)x; }
+inline s32 SignExt26(u32 x) { return x & 0x2000000 ? (s32)(x | 0xFC000000) : (s32)(x); }
+
+
+bool RecompilationEngine::AnalyseFunction(BlockEntry &functionData, u32 maxSize)
+{
+	u32 startAddress = functionData.cfg.start_address;
+	u32 farthestBranchTarget = startAddress;
+	functionData.calledFunctions.clear();
+	Log() << "Analysing " << (u32*)startAddress << "\n";
+	for (size_t instructionAddress = startAddress; instructionAddress < startAddress + maxSize; instructionAddress += 4)
+	{
+		u32 instr = vm::ps3::read32(instructionAddress);
+		if (instr == PPU_instr::implicts::BLR() && instructionAddress >= farthestBranchTarget)
+		{
+			functionData.instructionCount = (instructionAddress - startAddress) / 4 + 1;
+			Log() << "Instruction count is " << functionData.instructionCount << "\n";
+			functionData.is_compilable_function = true;
+			return true;
+		}
+		else if (PPU_instr::fields::GD_13(instr) == PPU_opcodes::G_13Opcodes::BCCTR)
+		{
+			if (!PPU_instr::fields::LK(instr))
+			{
+				Log() << "Failing because indirect branching \n";
+				return false;
+			}
+		}
+		else if (PPU_instr::fields::OPCD(instr) == PPU_opcodes::PPU_MainOpcodes::BC)
+		{
+			u32 target = SignExt16(PPU_instr::fields::BD(instr));
+			if (!PPU_instr::fields::AA(instr)) // Absolute address
+				target += instructionAddress;
+			if (target > farthestBranchTarget && !PPU_instr::fields::LK(instr))
+				farthestBranchTarget = target;
+		}
+		else if (PPU_instr::fields::OPCD(instr) == PPU_opcodes::PPU_MainOpcodes::B)
+		{
+			u32 target = SignExt26(PPU_instr::fields::LL(instr));
+			if (!PPU_instr::fields::AA(instr)) // Absolute address
+				target += instructionAddress;
+
+			if (!PPU_instr::fields::LK(instr))
+			{
+				if (target < startAddress)
+				{
+					Log() << "Failing because of branch to " << target << "\n";
+					return false; // Note : maybe update farthestBranchTarget ?
+				}
+				else if (target > farthestBranchTarget)
+					farthestBranchTarget = target;
+			}
+			else
+				functionData.calledFunctions.insert(target);
+		}
+	}
+	Log() << "Failing because maxSize reached \n";
+	return false;
 }
 
 void RecompilationEngine::Task() {
@@ -527,16 +653,27 @@ void RecompilationEngine::UpdateControlFlowGraph(ControlFlowGraph & cfg, const E
 
 void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	Log() << "Compile: " << block_entry.ToString() << "\n";
+	Log() << "Is compilable :" << block_entry.is_compilable_function << "\n";
+	Log() << "Size :" << block_entry.instructionCount << "\n";
+	Log() << "called function count : " << block_entry.calledFunctions.size() << "\n";
 	Log() << "CFG: " << block_entry.cfg.ToString() << "\n";
 
 	assert(!block_entry.is_compiled);
+	if (block_entry.IsFunction())
+		AnalyseFunction(block_entry);
 
-	const std::pair<Executable, llvm::ExecutionEngine *> &compileResult =
-		m_compiler.Compile(fmt::Format("fn_0x%08X_%u", block_entry.cfg.start_address, block_entry.revision++), block_entry.cfg,
-			block_entry.IsFunction() ? true : false /*generate_linkable_exits*/);
+	std::pair<Executable, llvm::ExecutionEngine *> compileResult;
+	if (block_entry.is_compilable_function)
+	{
+		compileResult = m_compiler.CompileFunction(block_entry.cfg.start_address, block_entry.instructionCount);
+	}
+	else
+	{
+		compileResult = m_compiler.CompileBlock(fmt::Format("block_0x%08X", block_entry.cfg.start_address), block_entry.cfg);
+	}
 
 	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
-	if (block_entry.IsFunction())
+	if (block_entry.is_compilable_function)
 	{
 		std::get<1>(m_function_to_compiled_executable[block_entry.cfg.start_address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
 		std::get<0>(m_function_to_compiled_executable[block_entry.cfg.start_address]) = compileResult.first;
@@ -665,7 +802,10 @@ u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteFunction(PPUThread *
 	auto execution_engine = (CPUHybridDecoderRecompiler *)ppu_state->GetDecoder();
 	const Executable *executable = execution_engine->m_recompilation_engine->GetCompiledFunctionIfAvailable(ppu_state->PC);
 	if (executable)
-		return (u32)(*executable)(ppu_state, 0);
+	{
+		u32 exitValue = (u32)(*executable)(ppu_state, 0);
+		return exitValue;
+	}
 	else
 	{
 		execution_engine->m_tracer.Trace(Tracer::TraceType::EnterFunction, ppu_state->PC, 0);
