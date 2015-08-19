@@ -293,7 +293,8 @@ RecompilationEngine::RecompilationEngine()
 }
 
 RecompilationEngine::~RecompilationEngine() {
-	m_address_to_function.clear();
+	m_function_to_compiled_executable.clear();
+	m_block_to_compiled_executable.clear();
 	join();
 }
 
@@ -304,13 +305,11 @@ const Executable *RecompilationEngine::GetExecutable(u32 address, bool isFunctio
 	return isFunction ? &executeFunc : &executeUntilReturn;
 }
 
-const Executable *RecompilationEngine::GetCompiledExecutableIfAvailable(u32 address)
+const Executable *RecompilationEngine::GetCompiledFunctionIfAvailable(u32 address)
 {
 	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
-	std::unordered_map<u32, ExecutableStorage>::iterator It = m_address_to_function.find(address);
-	if (It == m_address_to_function.end())
-		return nullptr;
-	if (std::get<1>(It->second) == nullptr)
+	std::unordered_map<u32, ExecutableStorage>::iterator It = m_function_to_compiled_executable.find(address);
+	if (It == m_function_to_compiled_executable.end())
 		return nullptr;
 	u32 id = std::get<3>(It->second);
 	if (Ini.LLVMExclusionRange.GetValue() && (id >= Ini.LLVMMinId.GetValue() && id <= Ini.LLVMMaxId.GetValue()))
@@ -318,20 +317,16 @@ const Executable *RecompilationEngine::GetCompiledExecutableIfAvailable(u32 addr
 	return &(std::get<0>(It->second));
 }
 
-void RecompilationEngine::RemoveUnusedEntriesFromCache() {
-	auto now = std::chrono::high_resolution_clock::now();
-	if (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_last_cache_clear_time).count() > 10000) {
-		for (auto i = m_address_to_function.begin(); i != m_address_to_function.end();) {
-			auto tmp = i;
-			i++;
-			if (std::get<2>(tmp->second) == 0)
-				m_address_to_function.erase(tmp);
-			else
-				std::get<2>(tmp->second) = 0;
-		}
-
-		m_last_cache_clear_time = now;
-	}
+const Executable *RecompilationEngine::GetCompiledBlockIfAvailable(u32 address)
+{
+	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
+	std::unordered_map<u32, ExecutableStorage>::iterator It = m_block_to_compiled_executable.find(address);
+	if (It == m_block_to_compiled_executable.end())
+		return nullptr;
+	u32 id = std::get<3>(It->second);
+	if (Ini.LLVMExclusionRange.GetValue() && (id >= Ini.LLVMMinId.GetValue() && id <= Ini.LLVMMaxId.GetValue()))
+		return nullptr;
+	return &(std::get<0>(It->second));
 }
 
 void RecompilationEngine::NotifyTrace(ExecutionTrace * execution_trace) {
@@ -540,16 +535,23 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 		m_compiler.Compile(fmt::Format("fn_0x%08X_%u", block_entry.cfg.start_address, block_entry.revision++), block_entry.cfg,
 			block_entry.IsFunction() ? true : false /*generate_linkable_exits*/);
 
+	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
+	if (block_entry.IsFunction())
 	{
-		std::lock_guard<std::mutex> lock(m_address_to_function_lock);
-		std::get<1>(m_address_to_function[block_entry.cfg.start_address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
-		std::get<0>(m_address_to_function[block_entry.cfg.start_address]) = compileResult.first;
-		std::get<3>(m_address_to_function[block_entry.cfg.start_address]) = m_currentId;
-		Log() << "ID IS " << m_currentId << "\n";
-		m_currentId++;
-		block_entry.last_compiled_cfg_size = block_entry.cfg.GetSize();
-		block_entry.is_compiled = true;
+		std::get<1>(m_function_to_compiled_executable[block_entry.cfg.start_address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
+		std::get<0>(m_function_to_compiled_executable[block_entry.cfg.start_address]) = compileResult.first;
+		std::get<3>(m_function_to_compiled_executable[block_entry.cfg.start_address]) = m_currentId;
 	}
+	else
+	{
+		std::get<1>(m_block_to_compiled_executable[block_entry.cfg.start_address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
+		std::get<0>(m_block_to_compiled_executable[block_entry.cfg.start_address]) = compileResult.first;
+		std::get<3>(m_block_to_compiled_executable[block_entry.cfg.start_address]) = m_currentId;
+	}
+	Log() << "ID IS " << m_currentId << "\n";
+	m_currentId++;
+	block_entry.last_compiled_cfg_size = block_entry.cfg.GetSize();
+	block_entry.is_compiled = true;
 }
 
 std::shared_ptr<RecompilationEngine> RecompilationEngine::GetInstance() {
@@ -661,8 +663,14 @@ u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::DecodeMemory(const u32 addr
 
 u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteFunction(PPUThread * ppu_state, u64 context) {
 	auto execution_engine = (CPUHybridDecoderRecompiler *)ppu_state->GetDecoder();
-	execution_engine->m_tracer.Trace(Tracer::TraceType::EnterFunction, ppu_state->PC, 0);
-	return ExecuteTillReturn(ppu_state, 0);
+	const Executable *executable = execution_engine->m_recompilation_engine->GetCompiledFunctionIfAvailable(ppu_state->PC);
+	if (executable)
+		return (u32)(*executable)(ppu_state, 0);
+	else
+	{
+		execution_engine->m_tracer.Trace(Tracer::TraceType::EnterFunction, ppu_state->PC, 0);
+		return ExecuteTillReturn(ppu_state, 0);
+	}
 }
 
 /// Get the branch type from a branch instruction
@@ -695,7 +703,7 @@ u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteTillReturn(PPUThread
 		execution_engine->m_tracer.Trace(Tracer::TraceType::ExitFromCompiledFunction, context >> 32, context & 0xFFFFFFFF);
 
 	while (PollStatus(ppu_state) == false) {
-		const Executable *executable = execution_engine->m_recompilation_engine->GetCompiledExecutableIfAvailable(ppu_state->PC);
+		const Executable *executable = execution_engine->m_recompilation_engine->GetCompiledBlockIfAvailable(ppu_state->PC);
 		if (executable) {
 			auto entry = ppu_state->PC;
 			u32 exit = (u32)(*executable)(ppu_state, 0);

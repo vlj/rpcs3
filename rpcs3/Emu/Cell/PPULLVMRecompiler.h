@@ -1016,10 +1016,16 @@ namespace ppu_recompiler_llvm {
 		const Executable *GetExecutable(u32 address, bool isFunction);
 
 		/**
-		 * Get the executable for the specified address if a compiled version is
+		 * Get the executable for the function at address if it exists.
+		 * Returns nullptr otherwise
+		 **/
+		const Executable *GetCompiledFunctionIfAvailable(u32 address);
+
+		/**
+		 * Get the executable for the "block" at address if a compiled version is
 		 * available, otherwise returns nullptr.
 		 **/
-		const Executable *GetCompiledExecutableIfAvailable(u32 address);
+		const Executable *GetCompiledBlockIfAvailable(u32 address);
 
 		/// Notify the recompilation engine about a newly detected trace. It takes ownership of the trace.
 		void NotifyTrace(ExecutionTrace * execution_trace);
@@ -1107,13 +1113,11 @@ namespace ppu_recompiler_llvm {
 		/// (function, module containing function, times hit, id).
 		typedef std::tuple<Executable, std::unique_ptr<llvm::ExecutionEngine>, u32, u32> ExecutableStorage;
 		/// Address to ordinal cahce. Key is address.
-		std::unordered_map<u32, ExecutableStorage> m_address_to_function;
+		std::unordered_map<u32, ExecutableStorage> m_function_to_compiled_executable;
+		std::unordered_map<u32, ExecutableStorage> m_block_to_compiled_executable;
 
 		/// The time at which the m_address_to_ordinal cache was last cleared
 		std::chrono::high_resolution_clock::time_point m_last_cache_clear_time;
-
-		/// Remove unused entries from the m_address_to_ordinal cache
-		void RemoveUnusedEntriesFromCache();
 
 		/// PPU Compiler
 		Compiler m_compiler;
