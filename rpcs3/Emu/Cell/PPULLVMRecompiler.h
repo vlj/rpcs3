@@ -292,10 +292,17 @@ namespace ppu_recompiler_llvm {
 		Compiler & operator = (Compiler && other) = delete;
 
 		/**
+		 * Set m_module and create an execution engine owning it.
+		 */
+		llvm::ExecutionEngine *InitializeModuleAndExecutionEngine();
+		static llvm::FunctionPassManager *createFunctionPassManager(llvm::Module *);
+
+		/**
 		 * Compile a code fragment described by a cfg and return an executable and the ExecutionEngine storing it
 		 * Pointer to function can be retrieved with getPointerToFunction
 		 */
-		std::pair<Executable, llvm::ExecutionEngine *> Compile(const std::string & name, const ControlFlowGraph & cfg, bool generate_linkable_exits);
+		std::pair<Executable, llvm::ExecutionEngine *> CompileBlock(const std::string & name, const ControlFlowGraph & cfg, bool generate_linkable_exits);
+		std::pair<Executable, llvm::ExecutionEngine *> CompileFunction(u32 address, u32 instruction_count);
 
 		/// Retrieve compiler stats
 		Stats GetStats();
@@ -736,6 +743,12 @@ namespace ppu_recompiler_llvm {
 
 			/// Create code such that exit points can be linked to other blocks
 			bool generate_linkable_exits;
+
+			/// True if the compiled entry is a function that can be completly compiled (ie with clean ret)
+			bool m_is_function_completly_compilable;
+
+			/// If the function can be completly compiled, num of instructions
+			u32 m_instruction_count;
 		};
 
 		/// Recompilation engine
@@ -1022,9 +1035,16 @@ namespace ppu_recompiler_llvm {
 
 		/**
 		 * Get the executable for the specified address if a compiled version is
+		 * Get the executable for the function at address if it exists.
+		 * Returns nullptr otherwise
+		 **/
+		const Executable *GetCompiledFunctionIfAvailable(u32 address);
+
+		/**
+		 * Get the executable for the "block" at address if a compiled version is
 		 * available, otherwise returns nullptr.
 		 **/
-		const Executable *GetCompiledExecutableIfAvailable(u32 address);
+		const Executable *GetCompiledBlockIfAvailable(u32 address);
 
 		/// Notify the recompilation engine about a newly detected trace. It takes ownership of the trace.
 		void NotifyTrace(ExecutionTrace * execution_trace);
@@ -1052,14 +1072,30 @@ namespace ppu_recompiler_llvm {
 			/// The CFG for this block
 			ControlFlowGraph cfg;
 
+			/// Indicates whether this function has been analysed or not
+			bool is_analysed;
+
 			/// Indicates whether the block has been compiled or not
 			bool is_compiled;
+
+			/// Indicate wheter the block is a function that can be completly compiled
+			/// that is, that has a clear "return" semantic.
+			bool is_compilable_function;
+
+			/// If the function is compilable, how long is it.
+			u32 instructionCount;
+
+			/// If the function is compilable, which function does it call.
+			std::set<u32> calledFunctions;
 
 			BlockEntry(u32 start_address, u32 function_address)
 				: num_hits(0)
 				, revision(0)
 				, last_compiled_cfg_size(0)
+				, is_analysed(false)
 				, is_compiled(false)
+				, is_compilable_function(false)
+				, instructionCount(0)
 				, cfg(start_address, function_address) {
 			}
 
@@ -1111,11 +1147,16 @@ namespace ppu_recompiler_llvm {
 
 		int m_currentId;
 
+		/// Storage for fully compiled function
+		std::vector<std::unique_ptr<llvm::ExecutionEngine> > m_function_storage;
+		/// Pointer to fully compiled function
+		std::unordered_map<u32, Executable> m_function_to_compiled_executable;
+
 		/// (function, module containing function, times hit, id).
 		typedef std::tuple<Executable, std::unique_ptr<llvm::ExecutionEngine>, u32, u32> ExecutableStorage;
 		/// Address to ordinal cahce. Key is address.
-		std::unordered_map<u32, ExecutableStorage> m_address_to_function;
 		std::unordered_map<u32, std::pair<std::mutex, std::atomic<int> > > m_address_locks;
+		std::unordered_map<u32, ExecutableStorage> m_block_to_compiled_executable;
 
 		/// The time at which the m_address_to_ordinal cache was last cleared
 		std::chrono::high_resolution_clock::time_point m_last_cache_clear_time;
@@ -1134,11 +1175,20 @@ namespace ppu_recompiler_llvm {
 		RecompilationEngine & operator = (const RecompilationEngine & other) = delete;
 		RecompilationEngine & operator = (RecompilationEngine && other) = delete;
 
+		/**
+		* This code is inspired from Dolphin PPC Analyst
+		* Return true if analysis is successful.
+		*/
+		bool AnalyseFunction(BlockEntry &functionData, u32 maxSize = 1000);
+
 		/// Process an execution trace.
 		void ProcessExecutionTrace(const ExecutionTrace & execution_trace);
 
 		/// Update a CFG
 		void UpdateControlFlowGraph(ControlFlowGraph & cfg, const ExecutionTraceEntry & this_entry, const ExecutionTraceEntry * next_entry);
+
+		/// Attempt to compile function
+		void TryCompileFunction(BlockEntry & block_entry);
 
 		/// Compile a block
 		void CompileBlock(BlockEntry & block_entry);
