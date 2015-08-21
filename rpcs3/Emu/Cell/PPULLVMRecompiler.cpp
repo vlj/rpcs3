@@ -101,24 +101,21 @@ llvm::ExecutionEngine *Compiler::InitializeModuleAndExecutionEngine()
 llvm::FunctionPassManager *Compiler::createFunctionPassManager(llvm::Module *module)
 {
 	llvm::FunctionPassManager *fpm = new llvm::FunctionPassManager(module);
+	fpm->add(createCFGSimplificationPass());
 	fpm->add(createNoAAPass());
 	fpm->add(createBasicAliasAnalysisPass());
 	fpm->add(createNoTargetTransformInfoPass());
 	fpm->add(createEarlyCSEPass());
 	fpm->add(createTailCallEliminationPass());
 	fpm->add(createReassociatePass());
-	fpm->add(createInstructionCombiningPass());
 	fpm->add(new DominatorTreeWrapperPass());
 	fpm->add(new MemoryDependenceAnalysis());
 	fpm->add(createGVNPass());
-	fpm->add(createInstructionCombiningPass());
 	fpm->add(new MemoryDependenceAnalysis());
 	fpm->add(createDeadStoreEliminationPass());
 	fpm->add(new LoopInfo());
 	fpm->add(new ScalarEvolution());
 	fpm->add(createSLPVectorizerPass());
-	fpm->add(createInstructionCombiningPass());
-	fpm->add(createCFGSimplificationPass());
 	fpm->doInitialization();
 
 	return fpm;
