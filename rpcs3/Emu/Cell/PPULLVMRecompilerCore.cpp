@@ -5197,7 +5197,11 @@ void Compiler::CreateBranch(llvm::Value * cmp_i1, llvm::Value * target_i32, bool
 			}
 
 			SetPc(target_i32);
-			IndirectCall(target_address, m_ir_builder->getInt64(0), true);
+			Function *fn = m_module->getFunction(fmt::Format("function_0x%08X", target_address));
+			if (fn)
+				m_ir_builder->CreateCall2(fn, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt64(0));
+			else
+				Call<u32>("execute_unknown_function", nullptr, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt64(0));
 			m_ir_builder->CreateBr(GetBasicBlockFromAddress(m_state.current_instruction_address + 4));
 		}
 		else {

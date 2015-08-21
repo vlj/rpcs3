@@ -292,6 +292,15 @@ namespace ppu_recompiler_llvm {
 		Compiler & operator = (Compiler && other) = delete;
 
 		/**
+		 * Interpreter callback for function;
+		 */
+		const Executable m_execute_unknown_function_callback;
+		/**
+		* Interpreter callback for block;
+		*/
+		const Executable m_execute_unknown_block_callback;
+
+		/**
 		 * Set m_module and create an execution engine owning it.
 		 */
 		llvm::ExecutionEngine *InitializeModuleAndExecutionEngine();

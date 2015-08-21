@@ -42,7 +42,10 @@ bool Compiler::s_rotate_mask_inited = false;
 Compiler::Compiler(RecompilationEngine & recompilation_engine, const Executable execute_unknown_function,
 	const Executable execute_unknown_block, bool(*poll_status_function)(PPUThread * ppu_state))
 	: m_recompilation_engine(recompilation_engine)
-	, m_poll_status_function(poll_status_function) {
+	, m_poll_status_function(poll_status_function)
+	, m_execute_unknown_block_callback(execute_unknown_block)
+	, m_execute_unknown_function_callback(execute_unknown_function)
+	{
 	InitializeNativeTarget();
 	InitializeNativeTargetAsmPrinter();
 	InitializeNativeTargetDisassembler();
@@ -55,8 +58,6 @@ Compiler::Compiler(RecompilationEngine & recompilation_engine, const Executable 
 	arg_types.push_back(m_ir_builder->getInt64Ty());
 	m_compiled_function_type = FunctionType::get(m_ir_builder->getInt32Ty(), arg_types, false);
 
-	m_executableMap["execute_unknown_function"] = execute_unknown_function;
-	m_executableMap["execute_unknown_block"] = execute_unknown_block;
 
 	if (!s_rotate_mask_inited) {
 		InitRotateMask();
@@ -71,6 +72,10 @@ Compiler::~Compiler() {
 
 llvm::ExecutionEngine *Compiler::InitializeModuleAndExecutionEngine()
 {
+	m_executableMap.clear();
+	m_executableMap["execute_unknown_function"] = m_execute_unknown_function_callback;
+	m_executableMap["execute_unknown_block"] = m_execute_unknown_block_callback;
+
 	m_module = new llvm::Module("Module", *m_llvm_context);
 	m_execute_unknown_function = (Function *)m_module->getOrInsertFunction("execute_unknown_function", m_compiled_function_type);
 	m_execute_unknown_function->setCallingConv(CallingConv::X86_64_Win64);
