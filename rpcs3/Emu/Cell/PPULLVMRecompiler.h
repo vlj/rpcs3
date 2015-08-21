@@ -311,8 +311,8 @@ namespace ppu_recompiler_llvm {
 		 * Pointer to function can be retrieved with getPointerToFunction
 		 */
 		std::pair<Executable, llvm::ExecutionEngine *> CompileBlock(const std::string & name, const ControlFlowGraph & cfg);
-		std::pair<Executable, llvm::ExecutionEngine *> CompileFunction(u32 address, u32 instruction_count,
-			const std::set<std::pair<u32, u32> > &knowSymbol);
+		std::pair<std::set<std::pair<u32, Executable> >, llvm::ExecutionEngine *>
+			CompileFunctions(const std::set<std::pair<u32, u32> > &AddressAndLength);
 
 		/// Retrieve compiler stats
 		Stats GetStats();
@@ -1146,10 +1146,11 @@ namespace ppu_recompiler_llvm {
 		int m_currentId;
 
 		/// (function, module containing function, times hit, id).
-		typedef std::tuple<Executable, std::unique_ptr<llvm::ExecutionEngine>, u32, u32> ExecutableStorage;
+		typedef std::tuple<Executable, llvm::ExecutionEngine *, u32, u32> FunctionStorage;
 		/// Address to ordinal cahce. Key is address.
-		std::unordered_map<u32, ExecutableStorage> m_function_to_compiled_executable;
-		std::unordered_map<u32, ExecutableStorage> m_block_to_compiled_executable;
+		std::unordered_map<u32, FunctionStorage> m_function_to_compiled_executable;
+		typedef std::tuple<Executable, std::unique_ptr<llvm::ExecutionEngine>, u32, u32> BlockStorage;
+		std::unordered_map<u32, BlockStorage> m_block_to_compiled_executable;
 
 		/// The time at which the m_address_to_ordinal cache was last cleared
 		std::chrono::high_resolution_clock::time_point m_last_cache_clear_time;

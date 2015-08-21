@@ -258,63 +258,76 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::CompileBlock(const std:
 	return std::make_pair((Executable)function, execution_engine);
 }
 
-std::pair<Executable, llvm::ExecutionEngine *> Compiler::CompileFunction(u32 address, u32 instruction_count,
-	const std::set<std::pair<u32, u32> > &helperFunctions) {
+std::pair<std::set<std::pair<u32, Executable> >, llvm::ExecutionEngine *> Compiler::CompileFunctions(const std::set<std::pair<u32, u32> > &AddressAndLength) {
 	auto compilation_start = std::chrono::high_resolution_clock::now();
-
 	llvm::ExecutionEngine *execution_engine = InitializeModuleAndExecutionEngine();
 	llvm::FunctionPassManager *fpm = createFunctionPassManager(m_module);
 
 	m_state.cfg = nullptr;
 	m_state.generate_linkable_exits = false;
 
-	m_state.m_instruction_count = instruction_count;
 	m_state.m_is_function_completly_compilable = true;
 
 	// Create the functions
-	for (std::pair<u32, u32> addressAndLenght : helperFunctions)
+	for (std::pair<u32, u32> addressAndLenght : AddressAndLength)
 	{
-		std::string _name = fmt::Format("function_0x%08X", addressAndLenght.first);
-		llvm::Function *function = (Function *)m_module->getOrInsertFunction(_name, m_compiled_function_type);
+		std::string name = fmt::Format("function_0x%08X", addressAndLenght.first);
+		llvm::Function *function = (Function *)m_module->getOrInsertFunction(name, m_compiled_function_type);
 		function->setCallingConv(CallingConv::X86_64_Win64);
-		m_recompilation_engine.Log() << "DECLARING " << _name << " with ptr " << m_module->getFunction(_name) <<  "\n";
+		m_recompilation_engine.Log() << "DECLARING " << name << " with ptr " << m_module->getFunction(name) << "or " << function <<  "\n";
 	}
 
-	m_state.function = (Function *)m_module->getOrInsertFunction(fmt::Format("fonction_0x%08X", address), m_compiled_function_type);
-	m_state.function->setCallingConv(CallingConv::X86_64_Win64);
-	auto arg_i = m_state.function->arg_begin();
-	arg_i->setName("ppu_state");
-	m_state.args[CompileTaskState::Args::State] = arg_i;
-	(++arg_i)->setName("context");
-	m_state.args[CompileTaskState::Args::Context] = arg_i;
+	// Fill them
+	for (std::pair<u32, u32> addressAndLenght : AddressAndLength)
+	{
+		std::string name = fmt::Format("function_0x%08X", addressAndLenght.first);
+		m_state.function = (Function *)m_module->getFunction(name);
+		auto arg_i = m_state.function->arg_begin();
+		arg_i->setName("ppu_state");
+		m_state.args[CompileTaskState::Args::State] = arg_i;
+		(++arg_i)->setName("context");
+		m_state.args[CompileTaskState::Args::Context] = arg_i;
 
-	// Create the entry block and add code to branch to the first instruction
-	m_ir_builder->SetInsertPoint(GetBasicBlockFromAddress(0));
-	m_ir_builder->CreateBr(GetBasicBlockFromAddress(address));
+		// Create the entry block and add code to branch to the first instruction
+		m_ir_builder->SetInsertPoint(GetBasicBlockFromAddress(0));
+		m_ir_builder->CreateBr(GetBasicBlockFromAddress(addressAndLenght.first));
 
-	// Used to decode instructions
-	PPUDisAsm dis_asm(CPUDisAsm_DumpMode);
-	dis_asm.offset = vm::get_ptr<u8>(address);
+		// Used to decode instructions
+		PPUDisAsm dis_asm(CPUDisAsm_DumpMode);
+		dis_asm.offset = vm::get_ptr<u8>(addressAndLenght.first);
 
-	m_recompilation_engine.Log() << "Recompiling block :\n\n";
+		m_recompilation_engine.Log() << "Recompiling block :\n\n";
 
-	// Convert each instruction in the CFG to LLVM IR
-	for (u32 instructionAddress = address; instructionAddress < address + instruction_count * 4; instructionAddress += 4) {
-		m_state.hit_branch_instruction = false;
-		m_state.current_instruction_address = instructionAddress;
-		BasicBlock *instr_bb = GetBasicBlockFromAddress(instructionAddress);
-		m_ir_builder->SetInsertPoint(instr_bb);
+		// Convert each instruction in the CFG to LLVM IR
+		for (u32 instructionAddress = addressAndLenght.first; instructionAddress < addressAndLenght.first + addressAndLenght.second * 4; instructionAddress += 4) {
+			m_state.hit_branch_instruction = false;
+			m_state.current_instruction_address = instructionAddress;
+			BasicBlock *instr_bb = GetBasicBlockFromAddress(instructionAddress);
+			m_ir_builder->SetInsertPoint(instr_bb);
 
-		u32 instr = vm::ps3::read32(instructionAddress);
+			u32 instr = vm::ps3::read32(instructionAddress);
 
-		// Dump PPU opcode
-		dis_asm.dump_pc = instructionAddress;
-		(*PPU_instr::main_list)(&dis_asm, instr);
-		m_recompilation_engine.Log() << dis_asm.last_opcode;
+			// Dump PPU opcode
+			dis_asm.dump_pc = instructionAddress;
+			(*PPU_instr::main_list)(&dis_asm, instr);
+			m_recompilation_engine.Log() << dis_asm.last_opcode;
 
-		Decode(instr);
-		if (!m_state.hit_branch_instruction)
-			m_ir_builder->CreateBr(GetBasicBlockFromAddress(instructionAddress + 4));
+			Decode(instr);
+			if (!m_state.hit_branch_instruction)
+				m_ir_builder->CreateBr(GetBasicBlockFromAddress(instructionAddress + 4));
+		}
+
+		auto ir_build_end = std::chrono::high_resolution_clock::now();
+		m_stats.ir_build_time += std::chrono::duration_cast<std::chrono::nanoseconds>(ir_build_end - compilation_start);
+
+
+		// Optimize this function
+//		fpm->run(*m_state.function);
+		auto optimize_end = std::chrono::high_resolution_clock::now();
+		m_stats.optimization_time += std::chrono::duration_cast<std::chrono::nanoseconds>(optimize_end - ir_build_end);
+
+		auto translate_end = std::chrono::high_resolution_clock::now();
+		m_stats.translation_time += std::chrono::duration_cast<std::chrono::nanoseconds>(translate_end - optimize_end);
 	}
 
 	m_recompilation_engine.Log() << "LLVM bytecode:\n";
@@ -322,30 +335,27 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::CompileFunction(u32 add
 
 	std::string        verify;
 	raw_string_ostream verify_ostream(verify);
-	if (verifyFunction(*m_state.function, &verify_ostream)) {
-		m_recompilation_engine.Log() << "Verification failed: " << verify << "\n";
+	if (verifyModule(*m_module, &verify_ostream)) {
+		m_recompilation_engine.Log() << "Verification failed: " << verify_ostream.str() << "\n";
 	}
-
-	auto ir_build_end = std::chrono::high_resolution_clock::now();
-	m_stats.ir_build_time += std::chrono::duration_cast<std::chrono::nanoseconds>(ir_build_end - compilation_start);
-
-	// Optimize this function
-	fpm->run(*m_state.function);
-	auto optimize_end = std::chrono::high_resolution_clock::now();
-	m_stats.optimization_time += std::chrono::duration_cast<std::chrono::nanoseconds>(optimize_end - ir_build_end);
 
 	// Translate to machine code
 	execution_engine->finalizeObject();
-	void *function = execution_engine->getPointerToFunction(m_state.function);
-	auto translate_end = std::chrono::high_resolution_clock::now();
-	m_stats.translation_time += std::chrono::duration_cast<std::chrono::nanoseconds>(translate_end - optimize_end);
+	std::set<std::pair<u32, Executable> > pointers;
+	for (std::pair<u32, u32> addressAndLenght : AddressAndLength)
+	{
+		std::string name = fmt::Format("function_0x%08X", addressAndLenght.first);
+		llvm::Function *function = (Function *)m_module->getFunction(name);
+		void *functionPtr = execution_engine->getPointerToFunction(m_state.function);
+		assert(functionPtr != nullptr);
+		pointers.insert(std::make_pair(addressAndLenght.first, (Executable)functionPtr));
+	}
 
 	auto compilation_end = std::chrono::high_resolution_clock::now();
 	m_stats.total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(compilation_end - compilation_start);
 	delete fpm;
 
-	assert(function != nullptr);
-	return std::make_pair((Executable)function, execution_engine);
+	return std::make_pair(pointers, execution_engine);
 }
 
 Compiler::Stats Compiler::GetStats() {
@@ -383,7 +393,7 @@ const Executable *RecompilationEngine::GetExecutable(u32 address, bool isFunctio
 const Executable *RecompilationEngine::GetCompiledFunctionIfAvailable(u32 address)
 {
 	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
-	std::unordered_map<u32, ExecutableStorage>::iterator It = m_function_to_compiled_executable.find(address);
+	std::unordered_map<u32, FunctionStorage>::iterator It = m_function_to_compiled_executable.find(address);
 	if (It == m_function_to_compiled_executable.end())
 		return nullptr;
 	u32 id = std::get<3>(It->second);
@@ -395,7 +405,7 @@ const Executable *RecompilationEngine::GetCompiledFunctionIfAvailable(u32 addres
 const Executable *RecompilationEngine::GetCompiledBlockIfAvailable(u32 address)
 {
 	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
-	std::unordered_map<u32, ExecutableStorage>::iterator It = m_block_to_compiled_executable.find(address);
+	std::unordered_map<u32, BlockStorage>::iterator It = m_block_to_compiled_executable.find(address);
 	if (It == m_block_to_compiled_executable.end())
 		return nullptr;
 	u32 id = std::get<3>(It->second);
@@ -703,8 +713,6 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 
 	assert(!block_entry.is_compiled);
 
-	std::pair<Executable, llvm::ExecutionEngine *> compileResult;
-
 	if (block_entry.IsFunction())
 	{
 		const std::set<u32> &functionSet = getMinimalFunctionCompileSetFor(block_entry);
@@ -719,27 +727,34 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 				addressAndLength.insert(std::make_pair(function, block->instructionCount));
 			}
 			Log() << "Function Set Size: " << functionSet.size() << "\n";
-			compileResult = m_compiler.CompileFunction(block_entry.cfg.start_address, block_entry.instructionCount, addressAndLength);
+			auto compileOutput = m_compiler.CompileFunctions(addressAndLength);
+			std::lock_guard<std::mutex> lock(m_address_to_function_lock);
+			for (std::pair<u32, Executable> pointer : compileOutput.first)
+			{
+				std::get<1>(m_function_to_compiled_executable[pointer.first]) = (compileOutput.second);
+				std::get<0>(m_function_to_compiled_executable[pointer.first]) = pointer.second;
+				std::get<3>(m_function_to_compiled_executable[pointer.first]) = m_currentId;
+
+				BlockEntry key(pointer.first, pointer.first);
+				auto block_it = m_block_table.find(&key);
+				BlockEntry *block = *block_it;
+				block->last_compiled_cfg_size = block_entry.cfg.GetSize();
+				block->is_compiled = true;
+			}
+			Log() << "ID IS " << m_currentId << "\n";
+			m_currentId++;
+			return;
 		}
-		else
-			compileResult = m_compiler.CompileBlock(fmt::Format("block_0x%08X", block_entry.cfg.start_address), block_entry.cfg);
 	}
-	else
-		compileResult = m_compiler.CompileBlock(fmt::Format("block_0x%08X", block_entry.cfg.start_address), block_entry.cfg);
+
+	std::pair<Executable, llvm::ExecutionEngine *> compileResult = m_compiler.CompileBlock(fmt::Format("block_0x%08X", block_entry.cfg.start_address), block_entry.cfg);
 
 	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
-	if (block_entry.is_compilable_function)
-	{
-		std::get<1>(m_function_to_compiled_executable[block_entry.cfg.start_address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
-		std::get<0>(m_function_to_compiled_executable[block_entry.cfg.start_address]) = compileResult.first;
-		std::get<3>(m_function_to_compiled_executable[block_entry.cfg.start_address]) = m_currentId;
-	}
-	else
-	{
-		std::get<1>(m_block_to_compiled_executable[block_entry.cfg.start_address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
-		std::get<0>(m_block_to_compiled_executable[block_entry.cfg.start_address]) = compileResult.first;
-		std::get<3>(m_block_to_compiled_executable[block_entry.cfg.start_address]) = m_currentId;
-	}
+
+	std::get<1>(m_block_to_compiled_executable[block_entry.cfg.start_address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
+	std::get<0>(m_block_to_compiled_executable[block_entry.cfg.start_address]) = compileResult.first;
+	std::get<3>(m_block_to_compiled_executable[block_entry.cfg.start_address]) = m_currentId;
+
 	Log() << "ID IS " << m_currentId << "\n";
 	m_currentId++;
 	block_entry.last_compiled_cfg_size = block_entry.cfg.GetSize();
