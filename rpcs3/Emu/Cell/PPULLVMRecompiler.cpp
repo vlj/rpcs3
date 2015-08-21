@@ -656,6 +656,37 @@ void RecompilationEngine::UpdateControlFlowGraph(ControlFlowGraph & cfg, const E
 	}
 }
 
+std::set<u32> RecompilationEngine::getMinimalFunctionCompileSetFor(BlockEntry & block_entry)
+{
+	std::set<u32> functionToBuild = { block_entry.cfg.start_address };
+	std::set<u32> functionToAnalyze = { block_entry.cfg.start_address };
+	std::set<u32> functionAlreadyAnalysed = {};
+
+	while (true) // hopefully it won't take too long...
+	{
+		if (functionToAnalyze.empty()) break;
+
+		u32 function = *(functionToAnalyze.begin());
+		BlockEntry key(function, function);
+		auto       block_it = m_block_table.find(&key);
+		if (block_it == m_block_table.end()) {
+			block_it = m_block_table.insert(m_block_table.end(), new BlockEntry(key.cfg.start_address, key.cfg.function_address));
+		}
+		BlockEntry *block = *block_it;
+
+		AnalyseFunction(*block);
+		functionToAnalyze.erase(functionToAnalyze.begin());
+		functionAlreadyAnalysed.insert(function);
+		if (!block->is_compilable_function)
+			continue;
+		functionToBuild.insert(function);
+		std::set<u32> newfunctionToAnalyse;
+		std::set_difference(block->calledFunctions.begin(), block->calledFunctions.end(), functionAlreadyAnalysed.begin(), functionAlreadyAnalysed.end(), std::inserter(newfunctionToAnalyse, newfunctionToAnalyse.begin()));
+		functionToAnalyze.insert(newfunctionToAnalyse.begin(), newfunctionToAnalyse.end());
+	}
+	return functionToBuild;
+}
+
 void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	Log() << "Compile: " << block_entry.ToString() << "\n";
 	Log() << "Is compilable :" << block_entry.is_compilable_function << "\n";
