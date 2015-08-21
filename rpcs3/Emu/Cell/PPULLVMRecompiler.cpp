@@ -319,7 +319,7 @@ std::pair<std::set<std::pair<u32, Executable> >, llvm::ExecutionEngine *> Compil
 
 
 		// Optimize this function
-//		fpm->run(*m_state.function);
+		fpm->run(*m_state.function);
 		auto optimize_end = std::chrono::high_resolution_clock::now();
 		m_stats.optimization_time += std::chrono::duration_cast<std::chrono::nanoseconds>(optimize_end - ir_build_end);
 
