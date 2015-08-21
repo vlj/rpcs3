@@ -393,7 +393,7 @@ const Executable *RecompilationEngine::GetCompiledFunctionIfAvailable(u32 addres
 	std::unordered_map<u32, FunctionStorage>::iterator It = m_function_to_compiled_executable.find(address);
 	if (It == m_function_to_compiled_executable.end())
 		return nullptr;
-	u32 id = std::get<3>(It->second);
+	u32 id = std::get<2>(It->second);
 	if (Ini.LLVMExclusionRange.GetValue() && (id >= Ini.LLVMMinId.GetValue() && id <= Ini.LLVMMaxId.GetValue()))
 		return nullptr;
 	return &(std::get<0>(It->second));
@@ -726,13 +726,11 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 			Log() << "Function Set Size: " << functionSet.size() << "\n";
 			auto compileOutput = m_compiler.CompileFunctions(addressAndLength);
 			std::lock_guard<std::mutex> lock(m_address_to_function_lock);
-			std::shared_ptr<llvm::ExecutionEngine> ptr;
-			ptr.reset(compileOutput.second);
+			m_functionStorage.emplace_back(compileOutput.second);
 			for (std::pair<u32, Executable> pointer : compileOutput.first)
 			{
-				std::get<1>(m_function_to_compiled_executable[pointer.first]) = ptr;
 				std::get<0>(m_function_to_compiled_executable[pointer.first]) = pointer.second;
-				std::get<3>(m_function_to_compiled_executable[pointer.first]) = m_currentId;
+				std::get<2>(m_function_to_compiled_executable[pointer.first]) = m_currentId;
 
 				BlockEntry key(pointer.first, pointer.first);
 				auto block_it = m_block_table.find(&key);
