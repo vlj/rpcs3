@@ -1037,6 +1037,9 @@ namespace ppu_recompiler_llvm {
 		*/
 		bool AnalyseBlock(BlockEntry &functionData, u32 maxSize = 10000);
 
+		/// Get minimal set of function that needs to be compiled together including block_entry so that all function call are direct when possible
+		std::set<u32> getMinimalFunctionCompileSetFor(BlockEntry & block_entry);
+
 		/// Compile a block
 		void CompileBlock(BlockEntry & block_entry);
 

@@ -473,6 +473,42 @@ bool RecompilationEngine::AnalyseBlock(BlockEntry &functionData, u32 maxSize)
 	return true;
 }
 
+std::pair<std::set<u32>, std::set<u32> > RecompilationEngine::getMinimalFunctionCompileSetFor(BlockEntry & block_entry)
+{
+	std::set<u32> functionToBuild = { };
+	std::set<u32> blockToBuild = { };
+	std::set<u32> functionToAnalyze = {block_entry.address};
+	std::set<u32> functionAlreadyAnalysed = {};
+
+	while (true) // hopefully it won't take too long...
+	{
+		if (functionToAnalyze.empty()) break;
+
+		u32 function = *(functionToAnalyze.begin());
+		functionToAnalyze.erase(functionToAnalyze.begin());
+		auto It = m_block_table.find(function);
+		if (It == m_block_table.end())
+			It = m_block_table.emplace(function, BlockEntry(function)).first;
+		BlockEntry &block = It->second;
+
+		// Analyse function
+		functionAlreadyAnalysed.insert(function);
+		if (block.is_analysed || !AnalyseBlock(block))
+			continue;
+
+		if (block.is_compilable_function)
+			functionToBuild.insert(function);
+		else
+			blockToBuild.insert(function);
+
+		// Include new functions
+		std::set<u32> newfunctionToAnalyse;
+		std::set_difference(block.calledFunctions.begin(), block.calledFunctions.end(), functionAlreadyAnalysed.begin(), functionAlreadyAnalysed.end(), std::inserter(newfunctionToAnalyse, newfunctionToAnalyse.begin()));
+		functionToAnalyze.insert(newfunctionToAnalyse.begin(), newfunctionToAnalyse.end());
+	}
+	return std::make_pair(functionToBuild, blockToBuild);
+}
+
 void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	Log() << "Compile: " << block_entry.ToString() << "\n";
 
