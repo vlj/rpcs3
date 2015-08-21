@@ -1146,7 +1146,7 @@ namespace ppu_recompiler_llvm {
 		int m_currentId;
 
 		/// (function, module containing function, times hit, id).
-		typedef std::tuple<Executable, llvm::ExecutionEngine *, u32, u32> FunctionStorage;
+		typedef std::tuple<Executable, std::shared_ptr<llvm::ExecutionEngine>, u32, u32> FunctionStorage;
 		/// Address to ordinal cahce. Key is address.
 		std::unordered_map<u32, FunctionStorage> m_function_to_compiled_executable;
 		typedef std::tuple<Executable, std::unique_ptr<llvm::ExecutionEngine>, u32, u32> BlockStorage;

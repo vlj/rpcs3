@@ -729,9 +729,11 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 			Log() << "Function Set Size: " << functionSet.size() << "\n";
 			auto compileOutput = m_compiler.CompileFunctions(addressAndLength);
 			std::lock_guard<std::mutex> lock(m_address_to_function_lock);
+			std::shared_ptr<llvm::ExecutionEngine> ptr;
+			ptr.reset(compileOutput.second);
 			for (std::pair<u32, Executable> pointer : compileOutput.first)
 			{
-				std::get<1>(m_function_to_compiled_executable[pointer.first]) = (compileOutput.second);
+				std::get<1>(m_function_to_compiled_executable[pointer.first]) = ptr;
 				std::get<0>(m_function_to_compiled_executable[pointer.first]) = pointer.second;
 				std::get<3>(m_function_to_compiled_executable[pointer.first]) = m_currentId;
 
