@@ -5229,17 +5229,6 @@ void Compiler::CreateBranch(llvm::Value * cmp_i1, llvm::Value * target_i32, bool
 			m_ir_builder->SetInsertPoint(unknown_function_block);
 			m_ir_builder->CreateCall2(m_execute_unknown_function, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt64(0));
 			m_ir_builder->CreateBr(next_block);
-
-			auto call_i = m_state.cfg->calls.find(m_state.current_instruction_address);
-			if (call_i != m_state.cfg->calls.end()) {
-				for (auto function_i = call_i->second.begin(); function_i != call_i->second.end(); function_i++) {
-					auto block = GetBasicBlockFromAddress(m_state.current_instruction_address, fmt::Format("0x%08X", *function_i));
-					m_ir_builder->SetInsertPoint(block);
-					IndirectCall(*function_i, m_ir_builder->getInt64(0), true);
-					m_ir_builder->CreateBr(next_block);
-					switch_instr->addCase(m_ir_builder->getInt32(*function_i), block);
-				}
-			}
 		}
 		else {
 			auto switch_instr = m_ir_builder->CreateSwitch(target_i32, GetBasicBlockFromAddress(0xFFFFFFFF));
