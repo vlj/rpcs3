@@ -346,7 +346,7 @@ std::pair<std::set<std::pair<u32, Executable> >, llvm::ExecutionEngine *> Compil
 	{
 		std::string name = fmt::Format("function_0x%08X", addressAndLenght.first);
 		llvm::Function *function = (Function *)m_module->getFunction(name);
-		void *functionPtr = execution_engine->getPointerToFunction(m_state.function);
+		void *functionPtr = execution_engine->getPointerToFunction(function);
 		assert(functionPtr != nullptr);
 		pointers.insert(std::make_pair(addressAndLenght.first, (Executable)functionPtr));
 	}
