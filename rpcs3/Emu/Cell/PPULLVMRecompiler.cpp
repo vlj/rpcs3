@@ -865,17 +865,22 @@ u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::DecodeMemory(const u32 addr
 	return 0;
 }
 
+std::atomic<int> execFuncCompiled;
+std::atomic<int> execFuncInterp;
+
 u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteFunction(PPUThread * ppu_state, u64 context) {
 	auto execution_engine = (CPUHybridDecoderRecompiler *)ppu_state->GetDecoder();
 	const Executable *executable = execution_engine->m_recompilation_engine->GetCompiledFunctionIfAvailable(ppu_state->PC);
 	if (executable)
 	{
 		u32 exitValue = (u32)(*executable)(ppu_state, 0);
+		execFuncCompiled.fetch_add(1);
 		return exitValue;
 	}
 	else
 	{
 		execution_engine->m_tracer.Trace(Tracer::TraceType::EnterFunction, ppu_state->PC, 0);
+		execFuncInterp.fetch_add(1);
 		return ExecuteTillReturn(ppu_state, 0);
 	}
 }

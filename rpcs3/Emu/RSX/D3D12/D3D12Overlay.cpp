@@ -114,11 +114,19 @@ void D3D12GSRender::ReleaseD2DStructures()
 	m_textBrush.Reset();
 }
 
+extern std::atomic<int> execFuncCompiled;
+extern std::atomic<int> execFuncInterp;
+
 void D3D12GSRender::renderOverlay()
 {
 	D2D1_SIZE_F rtSize = m_d2dRenderTargets[m_swapChain->GetCurrentBackBufferIndex()]->GetSize();
 	std::wstring duration = L"Draw duration : " + std::to_wstring(m_timers.m_drawCallDuration) + L" ms";
 	std::wstring count = L"Draw count : " + std::to_wstring(m_timers.m_drawCallCount);
+
+	std::wstring compcount = L"Compiled func cnt : " + std::to_wstring(execFuncCompiled.load());
+	std::wstring interpcount = L"Interpreted func cnt : " + std::to_wstring(execFuncInterp.load());
+	execFuncCompiled.store(0);
+	execFuncInterp.store(0);
 
 	// Acquire our wrapped render target resource for the current back buffer.
 	m_d3d11On12Device->AcquireWrappedResources(m_wrappedBackBuffers[m_swapChain->GetCurrentBackBufferIndex()].GetAddressOf(), 1);
@@ -139,6 +147,20 @@ void D3D12GSRender::renderOverlay()
 		count.size(),
 		m_textFormat.Get(),
 		&D2D1::RectF(0, 14, rtSize.width, rtSize.height),
+		m_textBrush.Get()
+		);
+	m_d2dDeviceContext->DrawTextW(
+		compcount.c_str(),
+		compcount.size(),
+		m_textFormat.Get(),
+		&D2D1::RectF(0, 28, rtSize.width, rtSize.height),
+		m_textBrush.Get()
+		);
+	m_d2dDeviceContext->DrawTextW(
+		interpcount.c_str(),
+		interpcount.size(),
+		m_textFormat.Get(),
+		&D2D1::RectF(0, 42, rtSize.width, rtSize.height),
 		m_textBrush.Get()
 		);
 	m_d2dDeviceContext->EndDraw();
