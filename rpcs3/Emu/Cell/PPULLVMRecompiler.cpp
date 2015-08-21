@@ -258,8 +258,8 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::CompileBlock(const std:
 	return std::make_pair((Executable)function, execution_engine);
 }
 
-
-std::pair<Executable, llvm::ExecutionEngine *> Compiler::CompileFunction(u32 address, u32 instruction_count) {
+std::pair<Executable, llvm::ExecutionEngine *> Compiler::CompileFunction(u32 address, u32 instruction_count,
+	const std::set<std::pair<u32, u32> > &helperFunctions) {
 	auto compilation_start = std::chrono::high_resolution_clock::now();
 
 	llvm::ExecutionEngine *execution_engine = InitializeModuleAndExecutionEngine();
@@ -271,9 +271,16 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::CompileFunction(u32 add
 	m_state.m_instruction_count = instruction_count;
 	m_state.m_is_function_completly_compilable = true;
 
-	// Create the function
-	std::string name = fmt::Format("fonction_0x%08X", address);
-	m_state.function = (Function *)m_module->getOrInsertFunction(name, m_compiled_function_type);
+	// Create the functions
+	for (std::pair<u32, u32> addressAndLenght : helperFunctions)
+	{
+		std::string _name = fmt::Format("function_0x%08X", addressAndLenght.first);
+		llvm::Function *function = (Function *)m_module->getOrInsertFunction(_name, m_compiled_function_type);
+		function->setCallingConv(CallingConv::X86_64_Win64);
+		m_recompilation_engine.Log() << "DECLARING " << _name << " with ptr " << m_module->getFunction(_name) <<  "\n";
+	}
+
+	m_state.function = (Function *)m_module->getOrInsertFunction(fmt::Format("fonction_0x%08X", address), m_compiled_function_type);
 	m_state.function->setCallingConv(CallingConv::X86_64_Win64);
 	auto arg_i = m_state.function->arg_begin();
 	arg_i->setName("ppu_state");
@@ -695,18 +702,30 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	Log() << "CFG: " << block_entry.cfg.ToString() << "\n";
 
 	assert(!block_entry.is_compiled);
-	if (block_entry.IsFunction())
-		AnalyseFunction(block_entry);
 
 	std::pair<Executable, llvm::ExecutionEngine *> compileResult;
-	if (block_entry.is_compilable_function)
+
+	if (block_entry.IsFunction())
 	{
-		compileResult = m_compiler.CompileFunction(block_entry.cfg.start_address, block_entry.instructionCount);
+		const std::set<u32> &functionSet = getMinimalFunctionCompileSetFor(block_entry);
+		if (block_entry.is_compilable_function)
+		{
+			std::set<std::pair<u32, u32> > addressAndLength;
+			for (u32 function : functionSet)
+			{
+				BlockEntry key(function, function);
+				auto block_it = m_block_table.find(&key);
+				BlockEntry *block = *block_it;
+				addressAndLength.insert(std::make_pair(function, block->instructionCount));
+			}
+			Log() << "Function Set Size: " << functionSet.size() << "\n";
+			compileResult = m_compiler.CompileFunction(block_entry.cfg.start_address, block_entry.instructionCount, addressAndLength);
+		}
+		else
+			compileResult = m_compiler.CompileBlock(fmt::Format("block_0x%08X", block_entry.cfg.start_address), block_entry.cfg);
 	}
 	else
-	{
 		compileResult = m_compiler.CompileBlock(fmt::Format("block_0x%08X", block_entry.cfg.start_address), block_entry.cfg);
-	}
 
 	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
 	if (block_entry.is_compilable_function)

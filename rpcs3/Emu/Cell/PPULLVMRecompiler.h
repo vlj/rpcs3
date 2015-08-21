@@ -311,7 +311,8 @@ namespace ppu_recompiler_llvm {
 		 * Pointer to function can be retrieved with getPointerToFunction
 		 */
 		std::pair<Executable, llvm::ExecutionEngine *> CompileBlock(const std::string & name, const ControlFlowGraph & cfg);
-		std::pair<Executable, llvm::ExecutionEngine *> CompileFunction(u32 address, u32 instruction_count);
+		std::pair<Executable, llvm::ExecutionEngine *> CompileFunction(u32 address, u32 instruction_count,
+			const std::set<std::pair<u32, u32> > &knowSymbol);
 
 		/// Retrieve compiler stats
 		Stats GetStats();
