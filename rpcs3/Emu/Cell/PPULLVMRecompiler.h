@@ -167,92 +167,6 @@ namespace ppu_recompiler_llvm {
 		}
 	};
 
-	/// A control flow graph
-	struct ControlFlowGraph {
-		/// Address of the first instruction
-		u32 start_address;
-
-		/// Address of the function to which this CFG belongs to
-		u32 function_address;
-
-		/// Set of addresses of the instructions in the CFG
-		std::set<u32> instruction_addresses;
-
-		/// Branches in the CFG.
-		/// Key is the address of an instruction
-		/// Data is the set of all instructions to which this instruction branches to.
-		std::map<u32, std::set<u32>> branches;
-
-		/// Function calls in the CFG
-		/// Key is the address of an instruction
-		/// Data is the set of all functions which this instruction invokes.
-		std::map<u32, std::set<u32>> calls;
-
-		ControlFlowGraph(u32 start_address, u32 function_address)
-			: start_address(start_address)
-			, function_address(function_address) {
-		}
-
-		void operator += (const ControlFlowGraph & other) {
-			for (auto i = other.instruction_addresses.begin(); i != other.instruction_addresses.end(); i++) {
-				instruction_addresses.insert(*i);
-			}
-
-			for (auto i = other.branches.begin(); i != other.branches.end(); i++) {
-				auto j = branches.find(i->first);
-				if (j == branches.end()) {
-					j = branches.insert(branches.begin(), std::make_pair(i->first, std::set<u32>()));
-				}
-
-				for (auto k = i->second.begin(); k != i->second.end(); k++) {
-					j->second.insert(*k);
-				}
-			}
-
-			for (auto i = other.calls.begin(); i != other.calls.end(); i++) {
-				auto j = calls.find(i->first);
-				if (j == calls.end()) {
-					j = calls.insert(calls.begin(), std::make_pair(i->first, std::set<u32>()));
-				}
-
-				for (auto k = i->second.begin(); k != i->second.end(); k++) {
-					j->second.insert(*k);
-				}
-			}
-		}
-
-		std::string ToString() const {
-			auto s = fmt::Format("0x%08X (0x%08X): Size=%u ->", start_address, function_address, GetSize());
-			for (auto i = instruction_addresses.begin(); i != instruction_addresses.end(); i++) {
-				s += fmt::Format(" 0x%08X", *i);
-			}
-
-			s += "\nBranches:";
-			for (auto i = branches.begin(); i != branches.end(); i++) {
-				s += fmt::Format("\n0x%08X ->", i->first);
-				for (auto j = i->second.begin(); j != i->second.end(); j++) {
-					s += fmt::Format(" 0x%08X", *j);
-				}
-			}
-
-			s += "\nCalls:";
-			for (auto i = calls.begin(); i != calls.end(); i++) {
-				s += fmt::Format("\n0x%08X ->", i->first);
-				for (auto j = i->second.begin(); j != i->second.end(); j++) {
-					s += fmt::Format(" 0x%08X", *j);
-				}
-			}
-
-			return s;
-		}
-
-		/// Get the size of the CFG. The size is a score of how large the CFG is and increases everytime
-		/// a node or an edge is added to the CFG.
-		size_t GetSize() const {
-			return instruction_addresses.size() + branches.size() + calls.size();
-		}
-	};
-
 	enum class BranchType {
 		NonBranch,
 		LocalBranch,
@@ -301,7 +215,7 @@ namespace ppu_recompiler_llvm {
 		 * Compile a code fragment described by a cfg and return an executable and the ExecutionEngine storing it
 		 * Pointer to function can be retrieved with getPointerToFunction
 		 */
-		std::pair<Executable, llvm::ExecutionEngine *> CompileBlock(const std::string & name, const ControlFlowGraph & cfg, bool generate_linkable_exits);
+		std::pair<Executable, llvm::ExecutionEngine *> CompileBlock(u32 address, u32 instruction_count, bool generate_linkable_exits);
 		std::pair<Executable, llvm::ExecutionEngine *> CompileFunction(u32 address, u32 instruction_count);
 
 		/// Retrieve compiler stats
@@ -730,9 +644,6 @@ namespace ppu_recompiler_llvm {
 			/// Args of the LLVM function
 			llvm::Value * args[MaxArgs];
 
-			/// The CFG being compiled
-			const ControlFlowGraph * cfg;
-
 			/// Address of the current instruction being compiled
 			u32 current_instruction_address;
 
@@ -1039,7 +950,7 @@ namespace ppu_recompiler_llvm {
 		 * Get the executable for the "block" at address if a compiled version is
 		 * available, otherwise returns nullptr.
 		 **/
-		const Executable *GetCompiledBlockIfAvailable(u32 address);
+		const Executable GetCompiledBlockIfAvailable(u32 address);
 
 		/// Log
 		llvm::raw_fd_ostream & Log();
