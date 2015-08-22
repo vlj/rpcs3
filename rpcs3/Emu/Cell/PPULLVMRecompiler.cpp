@@ -536,10 +536,11 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 
 void RecompilationEngine::TryCompileFunction(BlockEntry & block_entry) {
 	assert(!block_entry.is_compiled);
+	bool analysisResult = false;
 	if (!block_entry.is_analysed)
-		AnalyseFunction(block_entry);
+		analysisResult = AnalyseFunction(block_entry);
 
-	if (!block_entry.is_compilable_function)
+	if (!analysisResult || !block_entry.is_compilable_function)
 		return;
 
 	Log() << "Compile: " << block_entry.ToString() << "\n";
