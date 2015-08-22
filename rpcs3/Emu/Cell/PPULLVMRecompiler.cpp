@@ -46,6 +46,10 @@ Compiler::Compiler(RecompilationEngine & recompilation_engine, const Executable 
 	, m_execute_unknown_block_callback(execute_unknown_block)
 	, m_execute_unknown_function_callback(execute_unknown_function)
 	{
+		m_executableMap.clear();
+		m_executableMap["execute_unknown_function"] = m_execute_unknown_function_callback;
+		m_executableMap["execute_unknown_block"] = m_execute_unknown_block_callback;
+
 	InitializeNativeTarget();
 	InitializeNativeTargetAsmPrinter();
 	InitializeNativeTargetDisassembler();
@@ -72,10 +76,6 @@ Compiler::~Compiler() {
 
 llvm::ExecutionEngine *Compiler::InitializeModuleAndExecutionEngine()
 {
-	m_executableMap.clear();
-	m_executableMap["execute_unknown_function"] = m_execute_unknown_function_callback;
-	m_executableMap["execute_unknown_block"] = m_execute_unknown_block_callback;
-
 	m_module = new llvm::Module("Module", *m_llvm_context);
 	m_execute_unknown_function = (Function *)m_module->getOrInsertFunction("execute_unknown_function", m_compiled_function_type);
 	m_execute_unknown_function->setCallingConv(CallingConv::X86_64_Win64);
@@ -271,7 +271,6 @@ std::pair<std::set<std::pair<u32, Executable> >, llvm::ExecutionEngine *> Compil
 		std::string name = fmt::Format("function_0x%08X", addressAndLenght.first);
 		llvm::Function *function = (Function *)m_module->getOrInsertFunction(name, m_compiled_function_type);
 		function->setCallingConv(CallingConv::X86_64_Win64);
-		m_recompilation_engine.Log() << "DECLARING " << name << " with ptr " << m_module->getFunction(name) << "or " << function <<  "\n";
 	}
 
 	// Fill them
@@ -346,6 +345,7 @@ std::pair<std::set<std::pair<u32, Executable> >, llvm::ExecutionEngine *> Compil
 		void *functionPtr = execution_engine->getPointerToFunction(function);
 		assert(functionPtr != nullptr);
 		pointers.insert(std::make_pair(addressAndLenght.first, (Executable)functionPtr));
+		m_executableMap[name] = (Executable)functionPtr;
 	}
 
 	auto compilation_end = std::chrono::high_resolution_clock::now();
@@ -440,7 +440,6 @@ raw_fd_ostream & RecompilationEngine::Log() {
  */
 inline s32 SignExt16(s16 x) { return (s32)(s16)x; }
 inline s32 SignExt26(u32 x) { return x & 0x2000000 ? (s32)(x | 0xFC000000) : (s32)(x); }
-
 
 bool RecompilationEngine::AnalyseFunction(BlockEntry &functionData, u32 maxSize)
 {
@@ -590,6 +589,8 @@ void RecompilationEngine::ProcessExecutionTrace(const ExecutionTrace & execution
 		auto       block_i = m_block_table.find(&key);
 		if (block_i == m_block_table.end()) {
 			block_i = m_block_table.insert(m_block_table.end(), new BlockEntry(key.cfg.start_address, key.cfg.function_address));
+			if ((*block_i)->IsFunction() && !(*block_i)->is_compiled)
+				TryCompileFunction(*(*block_i));
 		}
 
 		auto function_block = *block_i;
@@ -701,48 +702,45 @@ std::set<u32> RecompilationEngine::getMinimalFunctionCompileSetFor(BlockEntry & 
 	return functionToBuild;
 }
 
+void RecompilationEngine::TryCompileFunction(BlockEntry & block_entry)
+{
+	assert(block_entry.IsFunction());
+	const std::set<u32> &functionSet = getMinimalFunctionCompileSetFor(block_entry);
+	if (!block_entry.is_compilable_function)
+		return;
+
+	std::set<std::pair<u32, u32> > addressAndLength;
+	for (u32 function : functionSet)
+	{
+		BlockEntry key(function, function);
+		auto block_it = m_block_table.find(&key);
+		BlockEntry *block = *block_it;
+		addressAndLength.insert(std::make_pair(function, block->instructionCount));
+	}
+	Log() << "Function Set Size: " << functionSet.size() << "\n";
+	auto compileOutput = m_compiler.CompileFunctions(addressAndLength);
+	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
+	m_functionStorage.emplace_back(compileOutput.second);
+	for (std::pair<u32, Executable> pointer : compileOutput.first)
+	{
+		std::get<0>(m_function_to_compiled_executable[pointer.first]) = pointer.second;
+		std::get<2>(m_function_to_compiled_executable[pointer.first]) = m_currentId;
+
+		BlockEntry key(pointer.first, pointer.first);
+		auto block_it = m_block_table.find(&key);
+		BlockEntry *block = *block_it;
+		block->last_compiled_cfg_size = block_entry.cfg.GetSize();
+		block->is_compiled = true;
+	}
+	Log() << "ID IS " << m_currentId << "\n";
+	m_currentId++;
+}
+
 void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	Log() << "Compile: " << block_entry.ToString() << "\n";
-	Log() << "Is compilable :" << block_entry.is_compilable_function << "\n";
-	Log() << "Size :" << block_entry.instructionCount << "\n";
-	Log() << "called function count : " << block_entry.calledFunctions.size() << "\n";
 	Log() << "CFG: " << block_entry.cfg.ToString() << "\n";
 
 	assert(!block_entry.is_compiled);
-
-	if (block_entry.IsFunction())
-	{
-		const std::set<u32> &functionSet = getMinimalFunctionCompileSetFor(block_entry);
-		if (block_entry.is_compilable_function)
-		{
-			std::set<std::pair<u32, u32> > addressAndLength;
-			for (u32 function : functionSet)
-			{
-				BlockEntry key(function, function);
-				auto block_it = m_block_table.find(&key);
-				BlockEntry *block = *block_it;
-				addressAndLength.insert(std::make_pair(function, block->instructionCount));
-			}
-			Log() << "Function Set Size: " << functionSet.size() << "\n";
-			auto compileOutput = m_compiler.CompileFunctions(addressAndLength);
-			std::lock_guard<std::mutex> lock(m_address_to_function_lock);
-			m_functionStorage.emplace_back(compileOutput.second);
-			for (std::pair<u32, Executable> pointer : compileOutput.first)
-			{
-				std::get<0>(m_function_to_compiled_executable[pointer.first]) = pointer.second;
-				std::get<2>(m_function_to_compiled_executable[pointer.first]) = m_currentId;
-
-				BlockEntry key(pointer.first, pointer.first);
-				auto block_it = m_block_table.find(&key);
-				BlockEntry *block = *block_it;
-				block->last_compiled_cfg_size = block_entry.cfg.GetSize();
-				block->is_compiled = true;
-			}
-			Log() << "ID IS " << m_currentId << "\n";
-			m_currentId++;
-			return;
-		}
-	}
 
 	std::pair<Executable, llvm::ExecutionEngine *> compileResult = m_compiler.CompileBlock(fmt::Format("block_0x%08X", block_entry.cfg.start_address), block_entry.cfg);
 

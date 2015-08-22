@@ -1172,7 +1172,7 @@ namespace ppu_recompiler_llvm {
 		* This code is inspired from Dolphin PPC Analyst
 		* Return true if analysis is successful.
 		*/
-		bool AnalyseFunction(BlockEntry &functionData, u32 maxSize = 1000);
+		bool AnalyseFunction(BlockEntry &functionData, u32 maxSize = 3000);
 
 		/// Process an execution trace.
 		void ProcessExecutionTrace(const ExecutionTrace & execution_trace);
@@ -1184,6 +1184,7 @@ namespace ppu_recompiler_llvm {
 		std::set<u32> getMinimalFunctionCompileSetFor(BlockEntry & block_entry);
 
 		/// Compile a block
+		void TryCompileFunction(BlockEntry & block_entry);
 		void CompileBlock(BlockEntry & block_entry);
 
 		/// Mutex used to prevent multiple creation
