@@ -1016,10 +1016,10 @@ namespace ppu_recompiler_llvm {
 	 * It then builds them asynchroneously and update the executable mapping
 	 * using atomic based locks to avoid undefined behavior.
 	 **/
-	class RecompilationEngine final : protected thread_t {
+	class RecompilationEngine {
 		friend class CPUHybridDecoderRecompiler;
 	public:
-		virtual ~RecompilationEngine() override;
+		~RecompilationEngine();
 
 		/**
 		 * Get the executable for the specified address
@@ -1033,7 +1033,7 @@ namespace ppu_recompiler_llvm {
 		 * Get the executable for the function at address if it exists.
 		 * Returns nullptr otherwise
 		 **/
-		const Executable *GetCompiledFunctionIfAvailable(u32 address);
+		const Executable GetCompiledFunctionIfAvailable(u32 address);
 
 		/**
 		 * Get the executable for the "block" at address if a compiled version is
@@ -1041,13 +1041,8 @@ namespace ppu_recompiler_llvm {
 		 **/
 		const Executable *GetCompiledBlockIfAvailable(u32 address);
 
-		/// Notify the recompilation engine about a newly detected trace. It takes ownership of the trace.
-		void NotifyTrace(ExecutionTrace * execution_trace);
-
 		/// Log
 		llvm::raw_fd_ostream & Log();
-
-		void Task();
 
 		/// Get a pointer to the instance of this class
 		static std::shared_ptr<RecompilationEngine> GetInstance();
@@ -1055,20 +1050,16 @@ namespace ppu_recompiler_llvm {
 	private:
 		/// An entry in the block table
 		struct BlockEntry {
-			/// Number of times this block was hit
-			u32 num_hits;
 
-			/// Size of the CFG when it was last compiled
-			size_t last_compiled_cfg_size;
-
-			/// The CFG for this block
-			ControlFlowGraph cfg;
+			u32 address;
 
 			/// Indicates whether this function has been analysed or not
 			bool is_analysed;
 
 			/// Indicates whether the block has been compiled or not
 			bool is_compiled;
+
+			bool is_function;
 
 			/// Indicate wheter the block is a function that can be completly compiled
 			/// that is, that has a clear "return" semantic.
@@ -1080,32 +1071,27 @@ namespace ppu_recompiler_llvm {
 			/// If the function is compilable, which function does it call.
 			std::set<u32> calledFunctions;
 
-			BlockEntry(u32 start_address, u32 function_address)
-				: num_hits(0)
-				, last_compiled_cfg_size(0)
-				, is_analysed(false)
+			BlockEntry(u32 start_address, bool function)
+				: is_analysed(false)
 				, is_compiled(false)
 				, is_compilable_function(false)
 				, instructionCount(0)
-				, cfg(start_address, function_address) {
+				, address(start_address)
+				, is_function(function) {
 			}
 
 			std::string ToString() const {
 				return fmt::Format("0x%08X (0x%08X): NumHits=%u, Revision=%u, LastCompiledCfgSize=%u, IsCompiled=%c",
-					cfg.start_address, cfg.function_address, num_hits, last_compiled_cfg_size, is_compiled ? 'Y' : 'N');
+					is_compiled ? 'Y' : 'N');
 			}
 
 			bool operator == (const BlockEntry & other) const {
-				return cfg.start_address == other.cfg.start_address;
-			}
-
-			bool IsFunction() const {
-				return cfg.function_address == cfg.start_address;
+				return address == other.address;
 			}
 
 			struct hash {
 				size_t operator()(const BlockEntry * e) const {
-					return e->cfg.start_address;
+					return e->address;
 				}
 			};
 
@@ -1119,22 +1105,13 @@ namespace ppu_recompiler_llvm {
 		/// Log
 		llvm::raw_fd_ostream * m_log;
 
-		/// Lock for accessing m_pending_execution_traces. TODO: Eliminate this and use a lock-free queue.
-		std::mutex m_pending_execution_traces_lock;
-
-		/// Queue of execution traces pending processing
-		std::list<ExecutionTrace *> m_pending_execution_traces;
-
 		/// Block table
 		std::unordered_set<BlockEntry *, BlockEntry::hash, BlockEntry::equal_to> m_block_table;
 
-		/// Execution traces that have been already encountered. Data is the list of all blocks that this trace includes.
-		std::unordered_map<ExecutionTrace::Id, std::vector<BlockEntry *>> m_processed_execution_traces;
-
 		/// Lock for accessing m_address_to_function.
 		std::mutex m_address_to_function_lock;
-		/// Lock for modifying address mutex table
-		std::mutex m_address_locks_lock;
+		/// Lock for compiler access
+		std::mutex m_compiler_lock;
 
 		int m_currentId;
 
@@ -1164,12 +1141,6 @@ namespace ppu_recompiler_llvm {
 		*/
 		bool AnalyseFunction(BlockEntry &functionData, u32 maxSize = 1000);
 
-		/// Process an execution trace.
-		void ProcessExecutionTrace(const ExecutionTrace & execution_trace);
-
-		/// Update a CFG
-		void UpdateControlFlowGraph(ControlFlowGraph & cfg, const ExecutionTraceEntry & this_entry, const ExecutionTraceEntry * next_entry);
-
 		/// Attempt to compile function
 		void TryCompileFunction(BlockEntry & block_entry);
 
@@ -1181,43 +1152,6 @@ namespace ppu_recompiler_llvm {
 
 		/// The instance
 		static std::shared_ptr<RecompilationEngine> s_the_instance;
-	};
-
-	/// Finds interesting execution sequences
-	class Tracer {
-	public:
-		/// Trace type
-		enum class TraceType : u32 {
-			CallFunction,
-			EnterFunction,
-			ExitFromCompiledFunction,
-			Return,
-			Instruction,
-			ExitFromCompiledBlock,
-		};
-
-		Tracer();
-
-		Tracer(const Tracer & other) = delete;
-		Tracer(Tracer && other) = delete;
-
-		virtual ~Tracer();
-
-		Tracer & operator = (const Tracer & other) = delete;
-		Tracer & operator = (Tracer && other) = delete;
-
-		/// Notify the tracer
-		void Trace(TraceType trace_type, u32 arg1, u32 arg2);
-
-		/// Notify the tracer that the execution sequence is being terminated.
-		void Terminate();
-
-	private:
-		/// Call stack
-		std::vector<ExecutionTrace *> m_stack;
-
-		/// Recompilation engine
-		std::shared_ptr<RecompilationEngine> m_recompilation_engine;
 	};
 
 	/**
@@ -1252,9 +1186,6 @@ namespace ppu_recompiler_llvm {
 
 		/// PPU instruction Decoder
 		PPUDecoder m_decoder;
-
-		/// Execution tracer
-		Tracer m_tracer;
 
 		/// Recompilation engine
 		std::shared_ptr<RecompilationEngine> m_recompilation_engine;
