@@ -167,92 +167,6 @@ namespace ppu_recompiler_llvm {
 		}
 	};
 
-	/// A control flow graph
-	struct ControlFlowGraph {
-		/// Address of the first instruction
-		u32 start_address;
-
-		/// Address of the function to which this CFG belongs to
-		u32 function_address;
-
-		/// Set of addresses of the instructions in the CFG
-		std::set<u32> instruction_addresses;
-
-		/// Branches in the CFG.
-		/// Key is the address of an instruction
-		/// Data is the set of all instructions to which this instruction branches to.
-		std::map<u32, std::set<u32>> branches;
-
-		/// Function calls in the CFG
-		/// Key is the address of an instruction
-		/// Data is the set of all functions which this instruction invokes.
-		std::map<u32, std::set<u32>> calls;
-
-		ControlFlowGraph(u32 start_address, u32 function_address)
-			: start_address(start_address)
-			, function_address(function_address) {
-		}
-
-		void operator += (const ControlFlowGraph & other) {
-			for (auto i = other.instruction_addresses.begin(); i != other.instruction_addresses.end(); i++) {
-				instruction_addresses.insert(*i);
-			}
-
-			for (auto i = other.branches.begin(); i != other.branches.end(); i++) {
-				auto j = branches.find(i->first);
-				if (j == branches.end()) {
-					j = branches.insert(branches.begin(), std::make_pair(i->first, std::set<u32>()));
-				}
-
-				for (auto k = i->second.begin(); k != i->second.end(); k++) {
-					j->second.insert(*k);
-				}
-			}
-
-			for (auto i = other.calls.begin(); i != other.calls.end(); i++) {
-				auto j = calls.find(i->first);
-				if (j == calls.end()) {
-					j = calls.insert(calls.begin(), std::make_pair(i->first, std::set<u32>()));
-				}
-
-				for (auto k = i->second.begin(); k != i->second.end(); k++) {
-					j->second.insert(*k);
-				}
-			}
-		}
-
-		std::string ToString() const {
-			auto s = fmt::Format("0x%08X (0x%08X): Size=%u ->", start_address, function_address, GetSize());
-			for (auto i = instruction_addresses.begin(); i != instruction_addresses.end(); i++) {
-				s += fmt::Format(" 0x%08X", *i);
-			}
-
-			s += "\nBranches:";
-			for (auto i = branches.begin(); i != branches.end(); i++) {
-				s += fmt::Format("\n0x%08X ->", i->first);
-				for (auto j = i->second.begin(); j != i->second.end(); j++) {
-					s += fmt::Format(" 0x%08X", *j);
-				}
-			}
-
-			s += "\nCalls:";
-			for (auto i = calls.begin(); i != calls.end(); i++) {
-				s += fmt::Format("\n0x%08X ->", i->first);
-				for (auto j = i->second.begin(); j != i->second.end(); j++) {
-					s += fmt::Format(" 0x%08X", *j);
-				}
-			}
-
-			return s;
-		}
-
-		/// Get the size of the CFG. The size is a score of how large the CFG is and increases everytime
-		/// a node or an edge is added to the CFG.
-		size_t GetSize() const {
-			return instruction_addresses.size() + branches.size() + calls.size();
-		}
-	};
-
 	enum class BranchType {
 		NonBranch,
 		LocalBranch,
@@ -295,7 +209,7 @@ namespace ppu_recompiler_llvm {
 		 * Compile a code fragment described by a cfg and return an executable and the ExecutionEngine storing it
 		 * Pointer to function can be retrieved with getPointerToFunction
 		 */
-		std::pair<Executable, llvm::ExecutionEngine *> Compile(const std::string & name, const ControlFlowGraph & cfg, bool generate_linkable_exits);
+		std::pair<Executable, llvm::ExecutionEngine *> Compile(const std::string & name, u32 start_address, u32 instruction_count, bool generate_linkable_exits);
 
 		/// Retrieve compiler stats
 		Stats GetStats();
@@ -723,9 +637,6 @@ namespace ppu_recompiler_llvm {
 			/// Args of the LLVM function
 			llvm::Value * args[MaxArgs];
 
-			/// The CFG being compiled
-			const ControlFlowGraph * cfg;
-
 			/// Address of the current instruction being compiled
 			u32 current_instruction_address;
 
@@ -1035,49 +946,45 @@ namespace ppu_recompiler_llvm {
 	private:
 		/// An entry in the block table
 		struct BlockEntry {
+			/// Start address
+			u32 address;
+
 			/// Number of times this block was hit
 			u32 num_hits;
 
-			/// Size of the CFG when it was last compiled
-			size_t last_compiled_cfg_size;
-
-			/// The CFG for this block
-			ControlFlowGraph cfg;
+			/// Indicates whether this function has been analysed or not
+			bool is_analysed;
 
 			/// Indicates whether the block has been compiled or not
 			bool is_compiled;
 
-			BlockEntry(u32 start_address, u32 function_address)
+			/// Indicate wheter the block is a function that can be completly compiled
+			/// that is, that has a clear "return" semantic and no indirect branch
+			bool is_compilable_function;
+
+			/// If the analysis was successfull, how long the block is.
+			u32 instructionCount;
+
+			/// If the analysis was successfull, which function does it call.
+			std::set<u32> calledFunctions;
+
+			BlockEntry(u32 start_address)
 				: num_hits(0)
-				, last_compiled_cfg_size(0)
+				, address(start_address)
 				, is_compiled(false)
-				, cfg(start_address, function_address) {
+				, is_analysed(false)
+				, is_compilable_function(false)
+				, instructionCount(0) {
 			}
 
 			std::string ToString() const {
-				return fmt::Format("0x%08X (0x%08X): NumHits=%u, LastCompiledCfgSize=%u, IsCompiled=%c",
-					cfg.start_address, cfg.function_address, num_hits, last_compiled_cfg_size, is_compiled ? 'Y' : 'N');
+				return fmt::Format("0x%08X: NumHits=%u, IsCompiled=%c",
+					address, num_hits, is_compiled ? 'Y' : 'N');
 			}
 
 			bool operator == (const BlockEntry & other) const {
-				return cfg.start_address == other.cfg.start_address;
+				return address == other.address;
 			}
-
-			bool IsFunction() const {
-				return cfg.function_address == cfg.start_address;
-			}
-
-			struct hash {
-				size_t operator()(const BlockEntry * e) const {
-					return e->cfg.start_address;
-				}
-			};
-
-			struct equal_to {
-				bool operator()(const BlockEntry * lhs, const BlockEntry * rhs) const {
-					return *lhs == *rhs;
-				}
-			};
 		};
 
 		/// Log
@@ -1090,7 +997,7 @@ namespace ppu_recompiler_llvm {
 		std::list<ExecutionTrace *> m_pending_execution_traces;
 
 		/// Block table
-		std::unordered_set<BlockEntry *, BlockEntry::hash, BlockEntry::equal_to> m_block_table;
+		std::unordered_map<u32, BlockEntry> m_block_table;
 
 		/// Execution traces that have been already encountered. Data is the list of all blocks that this trace includes.
 		std::unordered_map<ExecutionTrace::Id, std::vector<BlockEntry *>> m_processed_execution_traces;
@@ -1120,10 +1027,15 @@ namespace ppu_recompiler_llvm {
 		RecompilationEngine & operator = (RecompilationEngine && other) = delete;
 
 		/// Process an execution trace.
-		void ProcessExecutionTrace(const ExecutionTrace & execution_trace);
+		/// Returns true if a block was compiled
+		bool ProcessExecutionTrace(const ExecutionTrace & execution_trace);
 
-		/// Update a CFG
-		void UpdateControlFlowGraph(ControlFlowGraph & cfg, const ExecutionTraceEntry & this_entry, const ExecutionTraceEntry * next_entry);
+		/**
+		* Analyse block to get useful info (function called, has indirect branch...)
+		* This code is inspired from Dolphin PPC Analyst
+		* Return true if analysis is successful.
+		*/
+		bool AnalyseBlock(BlockEntry &functionData, u32 maxSize = 10000);
 
 		/// Compile a block
 		void CompileBlock(BlockEntry & block_entry);
@@ -1138,16 +1050,6 @@ namespace ppu_recompiler_llvm {
 	/// Finds interesting execution sequences
 	class Tracer {
 	public:
-		/// Trace type
-		enum class TraceType : u32 {
-			CallFunction,
-			EnterFunction,
-			ExitFromCompiledFunction,
-			Return,
-			Instruction,
-			ExitFromCompiledBlock,
-		};
-
 		Tracer();
 
 		Tracer(const Tracer & other) = delete;
@@ -1159,7 +1061,7 @@ namespace ppu_recompiler_llvm {
 		Tracer & operator = (Tracer && other) = delete;
 
 		/// Notify the tracer
-		void Trace(TraceType trace_type, u32 arg1, u32 arg2);
+		void TraceBlockStart(u32 block_address);
 
 		/// Notify the tracer that the execution sequence is being terminated.
 		void Terminate();
