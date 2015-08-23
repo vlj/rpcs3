@@ -209,7 +209,7 @@ namespace ppu_recompiler_llvm {
 		 * Compile a code fragment described by a cfg and return an executable and the ExecutionEngine storing it
 		 * Pointer to function can be retrieved with getPointerToFunction
 		 */
-		std::pair<Executable, llvm::ExecutionEngine *> Compile(const std::string & name, u32 start_address, u32 instruction_count, bool generate_linkable_exits);
+		std::pair<std::vector<std::pair<u32, Executable> >, llvm::ExecutionEngine *> Compile(const std::set<std::tuple<std::string, u32, u32, bool>> &);
 
 		/// Retrieve compiler stats
 		Stats GetStats();
@@ -1049,7 +1049,7 @@ namespace ppu_recompiler_llvm {
 		bool AnalyseBlock(BlockEntry &functionData, u32 maxSize = 10000);
 
 		/// Get minimal set of function that needs to be compiled together including block_entry so that all function call are direct when possible
-		std::set<u32> getMinimalFunctionCompileSetFor(BlockEntry & block_entry);
+		std::pair<std::set<u32>, std::set<u32> > getMinimalFunctionCompileSetFor(BlockEntry & block_entry);
 
 		/// Compile a block
 		void CompileBlock(BlockEntry & block_entry);
