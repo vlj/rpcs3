@@ -304,14 +304,6 @@ const Executable *RecompilationEngine::GetExecutable(u32 address, bool isFunctio
 	return isFunction ? &executeFunc : &executeUntilReturn;
 }
 
-std::pair<std::mutex, std::atomic<int> >* RecompilationEngine::GetMutexAndCounterForAddress(u32 address) {
-	std::lock_guard<std::mutex> lock(m_address_locks_lock);
-	std::unordered_map<u32, std::pair<std::mutex, std::atomic<int>> >::iterator It = m_address_locks.find(address);
-	if (It == m_address_locks.end())
-		return nullptr;
-	return &(It->second);
-}
-
 const Executable *RecompilationEngine::GetCompiledExecutableIfAvailable(u32 address)
 {
 	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
@@ -324,22 +316,6 @@ const Executable *RecompilationEngine::GetCompiledExecutableIfAvailable(u32 addr
 	if (Ini.LLVMExclusionRange.GetValue() && (id >= Ini.LLVMMinId.GetValue() && id <= Ini.LLVMMaxId.GetValue()))
 		return nullptr;
 	return &(std::get<0>(It->second));
-}
-
-void RecompilationEngine::RemoveUnusedEntriesFromCache() {
-	auto now = std::chrono::high_resolution_clock::now();
-	if (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_last_cache_clear_time).count() > 10000) {
-		for (auto i = m_address_to_function.begin(); i != m_address_to_function.end();) {
-			auto tmp = i;
-			i++;
-			if (std::get<2>(tmp->second) == 0)
-				m_address_to_function.erase(tmp);
-			else
-				std::get<2>(tmp->second) = 0;
-		}
-
-		m_last_cache_clear_time = now;
-	}
 }
 
 void RecompilationEngine::NotifyTrace(ExecutionTrace * execution_trace) {
@@ -367,7 +343,6 @@ raw_fd_ostream & RecompilationEngine::Log() {
 }
 
 void RecompilationEngine::Task() {
-	bool                     is_idling = false;
 	std::chrono::nanoseconds idling_time(0);
 	std::chrono::nanoseconds recompiling_time(0);
 
@@ -388,46 +363,11 @@ void RecompilationEngine::Task() {
 
 		if (execution_trace) {
 			ProcessExecutionTrace(*execution_trace);
-			delete execution_trace;
 			work_done_this_iteration = true;
+			delete execution_trace;
 		}
 
 		if (!work_done_this_iteration) {
-			// TODO: Reduce the priority of the recompilation engine thread if its set to high priority
-		}
-		else {
-			is_idling = false;
-		}
-
-		if (is_idling) {
-			auto recompiling_start = std::chrono::high_resolution_clock::now();
-
-			// Recompile the function whose CFG has changed the most since the last time it was compiled
-			auto   candidate = (BlockEntry *)nullptr;
-			size_t max_diff = 0;
-			for (auto block : m_block_table) {
-				if (block->IsFunction() && block->is_compiled) {
-					auto diff = block->cfg.GetSize() - block->last_compiled_cfg_size;
-					if (diff > max_diff) {
-						candidate = block;
-						max_diff = diff;
-					}
-				}
-			}
-
-			if (candidate != nullptr) {
-				Log() << "Recompiling: " << candidate->ToString() << "\n";
-				CompileBlock(*candidate);
-				work_done_this_iteration = true;
-			}
-
-			auto recompiling_end = std::chrono::high_resolution_clock::now();
-			recompiling_time += std::chrono::duration_cast<std::chrono::nanoseconds>(recompiling_end - recompiling_start);
-		}
-
-		if (!work_done_this_iteration) {
-			is_idling = true;
-
 			// Wait a few ms for something to happen
 			auto idling_start = std::chrono::high_resolution_clock::now();
 			std::unique_lock<std::mutex> lock(mutex);
@@ -549,7 +489,7 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	Log() << "CFG: " << block_entry.cfg.ToString() << "\n";
 
 	const std::pair<Executable, llvm::ExecutionEngine *> &compileResult =
-		m_compiler.Compile(fmt::Format("fn_0x%08X_%u", block_entry.cfg.start_address, block_entry.revision++), block_entry.cfg,
+		m_compiler.Compile(fmt::Format("fn_0x%08X", block_entry.cfg.start_address), block_entry.cfg,
 			block_entry.IsFunction() ? true : false /*generate_linkable_exits*/);
 
 	// If entry doesn't exist, create it (using lock)
@@ -558,24 +498,6 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	{
 		std::lock_guard<std::mutex> lock(m_address_to_function_lock);
 		std::get<1>(m_address_to_function[block_entry.cfg.start_address]) = nullptr;
-	}
-
-	std::unordered_map<u32, std::pair<std::mutex, std::atomic<int>> >::iterator It2 = m_address_locks.find(block_entry.cfg.start_address);
-	if (It2 == m_address_locks.end())
-	{
-		std::lock_guard<std::mutex> lock(m_address_locks_lock);
-		(void)m_address_locks[block_entry.cfg.start_address];
-		m_address_locks[block_entry.cfg.start_address].second.store(0);
-	}
-
-	std::lock_guard<std::mutex> lock(m_address_locks[block_entry.cfg.start_address].first);
-
-	int loopiteration = 0;
-	while (m_address_locks[block_entry.cfg.start_address].second.load() > 0)
-	{
-		std::this_thread::yield();
-		if (loopiteration++ > 10000000)
-			return;
 	}
 
 	std::get<1>(m_address_to_function[block_entry.cfg.start_address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
@@ -730,24 +652,15 @@ u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteTillReturn(PPUThread
 		execution_engine->m_tracer.Trace(Tracer::TraceType::ExitFromCompiledFunction, context >> 32, context & 0xFFFFFFFF);
 
 	while (PollStatus(ppu_state) == false) {
-		std::pair<std::mutex, std::atomic<int>> *mut = execution_engine->m_recompilation_engine->GetMutexAndCounterForAddress(ppu_state->PC);
-		if (mut) {
-			{
-				std::lock_guard<std::mutex> lock(mut->first);
-				mut->second.fetch_add(1);
-			}
-			const Executable *executable = execution_engine->m_recompilation_engine->GetCompiledExecutableIfAvailable(ppu_state->PC);
-			if (executable)
-			{
-				auto entry = ppu_state->PC;
-				u32 exit = (u32)(*executable)(ppu_state, 0);
-				mut->second.fetch_sub(1);
-				execution_engine->m_tracer.Trace(Tracer::TraceType::ExitFromCompiledBlock, entry, exit);
-				if (exit == 0)
-					return 0;
-				continue;
-			}
-			mut->second.fetch_add(1);
+		const Executable *executable = execution_engine->m_recompilation_engine->GetCompiledExecutableIfAvailable(ppu_state->PC);
+		if (executable)
+		{
+			auto entry = ppu_state->PC;
+			u32 exit = (u32)(*executable)(ppu_state, 0);
+			execution_engine->m_tracer.Trace(Tracer::TraceType::ExitFromCompiledBlock, entry, exit);
+			if (exit == 0)
+				return 0;
+			continue;
 		}
 		execution_engine->m_tracer.Trace(Tracer::TraceType::Instruction, ppu_state->PC, 0);
 		u32 instruction = vm::ps3::read32(ppu_state->PC);
