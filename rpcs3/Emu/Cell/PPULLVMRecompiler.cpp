@@ -69,7 +69,7 @@ Compiler::~Compiler() {
 	delete m_llvm_context;
 }
 
-std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::string & name, u32 start_address, u32 instruction_count, bool generate_linkable_exits) {
+std::pair<std::vector<std::pair<u32, Executable> >, llvm::ExecutionEngine *> Compiler::Compile(const std::set<std::tuple<std::string, u32, u32, bool>> &compileSet) {
 	auto compilation_start = std::chrono::high_resolution_clock::now();
 
 	m_module = new llvm::Module("Module", *m_llvm_context);
@@ -98,155 +98,173 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 	fpm->add(createEarlyCSEPass());
 	fpm->add(createTailCallEliminationPass());
 	fpm->add(createReassociatePass());
-	fpm->add(createInstructionCombiningPass());
+//	fpm->add(createInstructionCombiningPass());
 	fpm->add(new DominatorTreeWrapperPass());
 	fpm->add(new MemoryDependenceAnalysis());
 	fpm->add(createGVNPass());
-	fpm->add(createInstructionCombiningPass());
+//	fpm->add(createInstructionCombiningPass());
 	fpm->add(new MemoryDependenceAnalysis());
 	fpm->add(createDeadStoreEliminationPass());
 	fpm->add(new LoopInfo());
 	fpm->add(new ScalarEvolution());
 	fpm->add(createSLPVectorizerPass());
-	fpm->add(createInstructionCombiningPass());
+//	fpm->add(createInstructionCombiningPass());
 	fpm->add(createCFGSimplificationPass());
 	fpm->doInitialization();
 
-	m_state.generate_linkable_exits = generate_linkable_exits;
-
-	// Create the function
-	m_state.function = (Function *)m_module->getOrInsertFunction(name, m_compiled_function_type);
-	m_state.function->setCallingConv(CallingConv::X86_64_Win64);
-	auto arg_i = m_state.function->arg_begin();
-	arg_i->setName("ppu_state");
-	m_state.args[CompileTaskState::Args::State] = arg_i;
-	(++arg_i)->setName("context");
-	m_state.args[CompileTaskState::Args::Context] = arg_i;
-
-	// Create the entry block and add code to branch to the first instruction
-	m_ir_builder->SetInsertPoint(GetBasicBlockFromAddress(0));
-	m_ir_builder->CreateBr(GetBasicBlockFromAddress(start_address));
-
-	// Used to decode instructions
-	PPUDisAsm dis_asm(CPUDisAsm_DumpMode);
-	dis_asm.offset = vm::get_ptr<u8>(start_address);
-
-	m_recompilation_engine.Log() << "Recompiling block :\n\n";
-
-	// Convert each instruction in the CFG to LLVM IR
-	std::vector<PHINode *> exit_instr_list;
-	for (u32 instructionAddress = start_address; instructionAddress < start_address + instruction_count * 4; instructionAddress += 4) {
-		m_state.hit_branch_instruction = false;
-		m_state.current_instruction_address = instructionAddress;
-		BasicBlock *instr_bb = GetBasicBlockFromAddress(instructionAddress);
-		m_ir_builder->SetInsertPoint(instr_bb);
-
-		u32 instr = vm::ps3::read32(instructionAddress);
-
-		// Dump PPU opcode
-		dis_asm.dump_pc = instructionAddress;
-		(*PPU_instr::main_list)(&dis_asm, instr);
-		m_recompilation_engine.Log() << dis_asm.last_opcode;
-
-		Decode(instr);
-		if (!m_state.hit_branch_instruction)
-			 m_ir_builder->CreateBr(GetBasicBlockFromAddress(instructionAddress + 4));
+	// Declare the functions
+	m_recompilation_engine.Log() << "Function beeing compiled together:\n";
+	for (auto compileInfo : compileSet)
+	{
+		const std::string &name = std::get<0>(compileInfo);
+		m_recompilation_engine.Log() << name << "\n";
+		llvm::Function *fn = (Function *)m_module->getOrInsertFunction(name, m_compiled_function_type);
+		fn->setCallingConv(CallingConv::X86_64_Win64);
 	}
 
-	// Generate exit logic for all empty blocks
-	const std::string &default_exit_block_name = GetBasicBlockNameFromAddress(0xFFFFFFFF);
-	for (BasicBlock &block_i : *m_state.function) {
-		if (!block_i.getInstList().empty() || block_i.getName() == default_exit_block_name)
-			continue;
+	for (auto compileInfo : compileSet)
+	{
+		const std::string &name = std::get<0>(compileInfo);
+		u32 start_address = std::get<1>(compileInfo);
+		u32 instruction_count = std::get<2>(compileInfo);
+		bool generate_linkable_exits = std::get<3>(compileInfo);
 
-		// Found an empty block
-		m_state.current_instruction_address = GetAddressFromBasicBlockName(block_i.getName());
+		m_state.generate_linkable_exits = generate_linkable_exits;
+		m_state.function = (Function *)m_module->getFunction(name);
+		auto arg_i = m_state.function->arg_begin();
+		arg_i->setName("ppu_state");
+		m_state.args[CompileTaskState::Args::State] = arg_i;
+		(++arg_i)->setName("context");
+		m_state.args[CompileTaskState::Args::Context] = arg_i;
 
-		m_ir_builder->SetInsertPoint(&block_i);
-		PHINode *exit_instr_i32 = m_ir_builder->CreatePHI(m_ir_builder->getInt32Ty(), 0);
-		exit_instr_list.push_back(exit_instr_i32);
+		// Create the entry block and add code to branch to the first instruction
+		m_ir_builder->SetInsertPoint(GetBasicBlockFromAddress(0));
+		m_ir_builder->CreateBr(GetBasicBlockFromAddress(start_address));
 
-		SetPc(m_ir_builder->getInt32(m_state.current_instruction_address));
+		// Used to decode instructions
+		PPUDisAsm dis_asm(CPUDisAsm_DumpMode);
+		dis_asm.offset = vm::get_ptr<u8>(start_address);
 
-		if (generate_linkable_exits) {
-			Value *context_i64 = m_ir_builder->CreateZExt(exit_instr_i32, m_ir_builder->getInt64Ty());
-			context_i64 = m_ir_builder->CreateOr(context_i64, (u64)start_address << 32);
-			Value *ret_i32 = IndirectCall(m_state.current_instruction_address, context_i64, false);
-			Value *cmp_i1 = m_ir_builder->CreateICmpNE(ret_i32, m_ir_builder->getInt32(0));
-			BasicBlock *then_bb = GetBasicBlockFromAddress(m_state.current_instruction_address, "then_0");
-			BasicBlock *merge_bb = GetBasicBlockFromAddress(m_state.current_instruction_address, "merge_0");
-			m_ir_builder->CreateCondBr(cmp_i1, then_bb, merge_bb);
+		m_recompilation_engine.Log() << "Recompiling block :\n\n";
 
-			m_ir_builder->SetInsertPoint(then_bb);
-			context_i64 = m_ir_builder->CreateZExt(ret_i32, m_ir_builder->getInt64Ty());
-			context_i64 = m_ir_builder->CreateOr(context_i64, (u64)start_address << 32);
-			m_ir_builder->CreateCall2(m_execute_unknown_block, m_state.args[CompileTaskState::Args::State], context_i64);
-			m_ir_builder->CreateBr(merge_bb);
+		// Convert each instruction in the CFG to LLVM IR
+		std::vector<PHINode *> exit_instr_list;
+		for (u32 instructionAddress = start_address; instructionAddress < start_address + instruction_count * 4; instructionAddress += 4) {
+			m_state.hit_branch_instruction = false;
+			m_state.current_instruction_address = instructionAddress;
+			BasicBlock *instr_bb = GetBasicBlockFromAddress(instructionAddress);
+			m_ir_builder->SetInsertPoint(instr_bb);
 
-			m_ir_builder->SetInsertPoint(merge_bb);
-			m_ir_builder->CreateRet(m_ir_builder->getInt32(0));
+			u32 instr = vm::ps3::read32(instructionAddress);
+
+			// Dump PPU opcode
+			dis_asm.dump_pc = instructionAddress;
+			(*PPU_instr::main_list)(&dis_asm, instr);
+			m_recompilation_engine.Log() << dis_asm.last_opcode;
+
+			Decode(instr);
+			if (!m_state.hit_branch_instruction)
+				m_ir_builder->CreateBr(GetBasicBlockFromAddress(instructionAddress + 4));
 		}
-		else {
-			m_ir_builder->CreateRet(exit_instr_i32);
+
+		// Generate exit logic for all empty blocks
+		const std::string &default_exit_block_name = GetBasicBlockNameFromAddress(0xFFFFFFFF);
+		for (BasicBlock &block_i : *m_state.function) {
+			if (!block_i.getInstList().empty() || block_i.getName() == default_exit_block_name)
+				continue;
+
+			// Found an empty block
+			m_state.current_instruction_address = GetAddressFromBasicBlockName(block_i.getName());
+
+			m_ir_builder->SetInsertPoint(&block_i);
+			PHINode *exit_instr_i32 = m_ir_builder->CreatePHI(m_ir_builder->getInt32Ty(), 0);
+			exit_instr_list.push_back(exit_instr_i32);
+
+			SetPc(m_ir_builder->getInt32(m_state.current_instruction_address));
+
+			if (generate_linkable_exits) {
+				Value *context_i64 = m_ir_builder->CreateZExt(exit_instr_i32, m_ir_builder->getInt64Ty());
+				context_i64 = m_ir_builder->CreateOr(context_i64, (u64)start_address << 32);
+				Value *ret_i32 = IndirectCall(m_state.current_instruction_address, context_i64, false);
+				Value *cmp_i1 = m_ir_builder->CreateICmpNE(ret_i32, m_ir_builder->getInt32(0));
+				BasicBlock *then_bb = GetBasicBlockFromAddress(m_state.current_instruction_address, "then_0");
+				BasicBlock *merge_bb = GetBasicBlockFromAddress(m_state.current_instruction_address, "merge_0");
+				m_ir_builder->CreateCondBr(cmp_i1, then_bb, merge_bb);
+
+				m_ir_builder->SetInsertPoint(then_bb);
+				context_i64 = m_ir_builder->CreateZExt(ret_i32, m_ir_builder->getInt64Ty());
+				context_i64 = m_ir_builder->CreateOr(context_i64, (u64)start_address << 32);
+				m_ir_builder->CreateCall2(m_execute_unknown_block, m_state.args[CompileTaskState::Args::State], context_i64);
+				m_ir_builder->CreateBr(merge_bb);
+
+				m_ir_builder->SetInsertPoint(merge_bb);
+				m_ir_builder->CreateRet(m_ir_builder->getInt32(0));
+			}
+			else {
+				m_ir_builder->CreateRet(exit_instr_i32);
+			}
 		}
+
+		// If the function has a default exit block then generate code for it
+		BasicBlock *default_exit_bb = GetBasicBlockFromAddress(0xFFFFFFFF, "", false);
+		if (default_exit_bb) {
+			m_ir_builder->SetInsertPoint(default_exit_bb);
+			PHINode *exit_instr_i32 = m_ir_builder->CreatePHI(m_ir_builder->getInt32Ty(), 0);
+			exit_instr_list.push_back(exit_instr_i32);
+
+			if (generate_linkable_exits) {
+				Value *cmp_i1 = m_ir_builder->CreateICmpNE(exit_instr_i32, m_ir_builder->getInt32(0));
+				BasicBlock *then_bb = GetBasicBlockFromAddress(0xFFFFFFFF, "then_0");
+				BasicBlock *merge_bb = GetBasicBlockFromAddress(0xFFFFFFFF, "merge_0");
+				m_ir_builder->CreateCondBr(cmp_i1, then_bb, merge_bb);
+
+				m_ir_builder->SetInsertPoint(then_bb);
+				Value *context_i64 = m_ir_builder->CreateZExt(exit_instr_i32, m_ir_builder->getInt64Ty());
+				context_i64 = m_ir_builder->CreateOr(context_i64, (u64)start_address << 32);
+				m_ir_builder->CreateCall2(m_execute_unknown_block, m_state.args[CompileTaskState::Args::State], context_i64);
+				m_ir_builder->CreateBr(merge_bb);
+
+				m_ir_builder->SetInsertPoint(merge_bb);
+				m_ir_builder->CreateRet(m_ir_builder->getInt32(0));
+			}
+			else {
+				m_ir_builder->CreateRet(exit_instr_i32);
+			}
+		}
+
+		// Add incoming values for all exit instr PHI nodes
+		for (PHINode *exit_instr_i : exit_instr_list) {
+			BasicBlock *block = exit_instr_i->getParent();
+			for (pred_iterator pred_i = pred_begin(block); pred_i != pred_end(block); pred_i++) {
+				u32 pred_address = GetAddressFromBasicBlockName((*pred_i)->getName());
+				exit_instr_i->addIncoming(m_ir_builder->getInt32(pred_address), *pred_i);
+			}
+		}
+
+
+		m_recompilation_engine.Log() << "LLVM bytecode:\n";
+		m_recompilation_engine.Log() << *m_state.function;
+
+		// Optimize this function
+		fpm->run(*m_state.function);
 	}
 
-	// If the function has a default exit block then generate code for it
-	BasicBlock *default_exit_bb = GetBasicBlockFromAddress(0xFFFFFFFF, "", false);
-	if (default_exit_bb) {
-		m_ir_builder->SetInsertPoint(default_exit_bb);
-		PHINode *exit_instr_i32 = m_ir_builder->CreatePHI(m_ir_builder->getInt32Ty(), 0);
-		exit_instr_list.push_back(exit_instr_i32);
-
-		if (generate_linkable_exits) {
-			Value *cmp_i1 = m_ir_builder->CreateICmpNE(exit_instr_i32, m_ir_builder->getInt32(0));
-			BasicBlock *then_bb = GetBasicBlockFromAddress(0xFFFFFFFF, "then_0");
-			BasicBlock *merge_bb = GetBasicBlockFromAddress(0xFFFFFFFF, "merge_0");
-			m_ir_builder->CreateCondBr(cmp_i1, then_bb, merge_bb);
-
-			m_ir_builder->SetInsertPoint(then_bb);
-			Value *context_i64 = m_ir_builder->CreateZExt(exit_instr_i32, m_ir_builder->getInt64Ty());
-			context_i64 = m_ir_builder->CreateOr(context_i64, (u64)start_address << 32);
-			m_ir_builder->CreateCall2(m_execute_unknown_block, m_state.args[CompileTaskState::Args::State], context_i64);
-			m_ir_builder->CreateBr(merge_bb);
-
-			m_ir_builder->SetInsertPoint(merge_bb);
-			m_ir_builder->CreateRet(m_ir_builder->getInt32(0));
-		}
-		else {
-			m_ir_builder->CreateRet(exit_instr_i32);
-		}
-	}
-
-	// Add incoming values for all exit instr PHI nodes
-	for (PHINode *exit_instr_i : exit_instr_list) {
-		BasicBlock *block = exit_instr_i->getParent();
-		for (pred_iterator pred_i = pred_begin(block); pred_i != pred_end(block); pred_i++) {
-			u32 pred_address = GetAddressFromBasicBlockName((*pred_i)->getName());
-			exit_instr_i->addIncoming(m_ir_builder->getInt32(pred_address), *pred_i);
-		}
-	}
-
-	m_recompilation_engine.Log() << "LLVM bytecode:\n";
-	m_recompilation_engine.Log() << *m_module;
 
 	std::string        verify;
 	raw_string_ostream verify_ostream(verify);
-	if (verifyFunction(*m_state.function, &verify_ostream)) {
+	if (verifyModule(*m_module, &verify_ostream)) {
 		m_recompilation_engine.Log() << "Verification failed: " << verify << "\n";
 	}
 
 	auto ir_build_end = std::chrono::high_resolution_clock::now();
 	m_stats.ir_build_time += std::chrono::duration_cast<std::chrono::nanoseconds>(ir_build_end - compilation_start);
 
-	// Optimize this function
-	fpm->run(*m_state.function);
+
 	auto optimize_end = std::chrono::high_resolution_clock::now();
 	m_stats.optimization_time += std::chrono::duration_cast<std::chrono::nanoseconds>(optimize_end - ir_build_end);
 
 	// Translate to machine code
 	execution_engine->finalizeObject();
-	void *function = execution_engine->getPointerToFunction(m_state.function);
 	auto translate_end = std::chrono::high_resolution_clock::now();
 	m_stats.translation_time += std::chrono::duration_cast<std::chrono::nanoseconds>(translate_end - optimize_end);
 
@@ -262,12 +280,22 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 
 		LLVMDisasmDispose(disassembler);*/
 
+	std::vector<std::pair<u32, Executable> > pointers;
+	for (auto compileInfo : compileSet)
+	{
+		const std::string &name = std::get<0>(compileInfo);
+		void *function = execution_engine->getPointerToFunction(m_module->getFunction(name));
+		assert(function != nullptr);
+		u32 start_address = std::get<1>(compileInfo);
+		pointers.push_back(std::make_pair(start_address, (Executable)function));
+	}
+
 	auto compilation_end = std::chrono::high_resolution_clock::now();
 	m_stats.total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(compilation_end - compilation_start);
 	delete fpm;
 
-	assert(function != nullptr);
-	return std::make_pair((Executable)function, execution_engine);
+
+	return std::make_pair(pointers, execution_engine);
 }
 
 Compiler::Stats Compiler::GetStats() {
@@ -306,8 +334,6 @@ const Executable *RecompilationEngine::GetCompiledExecutableIfAvailable(u32 addr
 	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
 	std::unordered_map<u32, ExecutableStorage>::iterator It = m_address_to_function.find(address);
 	if (It == m_address_to_function.end())
-		return nullptr;
-	if (std::get<1>(It->second) == nullptr)
 		return nullptr;
 	u32 id = std::get<3>(It->second);
 	if (Ini.LLVMExclusionRange.GetValue() && (id >= Ini.LLVMMinId.GetValue() && id <= Ini.LLVMMaxId.GetValue()))
@@ -515,26 +541,49 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	if (block_entry.is_analysed)
 		return;
 
-	if (!AnalyseBlock(block_entry))
-		return;
+	// Determine function that are called and can be precompiled
+	const std::pair<std::set<u32>, std::set<u32>> &functionsToBuild = getMinimalFunctionCompileSetFor(block_entry);
 
-	const std::pair<Executable, llvm::ExecutionEngine *> &compileResult =
-		m_compiler.Compile(fmt::Format("fn_0x%08X", block_entry.address), block_entry.address, block_entry.instructionCount, false /*generate_linkable_exits*/);
-
-	// If entry doesn't exist, create it (using lock)
-	std::unordered_map<u32, ExecutableStorage>::iterator It = m_address_to_function.find(block_entry.address);
-	if (It == m_address_to_function.end())
+	std::set<std::tuple<std::string, u32, u32, bool>> compileSetInfo;
+	for (u32 function_address : functionsToBuild.first)
 	{
-		std::lock_guard<std::mutex> lock(m_address_to_function_lock);
-		std::get<1>(m_address_to_function[block_entry.address]) = nullptr;
+		auto block_it = m_block_table.find(function_address);
+		assert(block_it != m_block_table.end());
+		BlockEntry &block = block_it->second;
+
+		compileSetInfo.insert(std::make_tuple(fmt::Format("function_0x%08X", block.address), block.address, block.instructionCount, false /*generate_linkable_exits*/));
+	}
+	for (u32 block_address : functionsToBuild.second)
+	{
+		auto block_it = m_block_table.find(block_address);
+		assert(block_it != m_block_table.end());
+		BlockEntry &block = block_it->second;
+
+		compileSetInfo.insert(std::make_tuple(fmt::Format("block_0x%08X", block.address), block.address, block.instructionCount, false /*generate_linkable_exits*/));
 	}
 
-	std::get<1>(m_address_to_function[block_entry.address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
-	std::get<0>(m_address_to_function[block_entry.address]) = compileResult.first;
-	std::get<3>(m_address_to_function[block_entry.address]) = m_currentId;
-	Log() << "ID IS " << m_currentId << "\n";
-	m_currentId++;
-	block_entry.is_compiled = true;
+	const std::pair<std::vector<std::pair<u32, Executable> >, llvm::ExecutionEngine *> &compileResult = m_compiler.Compile(compileSetInfo);
+
+	for (auto compileResult : compileResult.first)
+	{
+		auto block_it = m_block_table.find(compileResult.first);
+		assert(block_it != m_block_table.end());
+		BlockEntry &block = block_it->second;
+
+		// If entry doesn't exist, create it (using lock)
+		std::unordered_map<u32, ExecutableStorage>::iterator It = m_address_to_function.find(block.address);
+		if (It == m_address_to_function.end())
+		{
+			std::lock_guard<std::mutex> lock(m_address_to_function_lock);
+			std::get<1>(m_address_to_function[block.address]) = nullptr;
+		}
+
+		std::get<0>(m_address_to_function[block.address]) = compileResult.second;
+		std::get<3>(m_address_to_function[block.address]) = m_currentId;
+		Log() << "ID IS " << m_currentId << "\n";
+		m_currentId++;
+		block.is_compiled = true;
+	}
 }
 
 std::shared_ptr<RecompilationEngine> RecompilationEngine::GetInstance() {
