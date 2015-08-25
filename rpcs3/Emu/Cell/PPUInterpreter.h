@@ -2184,13 +2184,17 @@ private:
 	{
 		CPU.GPR[rd] = (s64)CPU.GPR[ra] * simm16;
 	}
+	static void SUBFIC_impl(PPUThread *CPU, u32 rd, u32 ra, s32 simm16)
+	{
+		const u64 RA = CPU->GPR[ra];
+		const u64 IMM = (s64)simm16;
+		CPU->GPR[rd] = ~RA + IMM + 1;
+
+		CPU->XER.CA = CPU->IsCarry(~RA, IMM, 1);
+	}
 	void SUBFIC(u32 rd, u32 ra, s32 simm16)
 	{
-		const u64 RA = CPU.GPR[ra];
-		const u64 IMM = (s64)simm16;
-		CPU.GPR[rd] = ~RA + IMM + 1;
-
-		CPU.XER.CA = CPU.IsCarry(~RA, IMM, 1);
+		SUBFIC_impl(&CPU, rd, ra, simm16);
 	}
 
 	static void CMPLI_impl(PPUThread *CPU, u32 crfd, u32 l, u32 ra, u32 uimm16)
@@ -2404,10 +2408,16 @@ private:
 		RLDICL_impl(&CPU, ra, rs, sh, mb, rc);
 	}
 
+	static
+	void RLDICR_impl(PPUThread *CPU, u32 ra, u32 rs, u32 sh, u32 me, u32 rc)
+	{
+		CPU->GPR[ra] = rotl64(CPU->GPR[rs], sh) & rotate_mask[0][me];
+		if (rc) CPU->UpdateCR0<s64>(CPU->GPR[ra]);
+	}
+
 	void RLDICR(u32 ra, u32 rs, u32 sh, u32 me, u32 rc)
 	{
-		CPU.GPR[ra] = rotl64(CPU.GPR[rs], sh) & rotate_mask[0][me];
-		if(rc) CPU.UpdateCR0<s64>(CPU.GPR[ra]);
+		RLDICR_impl(&CPU, ra, rs, sh, me, rc);
 	}
 	void RLDIC(u32 ra, u32 rs, u32 sh, u32 mb, u32 rc)
 	{

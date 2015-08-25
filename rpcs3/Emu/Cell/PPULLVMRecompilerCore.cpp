@@ -1677,6 +1677,9 @@ void Compiler::MULLI(u32 rd, u32 ra, s32 simm16) {
 }
 
 void Compiler::SUBFIC(u32 rd, u32 ra, s32 simm16) {
+#ifdef USE_INTERP
+	Call<void>("SUBFIC", PPUInterpreter::SUBFIC_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(rd), m_ir_builder->getInt32(ra), m_ir_builder->getInt32(simm16));
+#else
 	auto ra_i64 = GetGpr(ra);
 	ra_i64 = m_ir_builder->CreateNeg(ra_i64); // simpler way of doing  ~ra + 1
 	auto res_s = m_ir_builder->CreateCall2(Intrinsic::getDeclaration(m_module, Intrinsic::uadd_with_overflow, m_ir_builder->getInt64Ty()), ra_i64, m_ir_builder->getInt64((s64)simm16));
@@ -1686,6 +1689,7 @@ void Compiler::SUBFIC(u32 rd, u32 ra, s32 simm16) {
 	carry_i1 = m_ir_builder->CreateOr(is_zero, carry_i1);
 	SetGpr(rd, diff_i64);
 	SetXerCa(carry_i1);
+#endif
 }
 
 void Compiler::CMPLI(u32 crfd, u32 l, u32 ra, u32 uimm16) {
@@ -2056,6 +2060,9 @@ void Compiler::RLDICL(u32 ra, u32 rs, u32 sh, u32 mb, u32 rc) {
 }
 
 void Compiler::RLDICR(u32 ra, u32 rs, u32 sh, u32 me, u32 rc) {
+#ifdef USE_INTERP
+	Call<void>("RLDICR", PPUInterpreter::RLDICR_impl, m_state.args[CompileTaskState::Args::State], m_ir_builder->getInt32(ra), m_ir_builder->getInt32(rs), m_ir_builder->getInt32(sh), m_ir_builder->getInt32(me), m_ir_builder->getInt32(rc));
+#else
 	auto rs_i64 = GetGpr(rs);
 	auto res_i64 = rs_i64;
 	if (sh) {
@@ -2070,6 +2077,7 @@ void Compiler::RLDICR(u32 ra, u32 rs, u32 sh, u32 me, u32 rc) {
 	if (rc) {
 		SetCrFieldSignedCmp(0, res_i64, m_ir_builder->getInt64(0));
 	}
+#endif
 }
 
 void Compiler::RLDIC(u32 ra, u32 rs, u32 sh, u32 mb, u32 rc) {
