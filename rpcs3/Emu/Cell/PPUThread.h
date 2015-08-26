@@ -456,6 +456,77 @@ struct FPRdouble
 	static int Cmp(PPCdouble a, PPCdouble b);
 };
 
+struct Registers
+{
+	PPCdouble FPR[32]{}; //Floating Point Register
+	FPSCRhdr FPSCR{}; //Floating Point Status and Control Register
+	u64 GPR[32]{}; //General-Purpose Register
+	v128 VPR[32]{};
+	u32 vpcr = 0;
+
+	CRhdr CR{}; //Condition Register
+							//CR0
+							// 0 : LT - Negative (is negative)
+							// : 0 - Result is not negative
+							// : 1 - Result is negative
+							// 1 : GT - Positive (is positive)
+							// : 0 - Result is not positive
+							// : 1 - Result is positive
+							// 2 : EQ - Zero (is zero)
+							// : 0 - Result is not equal to zero
+							// : 1 - Result is equal to zero
+							// 3 : SO - Summary overflow (copy of the final state XER[S0])
+							// : 0 - No overflow occurred
+							// : 1 - Overflow occurred
+
+							//CRn 
+							// 0 : LT - Less than (rA > X)
+							// : 0 - rA is not less than
+							// : 1 - rA is less than
+							// 1 : GT - Greater than (rA < X)
+							// : 0 - rA is not greater than
+							// : 1 - rA is greater than
+							// 2 : EQ - Equal to (rA == X)
+							// : 0 - Result is not equal to zero
+							// : 1 - Result is equal to zero
+							// 3 : SO - Summary overflow (copy of the final state XER[S0])
+							// : 0 - No overflow occurred
+							// : 1 - Overflow occurred
+
+							//SPR : Special-Purpose Registers
+
+	XERhdr XER{}; //SPR 0x001 : Fixed-Point Expection Register
+								// 0 : SO - Summary overflow
+								// : 0 - No overflow occurred
+								// : 1 - Overflow occurred
+								// 1 : OV - Overflow
+								// : 0 - No overflow occurred
+								// : 1 - Overflow occurred
+								// 2 : CA - Carry
+								// : 0 - Carry did not occur
+								// : 1 - Carry occured
+								// 3 - 24 : Reserved
+								// 25 - 31 : TBC
+								// Transfer-byte count
+
+	MSRhdr MSR{}; //Machine State Register
+	PVRhdr PVR{}; //Processor Version Register
+
+	VSCRhdr VSCR{}; // Vector Status and Control Register
+
+	u64 LR = 0;     //SPR 0x008 : Link Register
+	u64 CTR = 0;    //SPR 0x009 : Count Register
+
+	u32 VRSAVE = 0; //SPR 0x100: VR Save/Restore Register (32 bits)
+
+	u64 SPRG[8]{}; //SPR 0x110 - 0x117 : SPR General-Purpose Registers
+
+								 //TBR : Time-Base Registers
+	u64 TB = 0; //TBR 0x10C - 0x10D
+
+	u32 PC = 0;
+};
+
 class PPUThread final : public CPUThread
 {
 public:
@@ -540,6 +611,8 @@ public:
 	PPUThread(const std::string& name);
 	virtual ~PPUThread() override;
 
+	Registers get_registers() const;
+	void set_registers(const Registers& regs);
 	virtual void dump_info() const override;
 	virtual u32 get_pc() const override { return PC; }
 	virtual u32 get_offset() const override { return 0; }

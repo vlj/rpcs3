@@ -79,6 +79,32 @@ PPUThread::~PPUThread()
 	ppu_free_tls(m_id);
 }
 
+Registers PPUThread::get_registers() const
+{
+	Registers result = {};
+	memcpy((void*)FPR, result.FPR, sizeof(FPR));
+	memcpy((void*)&FPSCR, &(result.FPSCR), sizeof(FPSCRhdr));
+	memcpy((void*)GPR, result.GPR, sizeof(GPR));
+	memcpy((void*)VPR, result.VPR, sizeof(VPR));
+	result.vpcr = vpcr;
+	memcpy((void*)&CR, &(result.CR), sizeof(CRhdr));
+	memcpy((void*)&XER, &(result.XER), sizeof(XERhdr));
+	memcpy((void*)&MSR, &(result.MSR), sizeof(MSRhdr));
+	memcpy((void*)&PVR, &(result.PVR), sizeof(PVRhdr));
+	memcpy((void*)&VSCR, &(result.VSCR), sizeof(VSCRhdr));
+	result.LR = LR;
+	result.CTR = CTR;
+	result.VRSAVE = VRSAVE;
+	memcpy((void*)SPRG, result.SPRG, sizeof(SPRG));
+	result.TB = TB;
+	result.PC = PC;
+}
+
+void PPUThread::set_registers(const Registers& regs)
+{
+
+}
+
 void PPUThread::dump_info() const
 {
 	if (~hle_code < 1024)
