@@ -1097,7 +1097,7 @@ namespace ppu_recompiler_llvm {
 		* This code is inspired from Dolphin PPC Analyst
 		* Return true if analysis is successful.
 		*/
-		bool AnalyseBlock(BlockEntry &functionData, u32 maxSize = 10000);
+		bool AnalyseBlock(BlockEntry &functionData, u32 maxSize);
 
 		/// Compile a block
 		void CompileBlock(BlockEntry & block_entry);

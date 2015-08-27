@@ -96,6 +96,7 @@ public:
 	IniEntry<int> LLVMMinId;
 	IniEntry<int> LLVMMaxId;
 	IniEntry<int> LLVMThreshold;
+	IniEntry<bool> LLVMTestAgainstInterp;
 	IniEntry<u8> SPUDecoderMode;
 	IniEntry<bool> HookStFunc;
 	IniEntry<bool> LoadLibLv2;
@@ -187,6 +188,7 @@ public:
 		LLVMMinId.Init("LLVM_Min_ID", path);
 		LLVMMaxId.Init("LLVM_Max_ID", path);
 		LLVMThreshold.Init("LLVM_Threshold", path);
+		LLVMTestAgainstInterp.Init("LLVM_Test_Against_Interp", path);
 		SPUDecoderMode.Init("CORE_SPUDecoderMode", path);
 		HookStFunc.Init("CORE_HookStFunc", path);
 		LoadLibLv2.Init("CORE_LoadLibLv2", path);
@@ -274,6 +276,7 @@ public:
 		LLVMMinId.Load(200);
 		LLVMMaxId.Load(250);
 		LLVMThreshold.Load(1000);
+		LLVMTestAgainstInterp.Load(false);
 		SPUDecoderMode.Load(0);
 		HookStFunc.Load(false);
 		LoadLibLv2.Load(false);
@@ -361,6 +364,7 @@ public:
 		LLVMMinId.Save();
 		LLVMMaxId.Save();
 		LLVMThreshold.Save();
+		LLVMTestAgainstInterp.Save();
 		SPUDecoderMode.Save();
 		HookStFunc.Save();
 		LoadLibLv2.Save();

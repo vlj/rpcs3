@@ -461,7 +461,7 @@ bool RecompilationEngine::AnalyseBlock(BlockEntry &functionData, u32 maxSize)
 		if (instr == PPU_instr::implicts::BLR() && instructionAddress >= farthestBranchTarget && functionData.is_compilable_function)
 		{
 			Log() << "Analysis: Block is compilable into a function \n";
-			return functionData.instructionCount > 1;
+			return true;
 		}
 		else if (PPU_instr::fields::GD_13(instr) == PPU_opcodes::G_13Opcodes::BCCTR)
 		{
@@ -469,7 +469,7 @@ bool RecompilationEngine::AnalyseBlock(BlockEntry &functionData, u32 maxSize)
 			{
 				Log() << "Analysis: indirect branching found \n";
 				functionData.is_compilable_function = false;
-				return functionData.instructionCount > 1;
+				return true;
 			}
 		}
 		else if (PPU_instr::fields::OPCD(instr) == PPU_opcodes::PPU_MainOpcodes::BC)
@@ -492,7 +492,7 @@ bool RecompilationEngine::AnalyseBlock(BlockEntry &functionData, u32 maxSize)
 				{
 					Log() << "Analysis: branch to previous block\n";
 					functionData.is_compilable_function = false;
-					return functionData.instructionCount > 1;
+					return true;
 				}
 				else if (target > farthestBranchTarget)
 					farthestBranchTarget = target;
@@ -510,7 +510,7 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	if (block_entry.is_analysed)
 		return;
 
-	if (!AnalyseBlock(block_entry))
+	if (!AnalyseBlock(block_entry, Ini.LLVMTestAgainstInterp.GetValue() ? 1 : 10000))
 		return;
 	Log() << "Compile: " << block_entry.ToString() << "\n";
 	const std::pair<Executable, llvm::ExecutionEngine *> &compileResult =
@@ -609,6 +609,39 @@ static BranchType GetBranchTypeFromInstruction(u32 instruction)
 	return BranchType::NonBranch;
 }
 
+static bool
+isTestable(u32 instruction)
+{
+	u32 instructionOpcode = PPU_instr::fields::OPCD(instruction);
+	if (instructionOpcode == PPU_opcodes::PPU_MainOpcodes::B ||
+		instructionOpcode == PPU_opcodes::PPU_MainOpcodes::BC)
+	{
+		u32 lk = instruction & 1;
+		if (lk) return false;
+	}
+	if (instructionOpcode == PPU_opcodes::PPU_MainOpcodes::G_04)
+	{
+//		u32 G04Opcode = PPU_instr::fields::GD_04(instruction);
+//		if (G04Opcode == PPU_opcodes::G_04_VA_Opcodes::VNMSUBFP)
+			return false;
+	}
+	if (instructionOpcode == PPU_opcodes::PPU_MainOpcodes::LWZ)
+		return false;
+	if (instructionOpcode == PPU_opcodes::PPU_MainOpcodes::G_13) {
+		u32 G13Opcode = PPU_instr::fields::GD_13(instruction);
+		if (G13Opcode == PPU_opcodes::G_13Opcodes::BCLR)
+			return false;
+		if (G13Opcode == PPU_opcodes::G_13Opcodes::BCCTR)
+			return false;
+	}
+	if (instructionOpcode == PPU_opcodes::PPU_MainOpcodes::HACK)
+		return false;
+	if (instructionOpcode == PPU_opcodes::PPU_MainOpcodes::SC)
+		return false;
+	return true;
+}
+
+
 u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteTillReturn(PPUThread * ppu_state, u64 context) {
 	CPUHybridDecoderRecompiler *execution_engine = (CPUHybridDecoderRecompiler *)ppu_state->GetDecoder();
 
@@ -619,7 +652,48 @@ u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteTillReturn(PPUThread
 		if (executable)
 		{
 			auto entry = ppu_state->PC;
-			u32 exit = (u32)executable(ppu_state, 0);
+			u32 exit;
+			if (Ini.LLVMTestAgainstInterp.GetValue())
+			{
+				u32 instruction = vm::ps3::read32(entry);
+				PPUState previousRegistersState;
+				if (isTestable(instruction))
+					previousRegistersState.Load(*ppu_state, entry);
+				exit = (u32)executable(ppu_state, 0);
+				PPUState llvmResult;
+				if (isTestable(instruction))
+					llvmResult.Load(*ppu_state, entry);
+
+				if (isTestable(instruction))
+				{
+					previousRegistersState.Store(*ppu_state);
+					execution_engine->m_decoder.Decode(instruction);
+					ppu_state->PC += 4;
+					PPUState interpResult;
+					interpResult.Load(*ppu_state, entry);
+
+					if (!(interpResult == llvmResult))
+					{
+						execution_engine->m_recompilation_engine->Log() << "Difference between compiled and interp\n";
+						// Used to decode instructions
+						PPUDisAsm dis_asm(CPUDisAsm_DumpMode);
+						dis_asm.offset = vm::get_ptr<u8>(ppu_state->PC);
+
+						// Dump PPU opcode
+						dis_asm.dump_pc = entry;
+						(*PPU_instr::main_list)(&dis_asm, instruction);
+						execution_engine->m_recompilation_engine->Log() << dis_asm.last_opcode;
+						execution_engine->m_recompilation_engine->Log() << "on input :\n" << previousRegistersState.ToString() << "\n";
+						execution_engine->m_recompilation_engine->Log() << "interp state is :\n" << interpResult.ToString() << "\n";
+						execution_engine->m_recompilation_engine->Log() << "llvm state is :\n" << llvmResult.ToString() << "\n";
+						execution_engine->m_recompilation_engine->Log() << "diff is:\n" << PPUState::StateDiff(llvmResult, interpResult) << "\n";
+						abort();
+					}
+				}
+			}
+			else
+				exit = (u32)executable(ppu_state, 0);
+
 			if (exit == 0)
 				return 0;
 			execution_engine->m_tracer.TraceBlockStart(ppu_state->PC);

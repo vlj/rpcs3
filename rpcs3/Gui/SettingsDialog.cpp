@@ -105,6 +105,7 @@ SettingsDialog::SettingsDialog(wxWindow *parent)
 	wxComboBox* cbox_net_interface = new wxComboBox(p_networking, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, NULL, wxCB_READONLY);
 	wxComboBox* cbox_sys_lang = new wxComboBox(p_system, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, NULL, wxCB_READONLY);
 
+	wxCheckBox* chbox_core_llvm_test = new wxCheckBox(p_core, wxID_ANY, _("Test compiled vs interp (slow)"));
 	wxCheckBox* chbox_core_llvm_exclud = new wxCheckBox(p_core, wxID_ANY, "Compiled blocks exclusion");
 	wxCheckBox* chbox_core_hook_stfunc = new wxCheckBox(p_core, wxID_ANY, "Hook static functions");
 	wxCheckBox* chbox_core_load_liblv2 = new wxCheckBox(p_core, wxID_ANY, "Load liblv2.sprx");
@@ -236,6 +237,7 @@ SettingsDialog::SettingsDialog(wxWindow *parent)
 		cbox_sys_lang->Append(lang);
 
 	// Get values from .ini
+	chbox_core_llvm_test->SetValue(Ini.LLVMTestAgainstInterp.GetValue());
 	chbox_core_llvm_exclud->SetValue(Ini.LLVMExclusionRange.GetValue());
 	chbox_gs_log_prog->SetValue(Ini.GSLogPrograms.GetValue());
 	chbox_gs_dump_depth->SetValue(Ini.GSDumpDepthBuffer.GetValue());
@@ -285,6 +287,7 @@ SettingsDialog::SettingsDialog(wxWindow *parent)
 	cbox_sys_lang->SetSelection(Ini.SysLanguage.GetValue());
 
 	// Core
+	s_round_llvm->Add(chbox_core_llvm_test, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_round_llvm->Add(chbox_core_llvm_exclud, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_round_llvm_range->Add(txt_dbg_range_min, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_round_llvm_range->Add(txt_dbg_range_max, wxSizerFlags().Border(wxALL, 5).Expand());
@@ -409,6 +412,7 @@ SettingsDialog::SettingsDialog(wxWindow *parent)
 		long llvmthreshold;
 		txt_llvm_threshold->GetValue().ToLong(&llvmthreshold);
 		Ini.LLVMThreshold.SetValue(llvmthreshold);
+		Ini.LLVMTestAgainstInterp.SetValue(chbox_core_llvm_test->GetValue());
 		Ini.SPUDecoderMode.SetValue(rbox_spu_decoder->GetSelection());
 		Ini.HookStFunc.SetValue(chbox_core_hook_stfunc->GetValue());
 		Ini.LoadLibLv2.SetValue(chbox_core_load_liblv2->GetValue());
