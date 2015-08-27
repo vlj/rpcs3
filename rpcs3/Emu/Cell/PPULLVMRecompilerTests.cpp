@@ -39,46 +39,10 @@ VerifyInstructionAgainstInterpreter(fmt::format("%s.%d", #fn, tc).c_str(), &Comp
     }                                                                               \
 }
 
-/// Register state of a PPU
-struct ppu_recompiler_llvm::PPUState {
-	/// Floating point registers
-	PPCdouble FPR[32];
+namespace ppu_recompiler_llvm
+{
 
-	///Floating point status and control register
-	FPSCRhdr FPSCR;
-
-	/// General purpose reggisters
-	u64 GPR[32];
-
-	/// Vector purpose registers
-	v128 VPR[32];
-
-	/// Condition register
-	CRhdr CR;
-
-	/// Fixed point exception register
-	XERhdr XER;
-
-	/// Vector status and control register
-	VSCRhdr VSCR;
-
-	/// Link register
-	u64 LR;
-
-	/// Count register
-	u64 CTR;
-
-	/// SPR general purpose registers
-	u64 SPRG[8];
-
-	/// Time base register
-	u64 TB;
-
-	/// Memory block
-	u32 address;
-	u64 mem_block[64];
-
-	void Load(PPUThread & ppu, u32 addr) {
+	void PPUState::Load(PPUThread & ppu, u32 addr) {
 		for (int i = 0; i < 32; i++) {
 			FPR[i] = ppu.FPR[i];
 			GPR[i] = ppu.GPR[i];
@@ -96,6 +60,7 @@ struct ppu_recompiler_llvm::PPUState {
 		LR = ppu.LR;
 		CTR = ppu.CTR;
 		TB = ppu.TB;
+		PC = ppu.PC;
 
 		address = addr;
 		for (int i = 0; i < (sizeof(mem_block) / 8); i++) {
@@ -103,7 +68,7 @@ struct ppu_recompiler_llvm::PPUState {
 		}
 	}
 
-	void Store(PPUThread & ppu) {
+	void PPUState::Store(PPUThread & ppu) {
 		for (int i = 0; i < 32; i++) {
 			ppu.FPR[i] = FPR[i];
 			ppu.GPR[i] = GPR[i];
@@ -121,13 +86,14 @@ struct ppu_recompiler_llvm::PPUState {
 		ppu.LR = LR;
 		ppu.CTR = CTR;
 		ppu.TB = TB;
+		ppu.PC = PC;
 
 		for (int i = 0; i < (sizeof(mem_block) / 8); i++) {
 			vm::write64(address + (i * 8), mem_block[i]);
 		}
 	}
 
-	void SetRandom(u32 addr) {
+	void PPUState::SetRandom(u32 addr) {
 		std::mt19937_64 rng;
 
 		rng.seed((u32)std::chrono::high_resolution_clock::now().time_since_epoch().count());
@@ -163,7 +129,44 @@ struct ppu_recompiler_llvm::PPUState {
 		}
 	}
 
-	std::string ToString() const {
+	bool PPUState::operator==(const PPUState &other) const
+	{
+		if (PC != other.PC)
+			return false;
+		for (int i = 0; i < 32; i++) {
+			if (GPR[i] != other.GPR[i])
+				return false;
+			if (FPR[i]._u64 != other.FPR[i]._u64)
+				return false;
+			if (VPR[i] != other.VPR[i])
+				return false;
+		}
+
+		for (int i = 0; i < 8; i++) {
+			if (SPRG[i] != other.SPRG[i])
+				return false;
+		}
+
+		if (CR.CR != other.CR.CR)
+			return false;
+		if (LR != other.LR)
+			return false;
+		if (CTR != other.CTR)
+			return false;
+		if (TB != other.TB)
+			return false;
+
+		if (XER.XER != other.XER.XER)
+			return false;
+
+		for (int i = 0; i < (sizeof(mem_block) / 8); i++) {
+			if (mem_block[i] != other.mem_block[i])
+				return false;
+		}
+		return true;
+	}
+
+	std::string PPUState::ToString() const {
 		std::string ret;
 
 		for (int i = 0; i < 32; i++) {
@@ -183,62 +186,65 @@ struct ppu_recompiler_llvm::PPUState {
 
 		return ret;
 	}
-};
 
-#ifdef PPU_LLVM_RECOMPILER_UNIT_TESTS
-static std::string StateDiff(PPUState const & recomp, PPUState const & interp) {
-	std::string ret;
+	std::string PPUState::StateDiff(PPUState const & recomp, PPUState const & interp) {
+		std::string ret;
 
-	for (int i = 0; i < 32; i++) {
-		if (recomp.GPR[i] != interp.GPR[i]) {
-			ret += fmt::format("recomp: GPR[%02d] = 0x%016llx interp: GPR[%02d] = 0x%016llx\n", i, recomp.GPR[i], i, interp.GPR[i]);
+		if (recomp.PC != interp.PC)
+			ret += fmt::format("recomp: PC =  0x%016llx interp: PC = 0x%016llx\n", recomp.PC, interp.PC);
+
+		for (int i = 0; i < 32; i++) {
+			if (recomp.GPR[i] != interp.GPR[i]) {
+				ret += fmt::format("recomp: GPR[%02d] = 0x%016llx interp: GPR[%02d] = 0x%016llx\n", i, recomp.GPR[i], i, interp.GPR[i]);
+	}
+			if (recomp.FPR[i]._u64 != interp.FPR[i]._u64) {
+				ret += fmt::format("recomp: FPR[%02d] = %16g (0x%016llx) interp: FPR[%02d] = %16g (0x%016llx)\n", i, recomp.FPR[i]._double, recomp.FPR[i]._u64, i, interp.FPR[i]._double, interp.FPR[i]._u64);
+			}
+			if (recomp.VPR[i] != interp.VPR[i]) {
+				ret += fmt::format("recomp: VPR[%02d] = 0x%s [%s]\n", i, recomp.VPR[i].to_hex().c_str(), recomp.VPR[i].to_xyzw().c_str());
+				ret += fmt::format("interp: VPR[%02d] = 0x%s [%s]\n", i, interp.VPR[i].to_hex().c_str(), interp.VPR[i].to_xyzw().c_str());
+			}
+	}
+
+		for (int i = 0; i < 8; i++) {
+			if (recomp.SPRG[i] != interp.SPRG[i])
+				ret += fmt::format("recomp: SPRG[%d] = 0x%016llx interp: SPRG[%d] = 0x%016llx\n", i, recomp.SPRG[i], i, interp.SPRG[i]);
 		}
-		if (recomp.FPR[i]._u64 != interp.FPR[i]._u64) {
-			ret += fmt::format("recomp: FPR[%02d] = %16g (0x%016llx) interp: FPR[%02d] = %16g (0x%016llx)\n", i, recomp.FPR[i]._double, recomp.FPR[i]._u64, i, interp.FPR[i]._double, interp.FPR[i]._u64);
+
+		if (recomp.CR.CR != interp.CR.CR) {
+			ret += fmt::format("recomp: CR      = 0x%08x\n", recomp.CR.CR);
+			ret += fmt::format("interp: CR      = 0x%08x\n", interp.CR.CR);
 		}
-		if (recomp.VPR[i] != interp.VPR[i]) {
-			ret += fmt::format("recomp: VPR[%02d] = 0x%s [%s]\n", i, recomp.VPR[i].to_hex().c_str(), recomp.VPR[i].to_xyzw().c_str());
-			ret += fmt::format("interp: VPR[%02d] = 0x%s [%s]\n", i, interp.VPR[i].to_hex().c_str(), interp.VPR[i].to_xyzw().c_str());
+		if (recomp.LR != interp.LR) {
+			ret += fmt::format("recomp: LR = 0x%016llx\n", recomp.LR);
+			ret += fmt::format("interp: LR = 0x%016llx\n", interp.LR);
 		}
-	}
-
-	for (int i = 0; i < 8; i++) {
-		if (recomp.SPRG[i] != interp.SPRG[i])
-			ret += fmt::format("recomp: SPRG[%d] = 0x%016llx interp: SPRG[%d] = 0x%016llx\n", i, recomp.SPRG[i], i, interp.SPRG[i]);
-	}
-
-	if (recomp.CR.CR != interp.CR.CR) {
-		ret += fmt::format("recomp: CR      = 0x%08x\n", recomp.CR.CR);
-		ret += fmt::format("interp: CR      = 0x%08x\n", interp.CR.CR);
-	}
-	if (recomp.LR != interp.LR) {
-		ret += fmt::format("recomp: LR = 0x%016llx\n", recomp.LR);
-		ret += fmt::format("interp: LR = 0x%016llx\n", interp.LR);
-	}
-	if (recomp.CTR != interp.CTR) {
-		ret += fmt::format("recomp: CTR = 0x%016llx\n", recomp.CTR);
-		ret += fmt::format("interp: CTR = 0x%016llx\n", interp.CTR);
-	}
-	if (recomp.TB != interp.TB) {
-		ret += fmt::format("recomp: TB = 0x%016llx\n", recomp.TB);
-		ret += fmt::format("interp: TB = 0x%016llx\n", interp.TB);
-	}
-
-	if (recomp.XER.XER != interp.XER.XER) {
-		ret += fmt::format("recomp: XER     = 0x%016llx [CA=%d | OV=%d | SO=%d]\n", recomp.XER.XER, u32{ recomp.XER.CA }, u32{ recomp.XER.OV }, u32{ recomp.XER.SO });
-		ret += fmt::format("interp: XER     = 0x%016llx [CA=%d | OV=%d | SO=%d]\n", interp.XER.XER, u32{ interp.XER.CA }, u32{ interp.XER.OV }, u32{ interp.XER.SO });
-	}
-
-	for (int i = 0; i < (sizeof(recomp.mem_block) / 8); i++) {
-		if (recomp.mem_block[i] != interp.mem_block[i]) {
-			ret += fmt::format("recomp: mem_block[%d] = 0x%016llx\n", i, recomp.mem_block[i]);
-			ret += fmt::format("interp: mem_block[%d] = 0x%016llx\n", i, interp.mem_block[i]);
+		if (recomp.CTR != interp.CTR) {
+			ret += fmt::format("recomp: CTR = 0x%016llx\n", recomp.CTR);
+			ret += fmt::format("interp: CTR = 0x%016llx\n", interp.CTR);
 		}
+		if (recomp.TB != interp.TB) {
+			ret += fmt::format("recomp: TB = 0x%016llx\n", recomp.TB);
+			ret += fmt::format("interp: TB = 0x%016llx\n", interp.TB);
+		}
+
+		if (recomp.XER.XER != interp.XER.XER) {
+			ret += fmt::format("recomp: XER     = 0x%016llx [CA=%d | OV=%d | SO=%d]\n", recomp.XER.XER, u32{ recomp.XER.CA }, u32{ recomp.XER.OV }, u32{ recomp.XER.SO });
+			ret += fmt::format("interp: XER     = 0x%016llx [CA=%d | OV=%d | SO=%d]\n", interp.XER.XER, u32{ interp.XER.CA }, u32{ interp.XER.OV }, u32{ interp.XER.SO });
+		}
+
+		for (int i = 0; i < (sizeof(recomp.mem_block) / 8); i++) {
+			if (recomp.mem_block[i] != interp.mem_block[i]) {
+				ret += fmt::format("recomp: mem_block[%d] = 0x%016llx\n", i, recomp.mem_block[i]);
+				ret += fmt::format("interp: mem_block[%d] = 0x%016llx\n", i, interp.mem_block[i]);
+			}
+		}
+
+		return ret;
 	}
 
-	return ret;
 }
-#endif // PPU_LLVM_RECOMPILER_UNIT_TESTS
+
 
 #ifdef PPU_LLVM_RECOMPILER_UNIT_TESTS
 static PPUThread      * s_ppu_state = nullptr;

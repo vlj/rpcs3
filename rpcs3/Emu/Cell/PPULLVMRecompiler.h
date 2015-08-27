@@ -28,7 +28,58 @@ namespace ppu_recompiler_llvm {
 	class RecompilationEngine;
 	class Tracer;
 	class ExecutionEngine;
-	struct PPUState;
+
+	struct PPUState
+	{
+
+		/// Floating point registers
+		PPCdouble FPR[32];
+
+		///Floating point status and control register
+		FPSCRhdr FPSCR;
+
+		/// General purpose reggisters
+		u64 GPR[32];
+
+		/// Vector purpose registers
+		v128 VPR[32];
+
+		/// Condition register
+		CRhdr CR;
+
+		/// Fixed point exception register
+		XERhdr XER;
+
+		/// Vector status and control register
+		VSCRhdr VSCR;
+
+		/// Link register
+		u64 LR;
+
+		/// Count register
+		u64 CTR;
+
+		/// SPR general purpose registers
+		u64 SPRG[8];
+
+		/// Time base register
+		u64 TB;
+
+		/// Program counter;
+		u32 PC;
+
+		/// Memory block
+		u32 address;
+		u64 mem_block[64];
+
+		bool operator==(const PPUState &) const;
+		void Load(PPUThread & ppu, u32 addr);
+		void Store(PPUThread & ppu);
+		void SetRandom(u32 addr);
+		std::string ToString() const;
+
+		static std::string StateDiff(PPUState const & recomp, PPUState const & interp);
+	};
 
 	/// An entry in an execution trace
 	struct ExecutionTraceEntry {
