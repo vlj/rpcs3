@@ -404,11 +404,11 @@ SettingsDialog::SettingsDialog(wxWindow *parent)
 		txt_dbg_range_min->GetValue().ToLong(&minllvmid);
 		txt_dbg_range_max->GetValue().ToLong(&maxllvmid);
 		Ini.LLVMExclusionRange.SetValue(chbox_core_llvm_exclud->GetValue());
-		Ini.LLVMMinId.SetValue(minllvmid);
-		Ini.LLVMMaxId.SetValue(maxllvmid);
+		Ini.LLVMMinId.SetValue((unsigned long)minllvmid);
+		Ini.LLVMMaxId.SetValue((unsigned long)maxllvmid);
 		long llvmthreshold;
 		txt_llvm_threshold->GetValue().ToLong(&llvmthreshold);
-		Ini.LLVMThreshold.SetValue(llvmthreshold);
+		Ini.LLVMThreshold.SetValue((unsigned long)llvmthreshold);
 		Ini.SPUDecoderMode.SetValue(rbox_spu_decoder->GetSelection());
 		Ini.HookStFunc.SetValue(chbox_core_hook_stfunc->GetValue());
 		Ini.LoadLibLv2.SetValue(chbox_core_load_liblv2->GetValue());
