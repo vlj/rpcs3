@@ -184,7 +184,7 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 		PHINode *exit_instr_i32 = m_ir_builder->CreatePHI(m_ir_builder->getInt32Ty(), 0);
 		exit_instr_list.push_back(exit_instr_i32);
 
-		m_ir_builder->CreateRet(m_ir_builder->getInt32(0));
+		m_ir_builder->CreateRet(m_ir_builder->getInt32(ExecutionStatus::ExecutionStatusBlockEnded));
 	}
 
 	// Add incoming values for all exit instr PHI nodes
@@ -266,7 +266,6 @@ RecompilationEngine::RecompilationEngine()
 
 RecompilationEngine::~RecompilationEngine() {
 	m_address_to_function.clear();
-	join();
 	memory_helper::free_reserved_memory(FunctionCache, VIRTUAL_INSTRUCTION_COUNT * sizeof(Executable));
 	free(FunctionCachePagesCommited);
 }
@@ -299,32 +298,26 @@ void RecompilationEngine::commitAddress(u32 address)
 
 const Executable RecompilationEngine::GetCompiledExecutableIfAvailable(u32 address)
 {
-	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
-	if (!isAddressCommited(address / 4))
-		commitAddress(address / 4);
-	if (!Ini.LLVMExclusionRange.GetValue())
-		return FunctionCache[address / 4];
-	std::unordered_map<u32, ExecutableStorage>::iterator It = m_address_to_function.find(address);
-	if (It == m_address_to_function.end())
-		return nullptr;
-	u32 id = std::get<3>(It->second);
-	if (id >= Ini.LLVMMinId.GetValue() && id <= Ini.LLVMMaxId.GetValue())
-		return nullptr;
-	return std::get<0>(It->second);
-}
-
-void RecompilationEngine::NotifyTrace(ExecutionTrace * execution_trace) {
 	{
-		std::lock_guard<std::mutex> lock(m_pending_execution_traces_lock);
-		m_pending_execution_traces.push_back(execution_trace);
+		std::lock_guard<std::mutex> lock(m_address_to_function_lock);
+		if (!isAddressCommited(address / 4))
+			commitAddress(address / 4);
+		const Executable candidate = FunctionCache[address / 4];
+		if (candidate != nullptr)
+			return candidate;
 	}
+	{
+		std::lock_guard<std::mutex> lock(m_compiler_lock);
+		auto It = m_block_table.find(address);
+		if (It == m_block_table.end())
+		{
+			It = m_block_table.emplace(address, BlockEntry(address)).first;
+			BlockEntry &block = It->second;
+			CompileBlock(block);
+		}
 
-	if (!joinable()) {
-		start(WRAP_EXPR("PPU Recompilation Engine"), WRAP_EXPR(Task()));
+		return FunctionCache[address / 4];
 	}
-
-	cv.notify_one();
-	// TODO: Increase the priority of the recompilation engine thread
 }
 
 raw_fd_ostream & RecompilationEngine::Log() {
@@ -335,70 +328,6 @@ raw_fd_ostream & RecompilationEngine::Log() {
 	}
 
 	return *m_log;
-}
-
-void RecompilationEngine::Task() {
-	std::chrono::nanoseconds idling_time(0);
-	std::chrono::nanoseconds recompiling_time(0);
-
-	auto start = std::chrono::high_resolution_clock::now();
-	while (joinable() && !Emu.IsStopped()) {
-		bool             work_done_this_iteration = false;
-		std::list <ExecutionTrace *> m_current_execution_traces;
-
-		{
-			std::lock_guard<std::mutex> lock(m_pending_execution_traces_lock);
-			m_current_execution_traces.swap(m_pending_execution_traces);
-		}
-
-		if (!m_current_execution_traces.empty()) {
-			for (ExecutionTrace *execution_trace : m_current_execution_traces)
-			{
-				work_done_this_iteration |= ProcessExecutionTrace(*execution_trace);
-				delete execution_trace;
-			}
-		}
-
-		if (!work_done_this_iteration) {
-			// Wait a few ms for something to happen
-			auto idling_start = std::chrono::high_resolution_clock::now();
-			std::unique_lock<std::mutex> lock(mutex);
-			cv.wait_for(lock, std::chrono::milliseconds(250));
-			auto idling_end = std::chrono::high_resolution_clock::now();
-			idling_time += std::chrono::duration_cast<std::chrono::nanoseconds>(idling_end - idling_start);
-		}
-	}
-
-	std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
-	auto total_time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
-	auto compiler_stats = m_compiler.GetStats();
-
-	Log() << "Total time                      = " << total_time.count() / 1000000 << "ms\n";
-	Log() << "    Time spent compiling        = " << compiler_stats.total_time.count() / 1000000 << "ms\n";
-	Log() << "        Time spent building IR  = " << compiler_stats.ir_build_time.count() / 1000000 << "ms\n";
-	Log() << "        Time spent optimizing   = " << compiler_stats.optimization_time.count() / 1000000 << "ms\n";
-	Log() << "        Time spent translating  = " << compiler_stats.translation_time.count() / 1000000 << "ms\n";
-	Log() << "    Time spent recompiling      = " << recompiling_time.count() / 1000000 << "ms\n";
-	Log() << "    Time spent idling           = " << idling_time.count() / 1000000 << "ms\n";
-	Log() << "    Time spent doing misc tasks = " << (total_time.count() - idling_time.count() - compiler_stats.total_time.count()) / 1000000 << "ms\n";
-
-	LOG_NOTICE(PPU, "PPU LLVM Recompilation thread exiting.");
-	s_the_instance = nullptr; // Can cause deadlock if this is the last instance. Need to fix this.
-}
-
-bool RecompilationEngine::ProcessExecutionTrace(const ExecutionTrace & execution_trace) {
-	auto It = m_block_table.find(execution_trace.function_address);
-	if (It == m_block_table.end())
-		It = m_block_table.emplace(execution_trace.function_address, BlockEntry(execution_trace.function_address)).first;
-	BlockEntry &block = It->second;
-	if (!block.is_compiled) {
-		block.num_hits++;
-		if (block.num_hits >= Ini.LLVMThreshold.GetValue()) {
-			CompileBlock(block);
-			return true;
-		}
-	}
-	return false;
 }
 
 /**
@@ -470,6 +399,7 @@ bool RecompilationEngine::AnalyseBlock(BlockEntry &functionData, size_t maxSize)
 }
 
 void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
+	assert(!block_entry.is_compiled);
 	if (block_entry.is_analysed)
 		return;
 
@@ -506,24 +436,6 @@ std::shared_ptr<RecompilationEngine> RecompilationEngine::GetInstance() {
 	}
 
 	return s_the_instance;
-}
-
-Tracer::Tracer()
-	: m_recompilation_engine(RecompilationEngine::GetInstance()) {
-	m_stack.reserve(100);
-}
-
-Tracer::~Tracer() {
-	Terminate();
-}
-
-void Tracer::TraceBlockStart(u32 address) {
-	ExecutionTrace * execution_trace = new ExecutionTrace(address);
-	m_recompilation_engine->NotifyTrace(execution_trace);
-}
-
-void Tracer::Terminate() {
-	// TODO: Notify recompilation engine
 }
 
 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::CPUHybridDecoderRecompiler(PPUThread & ppu)
@@ -579,57 +491,17 @@ static BranchType GetBranchTypeFromInstruction(u32 instruction)
 u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteTillReturn(PPUThread * ppu_state, u64 context) {
 	CPUHybridDecoderRecompiler *execution_engine = (CPUHybridDecoderRecompiler *)ppu_state->GetDecoder();
 
-	execution_engine->m_tracer.TraceBlockStart(ppu_state->PC);
-
 	while (PollStatus(ppu_state) == false) {
 		const Executable executable = execution_engine->m_recompilation_engine->GetCompiledExecutableIfAvailable(ppu_state->PC);
-		if (executable)
-		{
-			auto entry = ppu_state->PC;
-			u32 exit = (u32)executable(ppu_state, 0);
-			if (exit == 0)
-				return ExecutionStatus::ExecutionStatusReturn;
-			// TODO: exception_ptr doesnt work, should add every possible exception
-			if (exit == ExecutionStatus::ExecutionStatusPropagateCPUThreadExit)
-				return ExecutionStatus::ExecutionStatusPropagateCPUThreadExit;
-			execution_engine->m_tracer.TraceBlockStart(ppu_state->PC);
-			continue;
-		}
-		u32 instruction = vm::ps3::read32(ppu_state->PC);
-		u32 oldPC = ppu_state->PC;
-		try
-		{
-			execution_engine->m_decoder.Decode(instruction);
-		}
-		// TODO: exception_ptr doesnt work, should add every possible exception
-		catch (CPUThreadExit)
-		{
+		assert(executable != nullptr);
+
+		auto entry = ppu_state->PC;
+		u32 exit = (u32)executable(ppu_state, 0);
+		if (exit == 0)
+			return ExecutionStatus::ExecutionStatusReturn;
+		if (exit == ExecutionStatus::ExecutionStatusPropagateCPUThreadExit)
 			return ExecutionStatus::ExecutionStatusPropagateCPUThreadExit;
-		}
-		auto branch_type = ppu_state->PC != oldPC ? GetBranchTypeFromInstruction(instruction) : BranchType::NonBranch;
-		ppu_state->PC += 4;
-
-		switch (branch_type) {
-		case BranchType::Return:
-			if (Emu.GetCPUThreadStop() == ppu_state->PC) ppu_state->fast_stop();
-			return 0;
-		case BranchType::FunctionCall: {
-			u32 status = ExecuteFunction(ppu_state, 0);
-			// TODO: exception_ptr doesnt work, should add every possible exception
-			if (status == ExecutionStatus::ExecutionStatusPropagateCPUThreadExit)
-				return ExecutionStatus::ExecutionStatusPropagateCPUThreadExit;
-			break;
-		}
-		case BranchType::LocalBranch:
-			break;
-		case BranchType::NonBranch:
-			break;
-		default:
-			assert(0);
-			break;
-		}
 	}
-
 	return 0;
 }
 

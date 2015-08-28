@@ -918,10 +918,10 @@ namespace ppu_recompiler_llvm {
 	 * It then builds them asynchroneously and update the executable mapping
 	 * using atomic based locks to avoid undefined behavior.
 	 **/
-	class RecompilationEngine final : protected named_thread_t {
+	class RecompilationEngine {
 		friend class CPUHybridDecoderRecompiler;
 	public:
-		virtual ~RecompilationEngine() override;
+		~RecompilationEngine();
 
 		/**
 		 * Get the executable for the specified address
@@ -936,13 +936,8 @@ namespace ppu_recompiler_llvm {
 		 **/
 		const Executable GetCompiledExecutableIfAvailable(u32 address);
 
-		/// Notify the recompilation engine about a newly detected trace. It takes ownership of the trace.
-		void NotifyTrace(ExecutionTrace * execution_trace);
-
 		/// Log
 		llvm::raw_fd_ostream & Log();
-
-		void Task();
 
 		/// Get a pointer to the instance of this class
 		static std::shared_ptr<RecompilationEngine> GetInstance();
@@ -994,20 +989,13 @@ namespace ppu_recompiler_llvm {
 		/// Log
 		llvm::raw_fd_ostream * m_log;
 
-		/// Lock for accessing m_pending_execution_traces. TODO: Eliminate this and use a lock-free queue.
-		std::mutex m_pending_execution_traces_lock;
-
-		/// Queue of execution traces pending processing
-		std::list<ExecutionTrace *> m_pending_execution_traces;
-
 		/// Block table
 		std::unordered_map<u32, BlockEntry> m_block_table;
 
-		/// Execution traces that have been already encountered. Data is the list of all blocks that this trace includes.
-		std::unordered_map<ExecutionTrace::Id, std::vector<BlockEntry *>> m_processed_execution_traces;
-
 		/// Lock for accessing m_address_to_function.
 		std::mutex m_address_to_function_lock;
+		/// Lock for block entry/compiler
+		std::mutex m_compiler_lock;
 
 		int m_currentId;
 
@@ -1041,10 +1029,6 @@ namespace ppu_recompiler_llvm {
 		RecompilationEngine & operator = (const RecompilationEngine & other) = delete;
 		RecompilationEngine & operator = (RecompilationEngine && other) = delete;
 
-		/// Process an execution trace.
-		/// Returns true if a block was compiled
-		bool ProcessExecutionTrace(const ExecutionTrace & execution_trace);
-
 		/**
 		* Analyse block to get useful info (function called, has indirect branch...)
 		* This code is inspired from Dolphin PPC Analyst
@@ -1060,33 +1044,6 @@ namespace ppu_recompiler_llvm {
 
 		/// The instance
 		static std::shared_ptr<RecompilationEngine> s_the_instance;
-	};
-
-	/// Finds interesting execution sequences
-	class Tracer {
-	public:
-		Tracer();
-
-		Tracer(const Tracer & other) = delete;
-		Tracer(Tracer && other) = delete;
-
-		virtual ~Tracer();
-
-		Tracer & operator = (const Tracer & other) = delete;
-		Tracer & operator = (Tracer && other) = delete;
-
-		/// Notify the tracer
-		void TraceBlockStart(u32 block_address);
-
-		/// Notify the tracer that the execution sequence is being terminated.
-		void Terminate();
-
-	private:
-		/// Call stack
-		std::vector<ExecutionTrace *> m_stack;
-
-		/// Recompilation engine
-		std::shared_ptr<RecompilationEngine> m_recompilation_engine;
 	};
 
 	/**
@@ -1121,9 +1078,6 @@ namespace ppu_recompiler_llvm {
 
 		/// PPU instruction Decoder
 		PPUDecoder m_decoder;
-
-		/// Execution tracer
-		Tracer m_tracer;
 
 		/// Recompilation engine
 		std::shared_ptr<RecompilationEngine> m_recompilation_engine;
