@@ -24,6 +24,13 @@
 #endif
 
 namespace ppu_recompiler_llvm {
+	enum ExecutionStatus
+	{
+		ExecutionStatusReturn = 0, ///< Block has hit a return, caller can continue execution
+		ExecutionStatusBlockEnded, ///< Block has been executed but no return was hit, at least another block must be executed before caller can continue
+		ExecutionStatusPropagateCPUThreadExit, ///< a CPUThreadExit exception was thrown
+	};
+
 	class Compiler;
 	class RecompilationEngine;
 	class Tracer;
@@ -882,9 +889,6 @@ namespace ppu_recompiler_llvm {
 			std::vector<llvm::Value *> fn_args = { args... };
 			return m_ir_builder->CreateCall(fn, fn_args);
 		}
-
-		/// Indirect call
-		llvm::Value * IndirectCall(u32 address, llvm::Value * context_i64, bool is_function);
 
 		/// Test an instruction against the interpreter
 		template <class... Args>

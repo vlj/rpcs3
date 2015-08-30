@@ -174,27 +174,7 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 
 		SetPc(m_ir_builder->getInt32(m_state.current_instruction_address));
 
-		if (generate_linkable_exits) {
-			Value *context_i64 = m_ir_builder->CreateZExt(exit_instr_i32, m_ir_builder->getInt64Ty());
-			context_i64 = m_ir_builder->CreateOr(context_i64, (u64)start_address << 32);
-			Value *ret_i32 = IndirectCall(m_state.current_instruction_address, context_i64, false);
-			Value *cmp_i1 = m_ir_builder->CreateICmpNE(ret_i32, m_ir_builder->getInt32(0));
-			BasicBlock *then_bb = GetBasicBlockFromAddress(m_state.current_instruction_address, "then_0");
-			BasicBlock *merge_bb = GetBasicBlockFromAddress(m_state.current_instruction_address, "merge_0");
-			m_ir_builder->CreateCondBr(cmp_i1, then_bb, merge_bb);
-
-			m_ir_builder->SetInsertPoint(then_bb);
-			context_i64 = m_ir_builder->CreateZExt(ret_i32, m_ir_builder->getInt64Ty());
-			context_i64 = m_ir_builder->CreateOr(context_i64, (u64)start_address << 32);
-			m_ir_builder->CreateCall2(m_execute_unknown_block, m_state.args[CompileTaskState::Args::State], context_i64);
-			m_ir_builder->CreateBr(merge_bb);
-
-			m_ir_builder->SetInsertPoint(merge_bb);
-			m_ir_builder->CreateRet(m_ir_builder->getInt32(0));
-		}
-		else {
-			m_ir_builder->CreateRet(exit_instr_i32);
-		}
+		m_ir_builder->CreateRet(m_ir_builder->getInt32(ExecutionStatus::ExecutionStatusBlockEnded));
 	}
 
 	// If the function has a default exit block then generate code for it
@@ -204,24 +184,7 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 		PHINode *exit_instr_i32 = m_ir_builder->CreatePHI(m_ir_builder->getInt32Ty(), 0);
 		exit_instr_list.push_back(exit_instr_i32);
 
-		if (generate_linkable_exits) {
-			Value *cmp_i1 = m_ir_builder->CreateICmpNE(exit_instr_i32, m_ir_builder->getInt32(0));
-			BasicBlock *then_bb = GetBasicBlockFromAddress(0xFFFFFFFF, "then_0");
-			BasicBlock *merge_bb = GetBasicBlockFromAddress(0xFFFFFFFF, "merge_0");
-			m_ir_builder->CreateCondBr(cmp_i1, then_bb, merge_bb);
-
-			m_ir_builder->SetInsertPoint(then_bb);
-			Value *context_i64 = m_ir_builder->CreateZExt(exit_instr_i32, m_ir_builder->getInt64Ty());
-			context_i64 = m_ir_builder->CreateOr(context_i64, (u64)start_address << 32);
-			m_ir_builder->CreateCall2(m_execute_unknown_block, m_state.args[CompileTaskState::Args::State], context_i64);
-			m_ir_builder->CreateBr(merge_bb);
-
-			m_ir_builder->SetInsertPoint(merge_bb);
-			m_ir_builder->CreateRet(m_ir_builder->getInt32(0));
-		}
-		else {
-			m_ir_builder->CreateRet(exit_instr_i32);
-		}
+		m_ir_builder->CreateRet(m_ir_builder->getInt32(0));
 	}
 
 	// Add incoming values for all exit instr PHI nodes
@@ -576,13 +539,17 @@ ppu_recompiler_llvm::CPUHybridDecoderRecompiler::~CPUHybridDecoderRecompiler() {
 }
 
 u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::DecodeMemory(const u32 address) {
-	ExecuteFunction(&m_ppu, 0);
+	// TODO: exception_ptr doesnt work, should add every possible exception
+	if (ExecuteFunction(&m_ppu, 0) == ExecutionStatus::ExecutionStatusPropagateCPUThreadExit)
+		throw CPUThreadExit{};
 	return 0;
 }
 
 u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteFunction(PPUThread * ppu_state, u64 context) {
 	auto execution_engine = (CPUHybridDecoderRecompiler *)ppu_state->GetDecoder();
-	return ExecuteTillReturn(ppu_state, 0);
+	if (ExecuteTillReturn(ppu_state, 0) == ExecutionStatus::ExecutionStatusPropagateCPUThreadExit)
+		return ExecutionStatus::ExecutionStatusPropagateCPUThreadExit;
+	return ExecutionStatus::ExecutionStatusReturn;
 }
 
 /// Get the branch type from a branch instruction
@@ -621,13 +588,24 @@ u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteTillReturn(PPUThread
 			auto entry = ppu_state->PC;
 			u32 exit = (u32)executable(ppu_state, 0);
 			if (exit == 0)
-				return 0;
+				return ExecutionStatus::ExecutionStatusReturn;
+			// TODO: exception_ptr doesnt work, should add every possible exception
+			if (exit == ExecutionStatus::ExecutionStatusPropagateCPUThreadExit)
+				return ExecutionStatus::ExecutionStatusPropagateCPUThreadExit;
 			execution_engine->m_tracer.TraceBlockStart(ppu_state->PC);
 			continue;
 		}
 		u32 instruction = vm::ps3::read32(ppu_state->PC);
 		u32 oldPC = ppu_state->PC;
-		execution_engine->m_decoder.Decode(instruction);
+		try
+		{
+			execution_engine->m_decoder.Decode(instruction);
+		}
+		// TODO: exception_ptr doesnt work, should add every possible exception
+		catch (CPUThreadExit)
+		{
+			return ExecutionStatus::ExecutionStatusPropagateCPUThreadExit;
+		}
 		auto branch_type = ppu_state->PC != oldPC ? GetBranchTypeFromInstruction(instruction) : BranchType::NonBranch;
 		ppu_state->PC += 4;
 
@@ -636,7 +614,10 @@ u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteTillReturn(PPUThread
 			if (Emu.GetCPUThreadStop() == ppu_state->PC) ppu_state->fast_stop();
 			return 0;
 		case BranchType::FunctionCall: {
-			ExecuteFunction(ppu_state, 0);
+			u32 status = ExecuteFunction(ppu_state, 0);
+			// TODO: exception_ptr doesnt work, should add every possible exception
+			if (status == ExecutionStatus::ExecutionStatusPropagateCPUThreadExit)
+				return ExecutionStatus::ExecutionStatusPropagateCPUThreadExit;
 			break;
 		}
 		case BranchType::LocalBranch:
