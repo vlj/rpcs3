@@ -98,24 +98,24 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 	m_module->setDataLayout(execution_engine->getDataLayout());
 
 	llvm::FunctionPassManager *fpm = new llvm::FunctionPassManager(m_module);
-	fpm->add(createNoAAPass());
+	fpm->add(createCFGSimplificationPass());
+	fpm->add(createDeadStoreEliminationPass());
+
+/*	fpm->add(createNoAAPass());
 	fpm->add(createBasicAliasAnalysisPass());
 	fpm->add(createNoTargetTransformInfoPass());
 	fpm->add(createEarlyCSEPass());
 	fpm->add(createTailCallEliminationPass());
 	fpm->add(createReassociatePass());
-	fpm->add(createInstructionCombiningPass());
 	fpm->add(new DominatorTreeWrapperPass());
 	fpm->add(new MemoryDependenceAnalysis());
 	fpm->add(createGVNPass());
-	fpm->add(createInstructionCombiningPass());
 	fpm->add(new MemoryDependenceAnalysis());
-	fpm->add(createDeadStoreEliminationPass());
+
 	fpm->add(new LoopInfo());
 	fpm->add(new ScalarEvolution());
-	fpm->add(createSLPVectorizerPass());
-	fpm->add(createInstructionCombiningPass());
-	fpm->add(createCFGSimplificationPass());
+	fpm->add(createSLPVectorizerPass());*/
+
 	fpm->doInitialization();
 
 	// Create the function
@@ -196,7 +196,7 @@ std::pair<Executable, llvm::ExecutionEngine *> Compiler::Compile(const std::stri
 	}
 
 	m_recompilation_engine.Log() << "LLVM bytecode:\n";
-	m_recompilation_engine.Log() << *m_module;
+//	m_recompilation_engine.Log() << *m_module;
 
 	std::string        verify;
 	raw_string_ostream verify_ostream(verify);
@@ -291,18 +291,10 @@ void RecompilationEngine::commitAddress(u32 address)
 
 const Executable RecompilationEngine::GetCompiledExecutableIfAvailable(u32 address)
 {
-	std::lock_guard<std::mutex> lock(m_address_to_function_lock);
 	if (!isAddressCommited(address / 4))
 		commitAddress(address / 4);
 	if (!Ini.LLVMExclusionRange.GetValue())
 		return FunctionCache[address / 4];
-	std::unordered_map<u32, ExecutableStorage>::iterator It = m_address_to_function.find(address);
-	if (It == m_address_to_function.end())
-		return nullptr;
-	u32 id = std::get<3>(It->second);
-	if (id >= Ini.LLVMMinId.GetValue() && id <= Ini.LLVMMaxId.GetValue())
-		return nullptr;
-	return std::get<0>(It->second);
 }
 
 void RecompilationEngine::NotifyBlockStart(u32 address) {
@@ -352,7 +344,7 @@ void RecompilationEngine::Task() {
 			// Wait a few ms for something to happen
 			auto idling_start = std::chrono::high_resolution_clock::now();
 			std::unique_lock<std::mutex> lock(mutex);
-			cv.wait_for(lock, std::chrono::milliseconds(250));
+			cv.wait_for(lock, std::chrono::milliseconds(10));
 			auto idling_end = std::chrono::high_resolution_clock::now();
 			idling_time += std::chrono::duration_cast<std::chrono::nanoseconds>(idling_end - idling_start);
 		}
@@ -458,6 +450,8 @@ bool RecompilationEngine::AnalyseBlock(BlockEntry &functionData, size_t maxSize)
 	return true;
 }
 
+std::atomic<u32> compiling_address;
+
 void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	if (block_entry.is_analysed)
 		return;
@@ -465,26 +459,28 @@ void RecompilationEngine::CompileBlock(BlockEntry & block_entry) {
 	if (!AnalyseBlock(block_entry))
 		return;
 	Log() << "Compile: " << block_entry.ToString() << "\n";
+	compiling_address.store(block_entry.address);
 	const std::pair<Executable, llvm::ExecutionEngine *> &compileResult =
 		m_compiler.Compile(fmt::format("fn_0x%08X", block_entry.address), block_entry.address, block_entry.instructionCount);
 
 	// If entry doesn't exist, create it (using lock)
 	std::unordered_map<u32, ExecutableStorage>::iterator It = m_address_to_function.find(block_entry.address);
-	if (It == m_address_to_function.end())
+	assert(It == m_address_to_function.end());
 	{
 		std::lock_guard<std::mutex> lock(m_address_to_function_lock);
 		std::get<1>(m_address_to_function[block_entry.address]) = nullptr;
 		if (!isAddressCommited(block_entry.address / 4))
 			commitAddress(block_entry.address / 4);
-	}
 
-	std::get<1>(m_address_to_function[block_entry.address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
-	std::get<0>(m_address_to_function[block_entry.address]) = compileResult.first;
-	std::get<3>(m_address_to_function[block_entry.address]) = m_currentId;
-	Log() << "Associating " << (void*)(uint64_t)block_entry.address << " with ID " << m_currentId << "\n";
-	m_currentId++;
-	block_entry.is_compiled = true;
-	FunctionCache[block_entry.address / 4] = compileResult.first;
+		std::get<1>(m_address_to_function[block_entry.address]) = std::unique_ptr<llvm::ExecutionEngine>(compileResult.second);
+		std::get<0>(m_address_to_function[block_entry.address]) = compileResult.first;
+		std::get<3>(m_address_to_function[block_entry.address]) = m_currentId;
+		Log() << "Associating " << (void*)(uint64_t)block_entry.address << " with ID " << m_currentId << "\n";
+		m_currentId++;
+		block_entry.is_compiled = true;
+		FunctionCache[block_entry.address / 4] = compileResult.first;
+		compiling_address.store(0);
+	}
 }
 
 std::shared_ptr<RecompilationEngine> RecompilationEngine::GetInstance() {
@@ -544,8 +540,7 @@ static BranchType GetBranchTypeFromInstruction(u32 instruction)
 u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteTillReturn(PPUThread * ppu_state, u64 context) {
 	CPUHybridDecoderRecompiler *execution_engine = (CPUHybridDecoderRecompiler *)ppu_state->GetDecoder();
 
-	execution_engine->m_recompilation_engine->NotifyBlockStart(ppu_state->PC);
-
+	bool previousInstWasInterp = false;
 	while (PollStatus(ppu_state) == false) {
 		const Executable executable = execution_engine->m_recompilation_engine->GetCompiledExecutableIfAvailable(ppu_state->PC);
 		if (executable)
@@ -554,13 +549,17 @@ u32 ppu_recompiler_llvm::CPUHybridDecoderRecompiler::ExecuteTillReturn(PPUThread
 			u32 exit = (u32)executable(ppu_state, 0);
 			if (exit == 0)
 				return 0;
-			execution_engine->m_recompilation_engine->NotifyBlockStart(ppu_state->PC);
+			previousInstWasInterp = false;
 			continue;
 		}
+		if (!previousInstWasInterp)
+			execution_engine->m_recompilation_engine->NotifyBlockStart(ppu_state->PC);
+		previousInstWasInterp = true;
 		u32 instruction = vm::ps3::read32(ppu_state->PC);
 		u32 oldPC = ppu_state->PC;
 		execution_engine->m_decoder.Decode(instruction);
 		auto branch_type = ppu_state->PC != oldPC ? GetBranchTypeFromInstruction(instruction) : BranchType::NonBranch;
+		previousInstWasInterp = (oldPC == ppu_state->PC);
 		ppu_state->PC += 4;
 
 		switch (branch_type) {
