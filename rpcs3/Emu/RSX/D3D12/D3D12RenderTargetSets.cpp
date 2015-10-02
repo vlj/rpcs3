@@ -132,13 +132,13 @@ void D3D12GSRender::PrepareRenderTargets(ID3D12GraphicsCommandList *copycmdlist)
 	}
 	}
 
+	if (!m_surface_depth_format) return;
+
 	ID3D12Resource *ds = m_rtts.bindAddressAsDepthStencil(m_device.Get(), copycmdlist, address_z, m_surface_clip_w, m_surface_clip_h, m_surface_depth_format, 1., 0);
 
 	D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilViewDesc = {};
 	switch (m_surface_depth_format)
 	{
-	case 0:
-		break;
 	case CELL_GCM_SURFACE_Z16:
 		depthStencilViewDesc.Format = DXGI_FORMAT_D16_UNORM;
 		break;
@@ -221,8 +221,6 @@ ID3D12Resource * RenderTargets::bindAddressAsDepthStencil(ID3D12Device * device,
 		DXGI_FORMAT dxgiFormat;
 		switch (surfaceDepthFormat)
 		{
-		case 0:
-		break;
 		case CELL_GCM_SURFACE_Z16:
 			dxgiFormat = DXGI_FORMAT_R16_TYPELESS;
 			clearDepthValue.Format = DXGI_FORMAT_D16_UNORM;

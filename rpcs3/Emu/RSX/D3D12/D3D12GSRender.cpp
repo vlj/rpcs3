@@ -351,13 +351,13 @@ void D3D12GSRender::Clear(u32 cmd)
 	}*/
 
 	// TODO: Merge depth and stencil clear when possible
-	if (m_clear_surface_mask & 0x1)
+	if (m_surface_depth_format && (m_clear_surface_mask & 0x1))
 	{
 		u32 max_depth_value = m_surface_depth_format == CELL_GCM_SURFACE_Z16 ? 0x0000ffff : 0x00ffffff;
 		getCurrentResourceStorage().m_commandList->ClearDepthStencilView(m_rtts.m_depthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, m_clear_surface_z / (float)max_depth_value, 0, 0, nullptr);
 	}
 
-	if (m_clear_surface_mask & 0x2)
+	if (m_surface_depth_format && (m_clear_surface_mask & 0x2))
 		getCurrentResourceStorage().m_commandList->ClearDepthStencilView(m_rtts.m_depthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_STENCIL, 0.f, m_clear_surface_s, 0, nullptr);
 
 	if (m_clear_surface_mask & 0xF0)
