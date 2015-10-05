@@ -1,0 +1,8 @@
+﻿<Application
+    x:Class="rpcs3_uap.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:rpcs3_uap"
+    RequestedTheme="Light">
+
+</Application>

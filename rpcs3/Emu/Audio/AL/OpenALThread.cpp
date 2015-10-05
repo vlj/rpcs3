@@ -36,28 +36,28 @@ OpenALThread::~OpenALThread()
 
 void OpenALThread::Init()
 {
-	m_device = alcOpenDevice(nullptr);
+/*	m_device = alcOpenDevice(nullptr);
 	checkForAlcError("alcOpenDevice");
 
 	m_context = alcCreateContext(m_device, nullptr);
 	checkForAlcError("alcCreateContext");
 
 	alcMakeContextCurrent(m_context);
-	checkForAlcError("alcMakeContextCurrent");
+	checkForAlcError("alcMakeContextCurrent");*/
 }
 
 void OpenALThread::Quit()
 {
-	m_context = alcGetCurrentContext();
+/*	m_context = alcGetCurrentContext();
 	m_device = alcGetContextsDevice(m_context);
 	alcMakeContextCurrent(nullptr);
 	alcDestroyContext(m_context);
-	alcCloseDevice(m_device);
+	alcCloseDevice(m_device);*/
 }
 
 void OpenALThread::Play()
 {
-	ALint state;
+/*	ALint state;
 	alGetSourcei(m_source, AL_SOURCE_STATE, &state);
 	checkForAlError("OpenALThread::Play -> alGetSourcei");
 
@@ -65,29 +65,29 @@ void OpenALThread::Play()
 	{
 		alSourcePlay(m_source);
 		checkForAlError("alSourcePlay");
-	}
+	}*/
 }
 
 void OpenALThread::Close()
 {
-	alSourceStop(m_source);
+/*	alSourceStop(m_source);
 	checkForAlError("alSourceStop");
 	if (alIsSource(m_source))
 		alDeleteSources(1, &m_source);
 
 	alDeleteBuffers(g_al_buffers_count, m_buffers);
-	checkForAlError("alDeleteBuffers");
+	checkForAlError("alDeleteBuffers");*/
 }
 
 void OpenALThread::Stop()
 {
-	alSourceStop(m_source);
-	checkForAlError("alSourceStop");
+/*	alSourceStop(m_source);
+	checkForAlError("alSourceStop");*/
 }
 
 void OpenALThread::Open(const void* src, int size)
 {
-	alGenSources(1, &m_source);
+/*	alGenSources(1, &m_source);
 	checkForAlError("alGenSources");
 
 	alGenBuffers(g_al_buffers_count, m_buffers);
@@ -106,12 +106,12 @@ void OpenALThread::Open(const void* src, int size)
 
 	alSourceQueueBuffers(m_source, g_al_buffers_count, m_buffers);
 	checkForAlError("alSourceQueueBuffers");
-	Play();
+	Play();*/
 }
 
 void OpenALThread::AddData(const void* src, int size)
 {
-	const char* bsrc = (const char*)src;
+/*	const char* bsrc = (const char*)src;
 	ALuint buffer;
 	ALint buffers_count;
 
@@ -145,5 +145,5 @@ void OpenALThread::AddData(const void* src, int size)
 		bsrc += bsize;
 	}
 
-	Play();
+	Play();*/
 }
