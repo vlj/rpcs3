@@ -76,3 +76,10 @@ rpcs3/Emu/SysCalls/Modules/prx_*.h
 
 /CMakeFiles/
 CMakeCache.txt
+
+# UAP files
+*.g.hpp
+*.g.cpp
+*.g.h
+*.xbf
+rpcs3\Generated Files*
