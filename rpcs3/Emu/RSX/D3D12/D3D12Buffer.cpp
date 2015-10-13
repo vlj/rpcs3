@@ -124,7 +124,7 @@ std::vector<D3D12_INPUT_ELEMENT_DESC> getIALayout(const rsx::data_array_format_i
  * 
  */
 static
-D3D12_GPU_VIRTUAL_ADDRESS createVertexBuffer(const rsx::data_array_format_info &vertex_array_desc, const std::vector<u8> &vertex_data, ID3D12Device *device, DataHeap<ID3D12Resource, 65536> &vertexIndexHeap)
+D3D12_GPU_VIRTUAL_ADDRESS createVertexBuffer(const rsx::data_array_format_info &vertex_array_desc, const std::vector<u8> &vertex_data, ID3D12Device *device, DataHeap<ID3D12Resource, 256> &vertexIndexHeap)
 {
 	size_t subBufferSize = vertex_data.size();
 	assert(vertexIndexHeap.canAlloc(subBufferSize));
