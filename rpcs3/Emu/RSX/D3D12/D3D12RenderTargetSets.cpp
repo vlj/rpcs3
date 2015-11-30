@@ -648,8 +648,12 @@ void D3D12GSRender::copy_depth_buffer_to_memory(void *buffer)
 
 	get_current_resource_storage().command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_rtts.bound_depth_stencil, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COPY_SOURCE));
 
-	get_current_resource_storage().command_list->CopyTextureRegion(&CD3DX12_TEXTURE_COPY_LOCATION(m_readback_resources.get_heap(), { heap_offset,{ DXGI_FORMAT_R32_TYPELESS, (UINT)clip_w, (UINT)clip_h, 1, (UINT)row_pitch } }), 0, 0, 0,
-		&CD3DX12_TEXTURE_COPY_LOCATION(m_rtts.bound_depth_stencil, 0), nullptr);
+	if (m_surface.depth_format == CELL_GCM_SURFACE_Z24S8)
+		get_current_resource_storage().command_list->CopyTextureRegion(&CD3DX12_TEXTURE_COPY_LOCATION(m_readback_resources.get_heap(), { heap_offset,{ DXGI_FORMAT_R32_TYPELESS, (UINT)clip_w, (UINT)clip_h, 1, (UINT)row_pitch } }), 0, 0, 0,
+			&CD3DX12_TEXTURE_COPY_LOCATION(m_rtts.bound_depth_stencil, 0), nullptr);
+	else
+		get_current_resource_storage().command_list->CopyTextureRegion(&CD3DX12_TEXTURE_COPY_LOCATION(m_readback_resources.get_heap(), { heap_offset,{ DXGI_FORMAT_R16_TYPELESS, (UINT)clip_w, (UINT)clip_h, 1, (UINT)row_pitch } }), 0, 0, 0,
+			&CD3DX12_TEXTURE_COPY_LOCATION(m_rtts.bound_depth_stencil, 0), nullptr);
 	get_current_resource_storage().command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_rtts.bound_depth_stencil, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE));
 
 	CHECK_HRESULT(get_current_resource_storage().command_list->Close());
@@ -662,10 +666,20 @@ void D3D12GSRender::copy_depth_buffer_to_memory(void *buffer)
 	void *mapped_buffer = m_readback_resources.map<void>(heap_offset);
 	for (unsigned row = 0; row < clip_h; row++)
 	{
-		u32 *casted_dest = (u32*)((char*)buffer + row * clip_w * 4);
-		u32 *casted_src = (u32*)((char*)mapped_buffer + row * row_pitch);
-		for (unsigned col = 0; col < row_pitch / 4; col++)
-			*casted_dest++ = *casted_src++;
+		if (m_surface.depth_format == CELL_GCM_SURFACE_Z24S8)
+		{
+			u32 *casted_dest = (u32*)((char*)buffer + row * clip_w * 4);
+			u32 *casted_src = (u32*)((char*)mapped_buffer + row * row_pitch);
+			for (unsigned col = 0; col < row_pitch / 4; col++)
+				*casted_dest++ = *casted_src++;
+		}
+		else
+		{
+			u16 *casted_dest = (u16*)((char*)buffer + row * clip_w * 2);
+			u16 *casted_src = (u16*)((char*)mapped_buffer + row * row_pitch);
+			for (unsigned col = 0; col < row_pitch / 2; col++)
+				*casted_dest++ = *casted_src++;
+		}
 	}
 	m_readback_resources.unmap();
 }

@@ -1012,12 +1012,21 @@ namespace rsx
 		{
 			draw_state.depth.width = clip_w;
 			draw_state.depth.height = clip_h;
-			draw_state.depth.data.resize(clip_w * clip_h * 4);
-			copy_depth_buffer_to_memory(draw_state.depth.data.data());
-			draw_state.stencil.width = clip_w;
-			draw_state.stencil.height = clip_h;
-			draw_state.stencil.data.resize(clip_w * clip_h * 4);
-			copy_stencil_buffer_to_memory(draw_state.stencil.data.data());
+			if (((method_registers[NV4097_SET_SURFACE_FORMAT] >> 5) & 0x7) == CELL_GCM_SURFACE_Z24S8)
+			{
+				draw_state.depth.data.resize(clip_w * clip_h * 4);
+				copy_depth_buffer_to_memory(draw_state.depth.data.data());
+
+				draw_state.stencil.width = clip_w;
+				draw_state.stencil.height = clip_h;
+				draw_state.stencil.data.resize(clip_w * clip_h * 4);
+				copy_stencil_buffer_to_memory(draw_state.stencil.data.data());
+			}
+			else
+			{
+				draw_state.depth.data.resize(clip_w * clip_h * 4);
+				copy_depth_buffer_to_memory(draw_state.depth.data.data());
+			}
 		}
 		draw_state.programs = get_programs();
 		draw_state.name = name;
