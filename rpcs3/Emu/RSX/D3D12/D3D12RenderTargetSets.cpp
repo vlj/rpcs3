@@ -375,6 +375,7 @@ namespace
 		size_t row_pitch;
 		switch (color_surface_format)
 		{
+		case CELL_GCM_SURFACE_R5G6B5: // emulated by RGBA8
 		case CELL_GCM_SURFACE_A8R8G8B8:
 			row_pitch = align(clip_w * 4, 256);
 			break;
@@ -571,6 +572,7 @@ void D3D12GSRender::copy_render_target_to_dma_location()
 	size_t srcPitch, dstPitch;
 	switch (m_surface.color_format)
 	{
+	case CELL_GCM_SURFACE_R5G6B5: // emulated by RGBA8
 	case CELL_GCM_SURFACE_A8R8G8B8:
 		srcPitch = align(clip_w * 4, 256);
 		dstPitch = clip_w * 4;
@@ -617,6 +619,7 @@ void D3D12GSRender::copy_render_targets_to_memory(void *buffer, u8 rtt)
 	size_t srcPitch, dstPitch;
 	switch (m_surface.color_format)
 	{
+	case CELL_GCM_SURFACE_R5G6B5: // emulated by RGBA8
 	case CELL_GCM_SURFACE_A8R8G8B8:
 		srcPitch = align(clip_w * 4, 256);
 		dstPitch = clip_w * 4;
