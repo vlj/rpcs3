@@ -380,6 +380,7 @@ namespace
 		case CELL_GCM_SURFACE_R5G6B5:
 			row_pitch = align(clip_w * 2, 256);
 			break;
+		case CELL_GCM_SURFACE_F_X32:
 		case CELL_GCM_SURFACE_A8R8G8B8:
 			row_pitch = align(clip_w * 4, 256);
 			break;
@@ -624,6 +625,7 @@ void D3D12GSRender::copy_render_targets_to_memory(void *buffer, u8 rtt)
 		srcPitch = align(clip_w * 2, 256);
 		dstPitch = clip_w * 2;
 		break;
+	case CELL_GCM_SURFACE_F_X32:
 	case CELL_GCM_SURFACE_A8R8G8B8:
 		srcPitch = align(clip_w * 4, 256);
 		dstPitch = clip_w * 4;
