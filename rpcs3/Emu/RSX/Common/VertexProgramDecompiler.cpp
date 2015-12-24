@@ -77,7 +77,10 @@ std::string VertexProgramDecompiler::GetSRC(const u32 n)
 	case 2: //input
 		if (d1.input_src < (sizeof(reg_table) / sizeof(reg_table[0])))
 		{
-			ret += m_parr.AddParam(PF_PARAM_IN, getFloatTypeName(4), reg_table[d1.input_src], d1.input_src);
+			if (!!(m_input_mask & (1 << d1.input_src)))
+				ret += m_parr.AddParam(PF_PARAM_IN, getFloatTypeName(4), reg_table[d1.input_src], d1.input_src);
+			else
+				ret += m_parr.AddParam(PF_PARAM_NONE, getFloatTypeName(4), reg_table[d1.input_src], "float4(0.0, 0.0, 0.0, 0.0)");
 		}
 		else
 		{
@@ -435,8 +438,10 @@ std::string VertexProgramDecompiler::BuildCode()
 	return OS.str();
 }
 
-VertexProgramDecompiler::VertexProgramDecompiler(std::vector<u32>& data) :
-	m_data(data)
+VertexProgramDecompiler::VertexProgramDecompiler(const RSXVertexProgram &prog) :
+	m_data(prog.data),
+	m_input_mask(prog.input_mask),
+	m_output_mask(prog.output_mask)
 {
 	m_funcs.emplace_back();
 	m_funcs[0].offset = 0;

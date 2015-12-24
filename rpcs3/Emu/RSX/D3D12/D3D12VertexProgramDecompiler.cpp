@@ -31,6 +31,7 @@ void D3D12VertexProgramDecompiler::insertHeader(std::stringstream &OS)
 	OS << "cbuffer SCALE_OFFSET : register(b0)" << std::endl;
 	OS << "{" << std::endl;
 	OS << "	float4x4 scaleOffsetMat;" << std::endl;
+	OS << "	float4 nv308a_color;" << std::endl;
 	OS << "	int isAlphaTested;" << std::endl;
 	OS << "	float alphaRef;" << std::endl;
 	OS << "	int tex0_is_unorm;" << std::endl;
@@ -114,20 +115,20 @@ struct reg_info
 
 static const reg_info reg_table[] =
 {
-	{ "gl_Position", false, "dst_reg0", "", false },
 	{ "diff_color", true, "dst_reg1", "", false },
 	{ "spec_color", true, "dst_reg2", "", false },
 	{ "front_diff_color", true, "dst_reg3", "", false },
 	{ "front_spec_color", true, "dst_reg4", "", false },
 	{ "fogc", true, "dst_reg5", ".x", true },
+	{ "gl_PointSize", false, "dst_reg6", ".x", false },
+	// TODO: Handle user clip distance properly
 	{ "gl_ClipDistance[0]", false, "dst_reg5", ".y", false },
 	{ "gl_ClipDistance[1]", false, "dst_reg5", ".z", false },
 	{ "gl_ClipDistance[2]", false, "dst_reg5", ".w", false },
-	// TODO: Handle user clip distance properly
-/*	{ "gl_PointSize", false, "dst_reg6", ".x", false },
 	{ "gl_ClipDistance[3]", false, "dst_reg6", ".y", false },
 	{ "gl_ClipDistance[4]", false, "dst_reg6", ".z", false },
-	{ "gl_ClipDistance[5]", false, "dst_reg6", ".w", false },*/
+	{ "gl_ClipDistance[5]", false, "dst_reg6", ".w", false },
+	{ "tc8", true, "dst_reg15", "", false },
 	{ "tc9", false, "dst_reg6", "", false },
 	{ "tc0", true, "dst_reg7", "", false },
 	{ "tc1", true, "dst_reg8", "", false },
@@ -137,7 +138,6 @@ static const reg_info reg_table[] =
 	{ "tc5", true, "dst_reg12", "", false },
 	{ "tc6", true, "dst_reg13", "", false },
 	{ "tc7", true, "dst_reg14", "", false },
-	{ "tc8", true, "dst_reg15", "", false },
 };
 
 void D3D12VertexProgramDecompiler::insertMainStart(std::stringstream & OS)
@@ -170,19 +170,31 @@ void D3D12VertexProgramDecompiler::insertMainStart(std::stringstream & OS)
 void D3D12VertexProgramDecompiler::insertMainEnd(std::stringstream & OS)
 {
 	OS << "	PixelInput Out = (PixelInput)0;" << std::endl;
-	// Declare inside main function
-	for (auto &i : reg_table)
+
+	// There is always an output position
+	OS << "	Out.dst_reg0 = dst_reg0;" << std::endl;
+
+	for (unsigned i = 0; i < 22; i++)
 	{
-		if (m_parr.HasParam(PF_PARAM_NONE, "float4", i.src_reg))
-			OS << "	Out." << i.src_reg << " = " << i.src_reg << ";" << std::endl;
+		if (!(m_output_mask & (1 << i)))
+		{
+			if (i == 0)
+				OS << "	Out." << reg_table[i].src_reg << " =  float4(1., 1., 1., 1.);" << std::endl;
+			else
+				OS << "	Out." << reg_table[i].src_reg << " =  float4(0., 0., 0., 1.);" << std::endl;
+			continue;
+		}
+		if (!m_parr.HasParam(PF_PARAM_NONE, "float4", reg_table[i].src_reg))
+			continue;
+			OS << "	Out." << reg_table[i].src_reg << " = " << reg_table[i].src_reg << ";" << std::endl;
 	}
 	OS << "	Out.dst_reg0 = mul(Out.dst_reg0, scaleOffsetMat);" << std::endl;
 	OS << "	return Out;" << std::endl;
 	OS << "}" << std::endl;
 }
 
-D3D12VertexProgramDecompiler::D3D12VertexProgramDecompiler(std::vector<u32>& data) :
-	VertexProgramDecompiler(data)
+D3D12VertexProgramDecompiler::D3D12VertexProgramDecompiler(const RSXVertexProgram &prog) :
+	VertexProgramDecompiler(prog)
 {
 }
 #endif

@@ -217,6 +217,7 @@ struct RSXFragmentProgram
 	u32 addr;
 	u32 offset;
 	u32 ctrl;
+	u32 transform_program_outputs;
 	std::vector<texture_dimension> texture_dimensions;
 
 	RSXFragmentProgram()

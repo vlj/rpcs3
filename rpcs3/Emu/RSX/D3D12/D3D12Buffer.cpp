@@ -131,6 +131,8 @@ void D3D12GSRender::load_vertex_index_data(u32 first, u32 count)
 	m_rendering_info.m_indexed = true;
 }
 
+u32 vector[4];
+
 void D3D12GSRender::upload_and_bind_scale_offset_matrix(size_t descriptorIndex)
 {
 	size_t heap_offset = m_buffer_data.alloc<D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT>(256);

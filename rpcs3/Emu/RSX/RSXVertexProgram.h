@@ -193,4 +193,6 @@ static const std::string rsx_vp_vec_op_names[] =
 struct RSXVertexProgram
 {
 	std::vector<u32> data;
+	u32 input_mask;
+	u32 output_mask;
 };

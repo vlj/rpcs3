@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "Emu/System.h"
-
+#include "../GCM.h"
 #include "GLVertexProgram.h"
 #include "GLCommonDecompiler.h"
 
@@ -125,7 +125,18 @@ void GLVertexDecompilerThread::insertMainEnd(std::stringstream & OS)
 	for (auto &i : reg_table)
 	{
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", i.src_reg))
+		{
 			OS << "	" << i.name << " = " << i.src_reg << i.src_reg_mask << ";" << std::endl;
+			continue;
+		}
+		// See comment above m_output_mask about implicit attributes values.
+		if (i.name == "diff_color")
+		{
+			if (!!(m_output_mask & CELL_GCM_ATTRIB_OUTPUT_MASK_FRONTDIFFUSE))
+				OS << "	" << i.name << " = " << "vec4(0., 0., 0., 0.);" << std::endl;
+			else
+				OS << "	" << i.name << " = " << "vec4(1., 1., 1., 1.);" << std::endl;
+		}
 	}
 	OS << "	gl_Position = gl_Position * scaleOffsetMat;" << std::endl;
 	OS << "}" << std::endl;
@@ -168,7 +179,7 @@ GLVertexProgram::~GLVertexProgram()
 
 void GLVertexProgram::Decompile(RSXVertexProgram& prog)
 {
-	GLVertexDecompilerThread decompiler(prog.data, shader, parr);
+	GLVertexDecompilerThread decompiler(prog, shader, parr);
 	decompiler.Task();
 }
 

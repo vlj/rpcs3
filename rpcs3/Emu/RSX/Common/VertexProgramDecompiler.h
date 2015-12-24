@@ -57,7 +57,7 @@ struct VertexProgramDecompiler
 
 	//wxString main;
 
-	std::vector<u32>& m_data;
+	std::vector<u32> m_data;
 	ParamArray m_parr;
 
 	std::string GetMask(bool is_sca);
@@ -81,6 +81,21 @@ struct VertexProgramDecompiler
 	void SetDSTSca(const std::string& code);
 	std::string BuildFuncBody(const FuncInfo& func);
 	std::string BuildCode();
+
+	/**
+	 * Transform programs don't always expliclty write all outputs read by the shader program.
+	 * (For instance Front Diffuse Dragon Ball Z: Burst Limits and Silent Hills 3 HD).
+	 * However the value implictly written is not a general default one.
+	 * ( (1., 1., 1., 1.) in DBZ shaders, (0., 0., 0., 0.) in SH3) )
+	 *
+	 * It looks like NV4097_SET_VERTEX_ATTRIB_OUTPUT_MASK is used by RSX to handle such situation:
+	 * - If the attrib output bit is set then the attrib value passed to shader program is a 0 float4 reg.
+	 * - If the attrib output bit is not set then the attrib value passed to shader program comes from somewhere else.
+	 * In the later case a float4(1.) vector value seems to work for DBZ Front diffuse.
+	 * It is not know yet if the same value applies for other attrib and for others apps.
+	 */
+	u32 m_input_mask;
+	u32 m_output_mask;
 
 protected:
 	/** returns the type name of float vectors.
@@ -124,6 +139,6 @@ protected:
 	*/
 	virtual void insertMainEnd(std::stringstream &OS) = 0;
 public:
-	VertexProgramDecompiler(std::vector<u32>& data);
+	VertexProgramDecompiler(const RSXVertexProgram &vertex_program);
 	std::string Decompile();
 };

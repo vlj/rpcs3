@@ -4,13 +4,14 @@
 
 #include "FragmentProgramDecompiler.h"
 
-FragmentProgramDecompiler::FragmentProgramDecompiler(u32 addr, u32& size, u32 ctrl, const std::vector<texture_dimension> &texture_dimensions) :
-	m_addr(addr),
+FragmentProgramDecompiler::FragmentProgramDecompiler(const RSXFragmentProgram& prog, u32& size) :
+	m_addr(prog.addr),
 	m_size(size),
 	m_const_index(0),
 	m_location(0),
-	m_ctrl(ctrl),
-	m_texture_dimensions(texture_dimensions)
+	m_ctrl(prog.ctrl),
+	vertex_outputs(prog.transform_program_outputs),
+	m_texture_dimensions(prog.texture_dimensions)
 {
 	m_size = 0;
 }
@@ -272,6 +273,12 @@ template<typename T> std::string FragmentProgramDecompiler::GetSRC(T src)
 		default:
 			if (dst.src_attr_reg_num < sizeof(reg_table) / sizeof(reg_table[0]))
 			{
+				if (dst.src_attr_reg_num == 1)
+					if (!(vertex_outputs & 0x1))
+					{
+						ret += AddConst();
+						break;
+					}
 				ret += m_parr.AddParam(PF_PARAM_IN, getFloatTypeName(4), reg_table[dst.src_attr_reg_num]);
 			}
 			else

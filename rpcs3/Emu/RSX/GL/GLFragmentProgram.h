@@ -9,8 +9,8 @@ struct GLFragmentDecompilerThread : public FragmentProgramDecompiler
 	std::string& m_shader;
 	ParamArray& m_parrDummy;
 public:
-	GLFragmentDecompilerThread(std::string& shader, ParamArray& parr, u32 addr, u32& size, u32 ctrl, const std::vector<texture_dimension> &texture_dimensions)
-		: FragmentProgramDecompiler(addr, size, ctrl, texture_dimensions)
+	GLFragmentDecompilerThread(const RSXFragmentProgram &prog, std::string& shader, ParamArray& parr, u32& size)
+		: FragmentProgramDecompiler(prog, size)
 		, m_shader(shader)
 		, m_parrDummy(parr)
 	{

@@ -146,7 +146,7 @@ struct D3D12Traits
 	static
 	void RecompileFragmentProgram(RSXFragmentProgram *RSXFP, FragmentProgramData& fragmentProgramData, size_t ID)
 	{
-		D3D12FragmentDecompiler FS(RSXFP->addr, RSXFP->size, RSXFP->ctrl, RSXFP->texture_dimensions);
+		D3D12FragmentDecompiler FS(*RSXFP, RSXFP->size);
 		const std::string &shader = FS.Decompile();
 		fragmentProgramData.Compile(shader, Shader::SHADER_TYPE::SHADER_TYPE_FRAGMENT);
 		fragmentProgramData.m_textureCount = 0;
@@ -172,7 +172,7 @@ struct D3D12Traits
 	static
 	void RecompileVertexProgram(RSXVertexProgram *RSXVP, VertexProgramData& vertexProgramData, size_t ID)
 	{
-		D3D12VertexProgramDecompiler VS(RSXVP->data);
+		D3D12VertexProgramDecompiler VS(*RSXVP);
 		std::string shaderCode = VS.Decompile();
 		vertexProgramData.Compile(shaderCode, Shader::SHADER_TYPE::SHADER_TYPE_VERTEX);
 		vertexProgramData.vertex_shader_inputs = VS.input_slots;

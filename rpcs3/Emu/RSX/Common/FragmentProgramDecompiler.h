@@ -28,6 +28,7 @@ class FragmentProgramDecompiler
 	u32 m_addr;
 	u32& m_size;
 	const std::vector<texture_dimension> m_texture_dimensions;
+	u32 vertex_outputs;
 	u32 m_const_index;
 	u32 m_offset;
 	u32 m_location;
@@ -113,6 +114,6 @@ protected:
 	virtual void insertMainEnd(std::stringstream &OS) = 0;
 public:
 	ParamArray m_parr;
-	FragmentProgramDecompiler(u32 addr, u32& size, u32 ctrl, const std::vector<texture_dimension> &texture_dimensions);
+	FragmentProgramDecompiler(const RSXFragmentProgram& prog, u32& size);
 	std::string Decompile();
 };

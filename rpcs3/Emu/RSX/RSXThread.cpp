@@ -333,6 +333,10 @@ namespace rsx
 				}
 
 				u32 address = get_address(method_registers[NV3062_SET_OFFSET_DESTIN] + (x << 2) + index * 4, method_registers[NV3062_SET_CONTEXT_DMA_IMAGE_DESTIN]);
+
+				if (method_registers[NV3062_SET_OFFSET_DESTIN] == 0x00740240)
+					LOG_ERROR(RSX, "Previous Value is %x", vm::read32(address));
+
 				vm::write32(address, arg);
 			}
 		};
@@ -1008,7 +1012,7 @@ namespace rsx
 			draw_state.color_buffer[i].data.resize(pitch * clip_h);
 			copy_render_targets_to_memory(draw_state.color_buffer[i].data.data(), i);
 		}
-		if (get_address(method_registers[NV4097_SET_SURFACE_ZETA_OFFSET], method_registers[NV4097_SET_CONTEXT_DMA_ZETA]))
+/*		if (get_address(method_registers[NV4097_SET_SURFACE_ZETA_OFFSET], method_registers[NV4097_SET_CONTEXT_DMA_ZETA]))
 		{
 			draw_state.depth.width = clip_w;
 			draw_state.depth.height = clip_h;
@@ -1027,7 +1031,7 @@ namespace rsx
 				draw_state.depth.data.resize(clip_w * clip_h * 4);
 				copy_depth_buffer_to_memory(draw_state.depth.data.data());
 			}
-		}
+		}*/
 		draw_state.programs = get_programs();
 		draw_state.name = name;
 		frame_debug.draw_calls.push_back(draw_state);

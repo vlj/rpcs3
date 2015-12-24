@@ -6,8 +6,8 @@
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
 
-D3D12FragmentDecompiler::D3D12FragmentDecompiler(u32 addr, u32& size, u32 ctrl, const std::vector<texture_dimension> &texture_dimensions) :
-	FragmentProgramDecompiler(addr, size, ctrl, texture_dimensions)
+D3D12FragmentDecompiler::D3D12FragmentDecompiler(const RSXFragmentProgram &prog, u32& size) :
+	FragmentProgramDecompiler(prog, size)
 {
 
 }
@@ -37,6 +37,7 @@ void D3D12FragmentDecompiler::insertHeader(std::stringstream & OS)
 	OS << "cbuffer SCALE_OFFSET : register(b0)" << std::endl;
 	OS << "{" << std::endl;
 	OS << "	float4x4 scaleOffsetMat;" << std::endl;
+	OS << "	float4 nv308a_color;" << std::endl;
 	OS << "	int isAlphaTested;" << std::endl;
 	OS << "	float alphaRef;" << std::endl;
 	OS << "	int tex0_is_unorm;" << std::endl;

@@ -39,6 +39,8 @@ bool D3D12GSRender::load_program()
 {
 	u32 transform_program_start = rsx::method_registers[NV4097_SET_TRANSFORM_PROGRAM_START];
 	vertex_program.data.reserve((512 - transform_program_start) * 4);
+	vertex_program.output_mask = rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_OUTPUT_MASK];
+	vertex_program.input_mask = rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_INPUT_MASK];
 
 	for (int i = transform_program_start; i < 512; ++i)
 	{
@@ -56,6 +58,7 @@ bool D3D12GSRender::load_program()
 	fragment_program.offset = shader_program & ~0x3;
 	fragment_program.addr = rsx::get_address(fragment_program.offset, (shader_program & 0x3) - 1);
 	fragment_program.ctrl = rsx::method_registers[NV4097_SET_SHADER_CONTROL];
+	fragment_program.transform_program_outputs = rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_OUTPUT_MASK];
 	fragment_program.texture_dimensions.clear();
 
 	for (u32 i = 0; i < rsx::limits::textures_count; ++i)

@@ -22,14 +22,14 @@ namespace ProgramHashUtil
 
 	struct HashVertexProgram
 	{
-		size_t operator()(const std::vector<u32> &program) const
+		size_t operator()(const RSXVertexProgram &program) const
 		{
 			// 64-bit Fowler/Noll/Vo FNV-1a hash code
 			size_t hash = 0xCBF29CE484222325ULL;
-			const qword *instbuffer = (const qword*)program.data();
+			const qword *instbuffer = (const qword*)program.data.data();
 			size_t instIndex = 0;
 			bool end = false;
-			for (unsigned i = 0; i < program.size() / 4; i++)
+			for (unsigned i = 0; i < program.data.size() / 4; i++)
 			{
 				const qword inst = instbuffer[instIndex];
 				hash ^= inst.dword[0];
@@ -45,13 +45,13 @@ namespace ProgramHashUtil
 
 	struct VertexProgramCompare
 	{
-		bool operator()(const std::vector<u32> &binary1, const std::vector<u32> &binary2) const
+		bool operator()(const RSXVertexProgram &binary1, const RSXVertexProgram &binary2) const
 		{
-			if (binary1.size() != binary2.size()) return false;
-			const qword *instBuffer1 = (const qword*)binary1.data();
-			const qword *instBuffer2 = (const qword*)binary2.data();
+			if (binary1.data.size() != binary2.data.size() || binary1.output_mask != binary2.output_mask || binary1.input_mask != binary2.input_mask) return false;
+			const qword *instBuffer1 = (const qword*)binary1.data.data();
+			const qword *instBuffer2 = (const qword*)binary2.data.data();
 			size_t instIndex = 0;
-			for (unsigned i = 0; i < binary1.size() / 4; i++)
+			for (unsigned i = 0; i < binary1.data.size() / 4; i++)
 			{
 				const qword& inst1 = instBuffer1[instIndex];
 				const qword& inst2 = instBuffer2[instIndex];
@@ -65,6 +65,12 @@ namespace ProgramHashUtil
 
 	struct FragmentProgramUtil
 	{
+		struct key_type
+		{
+			void *ptr;
+			u32 transform_program_outputs;
+		};
+
 		/**
 		* returns true if the given source Operand is a constant
 		*/
@@ -102,11 +108,11 @@ namespace ProgramHashUtil
 
 	struct HashFragmentProgram
 	{
-		size_t operator()(const void *program) const
+		size_t operator()(const FragmentProgramUtil::key_type &program) const
 		{
 			// 64-bit Fowler/Noll/Vo FNV-1a hash code
 			size_t hash = 0xCBF29CE484222325ULL;
-			const qword *instbuffer = (const qword*)program;
+			const qword *instbuffer = (const qword*)program.ptr;
 			size_t instIndex = 0;
 			while (true)
 			{
@@ -132,10 +138,11 @@ namespace ProgramHashUtil
 
 	struct FragmentProgramCompare
 	{
-		bool operator()(const void *binary1, const void *binary2) const
+		bool operator()(const FragmentProgramUtil::key_type &binary1, const FragmentProgramUtil::key_type &binary2) const
 		{
-			const qword *instBuffer1 = (const qword*)binary1;
-			const qword *instBuffer2 = (const qword*)binary2;
+			if (binary1.transform_program_outputs != binary2.transform_program_outputs) return false;
+			const qword *instBuffer1 = (const qword*)binary1.ptr;
+			const qword *instBuffer2 = (const qword*)binary2.ptr;
 			size_t instIndex = 0;
 			while (true)
 			{
@@ -179,8 +186,9 @@ template<typename BackendTraits>
 class ProgramStateCache
 {
 private:
-	typedef std::unordered_map<std::vector<u32>, typename BackendTraits::VertexProgramData, ProgramHashUtil::HashVertexProgram, ProgramHashUtil::VertexProgramCompare> binary2VS;
-	typedef std::unordered_map<void *, typename BackendTraits::FragmentProgramData, ProgramHashUtil::HashFragmentProgram, ProgramHashUtil::FragmentProgramCompare> binary2FS;
+
+	typedef std::unordered_map<RSXVertexProgram, typename BackendTraits::VertexProgramData, ProgramHashUtil::HashVertexProgram, ProgramHashUtil::VertexProgramCompare> binary2VS;
+	typedef std::unordered_map<ProgramHashUtil::FragmentProgramUtil::key_type, typename BackendTraits::FragmentProgramData, ProgramHashUtil::HashFragmentProgram, ProgramHashUtil::FragmentProgramCompare> binary2FS;
 	binary2VS m_cacheVS;
 	binary2FS m_cacheFS;
 
@@ -218,7 +226,8 @@ private:
 
 	typename BackendTraits::FragmentProgramData& SearchFp(RSXFragmentProgram* rsx_fp, bool& found)
 	{
-		typename binary2FS::iterator It = m_cacheFS.find(vm::base(rsx_fp->addr));
+		ProgramHashUtil::FragmentProgramUtil::key_type key = { vm::base(rsx_fp->addr), rsx_fp->transform_program_outputs };
+		typename binary2FS::iterator It = m_cacheFS.find(key);
 		if (It != m_cacheFS.end())
 		{
 			found = true;
@@ -229,7 +238,10 @@ private:
 		size_t actualFPSize = ProgramHashUtil::FragmentProgramUtil::getFPBinarySize(vm::base(rsx_fp->addr));
 		void *fpShadowCopy = malloc(actualFPSize);
 		std::memcpy(fpShadowCopy, vm::base(rsx_fp->addr), actualFPSize);
-		typename BackendTraits::FragmentProgramData &newShader = m_cacheFS[fpShadowCopy];
+		ProgramHashUtil::FragmentProgramUtil::key_type new_fp_key;
+		new_fp_key.ptr = fpShadowCopy;
+		new_fp_key.transform_program_outputs = rsx_fp->transform_program_outputs;
+		typename BackendTraits::FragmentProgramData &newShader = m_cacheFS[new_fp_key];
 		BackendTraits::RecompileFragmentProgram(rsx_fp, newShader, m_currentShaderId++);
 
 		return newShader;
@@ -237,7 +249,7 @@ private:
 
 	typename BackendTraits::VertexProgramData& SearchVp(RSXVertexProgram* rsx_vp, bool &found)
 	{
-		typename binary2VS::iterator It = m_cacheVS.find(rsx_vp->data);
+		typename binary2VS::iterator It = m_cacheVS.find(*rsx_vp);
 		if (It != m_cacheVS.end())
 		{
 			found = true;
@@ -245,7 +257,7 @@ private:
 		}
 		found = false;
 		LOG_WARNING(RSX, "VP not found in buffer!");
-		typename BackendTraits::VertexProgramData& newShader = m_cacheVS[rsx_vp->data];
+		typename BackendTraits::VertexProgramData& newShader = m_cacheVS[*rsx_vp];
 		BackendTraits::RecompileVertexProgram(rsx_vp, newShader, m_currentShaderId++);
 
 		return newShader;
@@ -273,7 +285,7 @@ public:
 
 	const typename BackendTraits::VertexProgramData* get_transform_program(const RSXVertexProgram& rsx_vp) const
 	{
-		typename binary2VS::const_iterator It = m_cacheVS.find(rsx_vp.data);
+		typename binary2VS::const_iterator It = m_cacheVS.find(rsx_vp);
 		if (It == m_cacheVS.end())
 			return nullptr;
 		return &It->second;
@@ -281,7 +293,8 @@ public:
 
 	const typename BackendTraits::FragmentProgramData* get_shader_program(const RSXFragmentProgram& rsx_fp) const
 	{
-		typename binary2FS::const_iterator It = m_cacheFS.find(vm::base(rsx_fp.addr));
+		ProgramHashUtil::FragmentProgramUtil::key_type key = { vm::base(rsx_fp.addr), rsx_fp.transform_program_outputs };
+		typename binary2FS::const_iterator It = m_cacheFS.find(key);
 		if (It == m_cacheFS.end())
 			return nullptr;
 		return &It->second;
@@ -294,7 +307,7 @@ public:
 		m_cachePSO.clear();
 
 		for (auto pair : m_cacheFS)
-			free(pair.first);
+			free(pair.first.ptr);
 
 		m_cacheFS.clear();
 	}
@@ -332,7 +345,8 @@ public:
 
 	size_t get_fragment_constants_buffer_size(const RSXFragmentProgram *fragmentShader) const
 	{
-		typename binary2FS::const_iterator It = m_cacheFS.find(vm::base(fragmentShader->addr));
+		ProgramHashUtil::FragmentProgramUtil::key_type key = { vm::base(fragmentShader->addr), fragmentShader->transform_program_outputs };
+		typename binary2FS::const_iterator It = m_cacheFS.find(key);
 		if (It != m_cacheFS.end())
 			return It->second.FragmentConstantOffsetCache.size() * 4 * sizeof(float);
 		LOG_ERROR(RSX, "Can't retrieve constant offset cache");
@@ -341,7 +355,8 @@ public:
 
 	void fill_fragment_constans_buffer(void *buffer, const RSXFragmentProgram *fragment_program) const
 	{
-		typename binary2FS::const_iterator It = m_cacheFS.find(vm::base(fragment_program->addr));
+		ProgramHashUtil::FragmentProgramUtil::key_type key = { vm::base(fragment_program->addr), fragment_program->transform_program_outputs };
+		typename binary2FS::const_iterator It = m_cacheFS.find(key);
 		if (It == m_cacheFS.end())
 			return;
 		__m128i mask = _mm_set_epi8(0xE, 0xF, 0xC, 0xD,
