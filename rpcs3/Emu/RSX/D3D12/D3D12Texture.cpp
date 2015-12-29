@@ -173,7 +173,29 @@ void D3D12GSRender::upload_and_bind_textures(ID3D12GraphicsCommandList *command_
 		bool is_render_target = false, is_depth_stencil_texture = false;
 		if (ItRTT != m_rtts.render_targets_storage.end())
 		{
-			vram_texture = ItRTT->second.Get();
+			ID3D12Resource *candidate = ItRTT->second.Get();
+			if (candidate->GetDesc().Width != w || candidate->GetDesc().Height != h)
+			{
+				// Create new temporary texture and copy data
+				ComPtr<ID3D12Resource> rtt_subset;
+				DXGI_FORMAT dxgi_format = get_texture_format(format);
+
+				ComPtr<ID3D12Resource> result;
+				CHECK_HRESULT(m_device->CreateCommittedResource(
+					&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+					D3D12_HEAP_FLAG_NONE,
+					&CD3DX12_RESOURCE_DESC::Tex2D(dxgi_format, (UINT)w, (UINT)h, 1, 1),
+					D3D12_RESOURCE_STATE_COPY_DEST,
+					nullptr,
+					IID_PPV_ARGS(rtt_subset.GetAddressOf())
+					));
+
+				command_list->CopyTextureRegion(&CD3DX12_TEXTURE_COPY_LOCATION{ rtt_subset.Get(), 0 }, 0, 0, 0,
+					&CD3DX12_TEXTURE_COPY_LOCATION{ candidate, 0 }, &CD3DX12_BOX(0, 0, w, h));
+				candidate = rtt_subset.Get();
+				get_current_resource_storage().dirty_textures.push_back(rtt_subset);
+			}
+			vram_texture = candidate;
 			is_render_target = true;
 		}
 		else if (ItDS != m_rtts.depth_stencil_storage.end())
