@@ -400,6 +400,10 @@ namespace rsx
 		u32 local_mem_addr, main_mem_addr;
 		bool strict_ordering[0x1000];
 
+
+		bool draw_inline_vertex_array;
+		std::vector<u32> inline_vertex_array;
+
 	public:
 		u32 draw_array_count;
 		u32 draw_array_first;

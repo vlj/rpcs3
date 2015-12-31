@@ -192,6 +192,12 @@ namespace rsx
 			rsx->load_vertex_index_data(first, count);
 		}
 
+		force_inline void draw_inline_array(thread* rsx, u32 arg)
+		{
+			rsx->draw_inline_vertex_array = true;
+			rsx->inline_vertex_array.push_back(arg);
+		}
+
 		template<u32 index>
 		struct set_transform_constant
 		{
@@ -227,6 +233,8 @@ namespace rsx
 		{
 			if (arg)
 			{
+				rsx->draw_inline_vertex_array = false;
+				rsx->inline_vertex_array.clear();
 				rsx->begin();
 				return;
 			}
@@ -776,6 +784,7 @@ namespace rsx
 			bind<NV4097_CLEAR_SURFACE>();
 			bind<NV4097_DRAW_ARRAYS, nv4097::draw_arrays>();
 			bind<NV4097_DRAW_INDEX_ARRAY, nv4097::draw_index_array>();
+			bind<NV4097_INLINE_ARRAY, nv4097::draw_inline_array>();
 			bind_range<NV4097_SET_VERTEX_DATA_ARRAY_FORMAT, 1, 16, nv4097::set_vertex_data_array_format>();
 			bind_range<NV4097_SET_VERTEX_DATA4UB_M, 1, 16, nv4097::set_vertex_data4ub_m>();
 			bind_range<NV4097_SET_VERTEX_DATA1F_M, 1, 16, nv4097::set_vertex_data1f_m>();
@@ -1003,7 +1012,7 @@ namespace rsx
 			color_index_to_record = { 0, 1, 2, 3 };
 			break;
 		}
-		for (size_t i : color_index_to_record)
+/*		for (size_t i : color_index_to_record)
 		{
 			draw_state.color_buffer[i].width = clip_w;
 			draw_state.color_buffer[i].height = clip_h;
@@ -1020,7 +1029,7 @@ namespace rsx
 			draw_state.stencil.height = clip_h;
 			draw_state.stencil.data.resize(clip_w * clip_h * 4);
 			copy_stencil_buffer_to_memory(draw_state.stencil.data.data());
-		}
+		}*/
 		draw_state.programs = get_programs();
 		draw_state.name = name;
 		frame_debug.draw_calls.push_back(draw_state);

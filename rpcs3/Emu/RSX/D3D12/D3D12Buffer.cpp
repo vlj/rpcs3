@@ -229,6 +229,51 @@ void D3D12GSRender::upload_and_bind_fragment_shader_constants(size_t descriptor_
 
 void D3D12GSRender::upload_and_set_vertex_index_data(ID3D12GraphicsCommandList *command_list)
 {
+	if (draw_inline_vertex_array)
+	{
+		// Copy inline buffer
+		size_t buffer_size = inline_vertex_array.size() * sizeof(int);
+		assert(m_vertex_index_data.can_alloc(buffer_size));
+		size_t heap_offset = m_vertex_index_data.alloc(buffer_size);
+		void *buffer;
+		CHECK_HRESULT(m_vertex_index_data.m_heap->Map(0, &CD3DX12_RANGE(heap_offset, heap_offset + buffer_size), (void**)&buffer));
+		void *mapped_buffer = (char*)buffer + heap_offset;
+		memcpy(mapped_buffer, inline_vertex_array.data(), buffer_size);
+		m_vertex_index_data.m_heap->Unmap(0, &CD3DX12_RANGE(heap_offset, heap_offset + buffer_size));
+
+		UINT offset = 0;
+		// Bind attributes
+		for (int index = 0; index < rsx::limits::vertex_count; ++index)
+		{
+			const auto &info = vertex_arrays_info[index];
+
+			if (!info.array) // disabled
+				continue;
+
+			D3D12_INPUT_ELEMENT_DESC IAElement = {};
+			IAElement.SemanticName = "TEXCOORD";
+			IAElement.SemanticIndex = (UINT)index;
+			IAElement.InputSlot = 0;
+			IAElement.Format = get_vertex_attribute_format(info.type, info.size);
+			IAElement.AlignedByteOffset = offset;
+			IAElement.InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+			IAElement.InstanceDataStepRate = 0;
+			m_IASet.push_back(IAElement);
+
+			offset += rsx::get_vertex_type_size(info.type) * info.size;
+		}
+		m_rendering_info.m_indexed = false;
+		m_rendering_info.m_count = buffer_size / offset;
+
+		D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view =
+		{
+			m_vertex_index_data.m_heap->GetGPUVirtualAddress() + heap_offset,
+			(UINT)buffer_size,
+			(UINT)offset
+		};
+		command_list->IASetVertexBuffers(0, (UINT)1, &vertex_buffer_view);
+		return;
+	}
 	// Index count
 	m_rendering_info.m_count = 0;
 	for (const auto &pair : m_first_count_pairs)
