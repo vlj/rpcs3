@@ -242,6 +242,7 @@ void D3D12GSRender::upload_and_set_vertex_index_data(ID3D12GraphicsCommandList *
 		m_vertex_index_data.m_heap->Unmap(0, &CD3DX12_RANGE(heap_offset, heap_offset + buffer_size));
 
 		UINT offset = 0;
+		m_IASet.clear();
 		// Bind attributes
 		for (int index = 0; index < rsx::limits::vertex_count; ++index)
 		{
