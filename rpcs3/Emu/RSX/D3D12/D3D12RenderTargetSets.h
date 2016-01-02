@@ -12,8 +12,8 @@ struct render_targets
 	ID3D12Resource *bound_depth_stencil;
 	u32 bound_depth_stencil_address;
 
-	size_t bind_render_targets(ID3D12Device *, u32 color_format, D3D12_CPU_DESCRIPTOR_HANDLE);
-	size_t bind_depth_stencil(ID3D12Device *, u32 depth_format, D3D12_CPU_DESCRIPTOR_HANDLE);
+	size_t bind_render_targets(ID3D12Device *, u32 color_format, bool antialias, D3D12_CPU_DESCRIPTOR_HANDLE);
+	size_t bind_depth_stencil(ID3D12Device *, u32 depth_format, bool antialias, D3D12_CPU_DESCRIPTOR_HANDLE);
 
 	/**
 	 * If render target already exists at address, issue state change operation on cmdList.
@@ -21,10 +21,10 @@ struct render_targets
 	 * returns the corresponding render target resource.
 	 */
 	ID3D12Resource *bind_address_as_render_targets(ID3D12Device *device, ID3D12GraphicsCommandList *cmdList, u32 address,
-		size_t width, size_t height, u8 surfaceColorFormat, const std::array<float, 4> &clearColor, ComPtr<ID3D12Resource> &dirtyDS);
+		size_t width, size_t height, u8 surfaceColorFormat, u8 antialias, const std::array<float, 4> &clearColor, ComPtr<ID3D12Resource> &dirtyDS);
 
 	ID3D12Resource *bind_address_as_depth_stencil(ID3D12Device *device, ID3D12GraphicsCommandList *cmdList, u32 address,
-		size_t width, size_t height, u8 surfaceDepthFormat, float depthClear, u8 stencilClear, ComPtr<ID3D12Resource> &dirtyDS);
+		size_t width, size_t height, u8 surfaceDepthFormat, u8 antialias, float depthClear, u8 stencilClear, ComPtr<ID3D12Resource> &dirtyDS);
 
 	void init(ID3D12Device *device);
 };

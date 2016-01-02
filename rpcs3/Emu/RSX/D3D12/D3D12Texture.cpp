@@ -197,6 +197,25 @@ void D3D12GSRender::upload_and_bind_textures(ID3D12GraphicsCommandList *command_
 			}
 			vram_texture = candidate;
 			is_render_target = true;
+			if (vram_texture->GetDesc().SampleDesc.Count > 1)
+			{
+				DXGI_FORMAT dxgi_format = get_texture_format(format);
+				ComPtr<ID3D12Resource> resolved_texture;
+				CHECK_HRESULT(m_device->CreateCommittedResource(
+					&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+					D3D12_HEAP_FLAG_NONE,
+					&CD3DX12_RESOURCE_DESC::Tex2D(dxgi_format, (UINT)w, (UINT)h),
+					D3D12_RESOURCE_STATE_RESOLVE_DEST,
+					nullptr,
+					IID_PPV_ARGS(resolved_texture.GetAddressOf())
+					));
+				command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(vram_texture, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RESOLVE_SOURCE));
+				command_list->ResolveSubresource(resolved_texture.Get(), 0, vram_texture, 0, dxgi_format);
+				command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(vram_texture, D3D12_RESOURCE_STATE_RESOLVE_SOURCE, D3D12_RESOURCE_STATE_GENERIC_READ));
+				command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(resolved_texture.Get(), D3D12_RESOURCE_STATE_RESOLVE_DEST, D3D12_RESOURCE_STATE_GENERIC_READ));
+				get_current_resource_storage().dirty_textures.push_back(resolved_texture);
+				vram_texture = resolved_texture.Get();
+			}
 		}
 		else if (ItDS != m_rtts.depth_stencil_storage.end())
 		{
@@ -231,8 +250,13 @@ void D3D12GSRender::upload_and_bind_textures(ID3D12GraphicsCommandList *command_
 		}
 		else
 		{
-			shared_resource_view_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-			shared_resource_view_desc.Texture2D.MipLevels = textures[i].mipmap();
+//			if (vram_texture->GetDesc().SampleDesc.Count > 1)
+//				shared_resource_view_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
+//			else
+			{
+				shared_resource_view_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+				shared_resource_view_desc.Texture2D.MipLevels = textures[i].mipmap();
+			}
 		}
 		shared_resource_view_desc.Format = get_texture_format(format);
 

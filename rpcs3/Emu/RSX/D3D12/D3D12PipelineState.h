@@ -13,6 +13,7 @@ struct D3D12PipelineProperties
 	std::vector<D3D12_INPUT_ELEMENT_DESC> IASet;
 	D3D12_BLEND_DESC Blend;
 	unsigned numMRT : 3;
+	unsigned sample_count;
 	D3D12_DEPTH_STENCIL_DESC DepthStencil;
 	D3D12_RASTERIZER_DESC Rasterization;
 	D3D12_INDEX_BUFFER_STRIP_CUT_VALUE CutValue;
@@ -20,6 +21,8 @@ struct D3D12PipelineProperties
 	bool operator==(const D3D12PipelineProperties &in) const
 	{
 		if (IASet.size() != in.IASet.size())
+			return false;
+		if (sample_count != in.sample_count)
 			return false;
 		for (unsigned i = 0; i < IASet.size(); i++)
 		{
@@ -214,7 +217,8 @@ struct D3D12Traits
 
 		graphicPipelineStateDesc.InputLayout.pInputElementDescs = completed_IA_desc.data();
 		graphicPipelineStateDesc.InputLayout.NumElements = (UINT)completed_IA_desc.size();
-		graphicPipelineStateDesc.SampleDesc.Count = 1;
+		graphicPipelineStateDesc.SampleDesc.Count = pipelineProperties.sample_count;
+		graphicPipelineStateDesc.RasterizerState.MultisampleEnable = pipelineProperties.sample_count > 1;
 		graphicPipelineStateDesc.SampleMask = UINT_MAX;
 		graphicPipelineStateDesc.NodeMask = 1;
 

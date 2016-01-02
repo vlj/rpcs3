@@ -253,6 +253,8 @@ bool D3D12GSRender::load_program()
 	for (unsigned i = 0; i < prop.numMRT; i++)
 		prop.Blend.RenderTarget[i].RenderTargetWriteMask = mask;
 
+	prop.sample_count = ((rsx::method_registers[NV4097_SET_ANTI_ALIASING_CONTROL] & 0x1) && !!m_surface.antialias) ? 4 : 1;
+
 	prop.IASet = m_IASet;
 	if (!!rsx::method_registers[NV4097_SET_RESTART_INDEX_ENABLE])
 		prop.CutValue = ((rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4) == CELL_GCM_DRAW_INDEX_ARRAY_TYPE_32) ?
