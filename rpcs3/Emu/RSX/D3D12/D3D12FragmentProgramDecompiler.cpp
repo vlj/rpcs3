@@ -142,6 +142,13 @@ void D3D12FragmentDecompiler::insertConstants(std::stringstream & OS)
 
 void D3D12FragmentDecompiler::insertMainStart(std::stringstream & OS)
 {
+	// "lib" function
+	OS << "float4 div_legacy(float4 num, float4 denum)\n";
+	OS << "{\n";
+	OS << "	return (num == float4(0., 0., 0., 0.)) ? float4(0., 0., 0., 0.) : num / denum;\n";
+	OS << "}\n";
+
+
 	const std::set<std::string> output_value =
 	{
 		"r0", "r1", "r2", "r3", "r4",
