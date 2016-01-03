@@ -52,4 +52,4 @@ void stream_vector(gsl::span<float, 4> dst, u32 x, u32 y, u32 z, u32 w);
 /**
  * Stream a 128 bits vector from src to dst.
  */
-void stream_vector_from_memory(void *dst, void *src);
+void stream_vector_from_memory(gsl::span<float, 4> dst, gsl::span<const float, 4> src);

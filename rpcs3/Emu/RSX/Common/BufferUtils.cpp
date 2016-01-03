@@ -311,8 +311,8 @@ void stream_vector(gsl::span<float, 4> dst, u32 x, u32 y, u32 z, u32 w)
 	_mm_stream_si128((__m128i*)dst.data(), vector);
 }
 
-void stream_vector_from_memory(void *dst, void *src)
+void stream_vector_from_memory(gsl::span<float, 4> dst, gsl::span<const float, 4> src)
 {
-	const __m128i &vector = _mm_loadu_si128((__m128i*)src);
-	_mm_stream_si128((__m128i*)dst, vector);
+	const __m128i &vector = _mm_loadu_si128((__m128i*)src.data());
+	_mm_stream_si128((__m128i*)dst.data(), vector);
 }

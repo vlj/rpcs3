@@ -697,7 +697,7 @@ bool GLGSRender::load_program()
 
 	glBindBuffer(GL_UNIFORM_BUFFER, m_vertex_constants_buffer.id());
 	buffer = (float*)glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
-	fill_vertex_program_constants_data(buffer);
+	fill_vertex_program_constants_data({ buffer, 2048 });
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 
 	glBindBuffer(GL_UNIFORM_BUFFER, m_fragment_constants_buffer.id());

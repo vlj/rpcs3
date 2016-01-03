@@ -1191,12 +1191,12 @@ namespace rsx
 	* Fill buffer with vertex program constants.
 	* Buffer must be at least 512 float4 wide.
 	*/
-	void thread::fill_vertex_program_constants_data(void *buffer)
+	void thread::fill_vertex_program_constants_data(gsl::span<float, 2048> buffer)
 	{
 		for (const auto &entry : transform_constants)
 			local_transform_constants[entry.first] = entry.second;
 		for (const auto &entry : local_transform_constants)
-			stream_vector_from_memory((char*)buffer + entry.first * 4 * sizeof(float), (void*)entry.second.rgba);
+			stream_vector_from_memory(buffer.subspan(entry.first * 4, 4), entry.second.rgba);
 	}
 
 	u64 thread::timestamp() const

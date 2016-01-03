@@ -462,7 +462,7 @@ namespace rsx
 		* Fill buffer with vertex program constants.
 		* Buffer must be at least 512 float4 wide.
 		*/
-		void fill_vertex_program_constants_data(void *buffer);
+		void fill_vertex_program_constants_data(gsl::span<float, 2048> buffer);
 
 		/**
 		 * Copy rtt values to buffer.
