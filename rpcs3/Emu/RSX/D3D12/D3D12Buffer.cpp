@@ -120,6 +120,13 @@ void D3D12GSRender::load_vertex_index_data(u32 first, u32 count)
 	m_rendering_info.m_indexed = true;
 }
 
+struct shader_state_constants
+{
+	float scale_offset_matrix[16];
+	int is_alpha_tested;
+	float alpha_ref;
+};
+
 void D3D12GSRender::upload_and_bind_scale_offset_matrix(size_t descriptorIndex)
 {
 	assert(m_constants_data.can_alloc(256));
@@ -129,7 +136,8 @@ void D3D12GSRender::upload_and_bind_scale_offset_matrix(size_t descriptorIndex)
 	// Separate constant buffer
 	void *mapped_buffer;
 	CHECK_HRESULT(m_constants_data.m_heap->Map(0, &CD3DX12_RANGE(heap_offset, heap_offset + 256), &mapped_buffer));
-	fill_scale_offset_data({ (float*)((char*)mapped_buffer + heap_offset), 256 });
+	shader_state_constants *constants = (shader_state_constants*)((char*)mapped_buffer + heap_offset);
+	fill_scale_offset_data( constants->scale_offset_matrix );
 	int is_alpha_tested = !!(rsx::method_registers[NV4097_SET_ALPHA_TEST_ENABLE]);
 	float alpha_ref = (float&)rsx::method_registers[NV4097_SET_ALPHA_REF];
 	memcpy((char*)mapped_buffer + heap_offset + 16 * sizeof(float), &is_alpha_tested, sizeof(int));
