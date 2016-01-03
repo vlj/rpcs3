@@ -47,7 +47,7 @@ void write_index_array_for_non_indexed_non_native_primitive_to_buffer(char* dst,
 /**
  * Stream a 128 bits vector to dst.
  */
-void stream_vector(void *dst, u32 x, u32 y, u32 z, u32 w);
+void stream_vector(gsl::span<float, 4> dst, u32 x, u32 y, u32 z, u32 w);
 
 /**
  * Stream a 128 bits vector from src to dst.

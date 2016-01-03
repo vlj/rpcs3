@@ -47,8 +47,8 @@ D3D12_SAMPLER_DESC get_sampler_desc(const rsx::texture &texture)
  */
 ComPtr<ID3D12Resource> upload_single_texture(
 	const rsx::texture &texture,
-	ID3D12Device *device,
-	ID3D12GraphicsCommandList *command_list,
+	gsl::not_null<ID3D12Device *> device,
+	gsl::not_null<ID3D12GraphicsCommandList *> command_list,
 	data_heap<ID3D12Resource, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT> &texture_buffer_heap)
 {
 	size_t w = texture.width(), h = texture.height();
@@ -96,7 +96,7 @@ ComPtr<ID3D12Resource> upload_single_texture(
 */
 void update_existing_texture(
 	const rsx::texture &texture,
-	ID3D12GraphicsCommandList *command_list,
+	gsl::not_null<ID3D12GraphicsCommandList *> command_list,
 	data_heap<ID3D12Resource, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT> &texture_buffer_heap,
 	ID3D12Resource *existing_texture)
 {

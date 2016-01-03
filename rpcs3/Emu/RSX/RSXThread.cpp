@@ -1160,7 +1160,7 @@ namespace rsx
 		return "rsx::thread"s;
 	}
 
-	void thread::fill_scale_offset_data(void *buffer, bool is_d3d) const
+	void thread::fill_scale_offset_data(gsl::span<float, 16> buffer, bool is_d3d) const
 	{
 		int clip_w = rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL] >> 16;
 		int clip_h = rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL] >> 16;
@@ -1182,9 +1182,9 @@ namespace rsx
 		float one = 1.f;
 
 		stream_vector(buffer, (u32&)scale_x, 0, 0, (u32&)offset_x);
-		stream_vector((char*)buffer + 16, 0, (u32&)scale_y, 0, (u32&)offset_y);
-		stream_vector((char*)buffer + 32, 0, 0, (u32&)scale_z, (u32&)offset_z);
-		stream_vector((char*)buffer + 48, 0, 0, 0, (u32&)one);
+		stream_vector(buffer.subspan<4, 4>(), 0, (u32&)scale_y, 0, (u32&)offset_y);
+		stream_vector(buffer.subspan<8, 4>(), 0, 0, (u32&)scale_z, (u32&)offset_z);
+		stream_vector(buffer.subspan<12, 4>(), 0, 0, 0, (u32&)one);
 	}
 
 	/**

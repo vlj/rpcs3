@@ -691,19 +691,19 @@ bool GLGSRender::load_program()
 #endif
 	glBindBuffer(GL_UNIFORM_BUFFER, m_scale_offset_buffer.id());
 
-	void *buffer = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
-	fill_scale_offset_data(buffer, false);
+	float *buffer = (float*)glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+	fill_scale_offset_data({ buffer, 16 * sizeof(float) }, false);
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 
 	glBindBuffer(GL_UNIFORM_BUFFER, m_vertex_constants_buffer.id());
-	buffer = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+	buffer = (float*)glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
 	fill_vertex_program_constants_data(buffer);
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 
 	glBindBuffer(GL_UNIFORM_BUFFER, m_fragment_constants_buffer.id());
 	size_t buffer_size = m_prog_buffer.get_fragment_constants_buffer_size(&fragment_program);
 	glBufferData(GL_UNIFORM_BUFFER, buffer_size, nullptr, GL_STATIC_DRAW);
-	buffer = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+	buffer = (float*)glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
 	m_prog_buffer.fill_fragment_constans_buffer(buffer, &fragment_program);
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 

@@ -7,26 +7,6 @@
 #include "../Common/BufferUtils.h"
 #include "D3D12Formats.h"
 
-namespace
-{
-/**
- * 
- */
-D3D12_GPU_VIRTUAL_ADDRESS createVertexBuffer(const rsx::data_array_format_info &vertex_array_desc, const std::vector<u8> &vertex_data, ID3D12Device *device, data_heap<ID3D12Resource, 65536> &vertex_index_heap)
-{
-	size_t buffer_size = vertex_data.size();
-	assert(vertex_index_heap.can_alloc(buffer_size));
-	size_t heap_offset = vertex_index_heap.alloc(buffer_size);
-
-	void *buffer;
-	CHECK_HRESULT(vertex_index_heap.m_heap->Map(0, &CD3DX12_RANGE(heap_offset, heap_offset + buffer_size), (void**)&buffer));
-	void *bufferMap = (char*)buffer + heap_offset;
-	memcpy(bufferMap, vertex_data.data(), vertex_data.size());
-	vertex_index_heap.m_heap->Unmap(0, &CD3DX12_RANGE(heap_offset, heap_offset + buffer_size));
-	return vertex_index_heap.m_heap->GetGPUVirtualAddress() + heap_offset;
-}
-
-}
 
 void D3D12GSRender::load_vertex_data(u32 first, u32 count)
 {
@@ -149,7 +129,7 @@ void D3D12GSRender::upload_and_bind_scale_offset_matrix(size_t descriptorIndex)
 	// Separate constant buffer
 	void *mapped_buffer;
 	CHECK_HRESULT(m_constants_data.m_heap->Map(0, &CD3DX12_RANGE(heap_offset, heap_offset + 256), &mapped_buffer));
-	fill_scale_offset_data((char*)mapped_buffer + heap_offset);
+	fill_scale_offset_data({ (float*)((char*)mapped_buffer + heap_offset), 256 });
 	int is_alpha_tested = !!(rsx::method_registers[NV4097_SET_ALPHA_TEST_ENABLE]);
 	float alpha_ref = (float&)rsx::method_registers[NV4097_SET_ALPHA_REF];
 	memcpy((char*)mapped_buffer + heap_offset + 16 * sizeof(float), &is_alpha_tested, sizeof(int));
