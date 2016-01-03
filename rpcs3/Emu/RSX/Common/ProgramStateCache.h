@@ -339,7 +339,7 @@ public:
 		return 0;
 	}
 
-	void fill_fragment_constans_buffer(void *buffer, const RSXFragmentProgram *fragment_program) const
+	void fill_fragment_constants_buffer(gsl::span<float> buffer, const RSXFragmentProgram *fragment_program) const
 	{
 		typename binary2FS::const_iterator It = m_cacheFS.find(vm::base(fragment_program->addr));
 		if (It == m_cacheFS.end())
@@ -349,14 +349,16 @@ public:
 			0x6, 0x7, 0x4, 0x5,
 			0x2, 0x3, 0x0, 0x1);
 
+		Expects((size_t)buffer.size_bytes() >= It->second.FragmentConstantOffsetCache.size() * 4u);
+
 		size_t offset = 0;
 		for (size_t offset_in_fragment_program : It->second.FragmentConstantOffsetCache)
 		{
 			void *data = vm::base(fragment_program->addr + (u32)offset_in_fragment_program);
 			const __m128i &vector = _mm_loadu_si128((__m128i*)data);
 			const __m128i &shuffled_vector = _mm_shuffle_epi8(vector, mask);
-			_mm_stream_si128((__m128i*)((char*)buffer + offset), shuffled_vector);
-			offset += 4 * sizeof(u32);
+			_mm_stream_si128((__m128i*)buffer.subspan(offset, 4).data(), shuffled_vector);
+			offset += 4;
 		}
 	}
 };

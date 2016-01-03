@@ -202,7 +202,8 @@ void D3D12GSRender::upload_and_bind_fragment_shader_constants(size_t descriptor_
 	size_t offset = 0;
 	void *mapped_buffer;
 	CHECK_HRESULT(m_constants_data.m_heap->Map(0, &CD3DX12_RANGE(heap_offset, heap_offset + buffer_size), &mapped_buffer));
-	m_pso_cache.fill_fragment_constans_buffer((char*)mapped_buffer + heap_offset, &fragment_program);
+	float *buffer = (float*)((char*)mapped_buffer + heap_offset);
+	m_pso_cache.fill_fragment_constants_buffer({ buffer, gsl::narrow<int>(buffer_size / sizeof(float)) }, &fragment_program);
 	m_constants_data.m_heap->Unmap(0, &CD3DX12_RANGE(heap_offset, heap_offset + buffer_size));
 
 	D3D12_CONSTANT_BUFFER_VIEW_DESC constant_buffer_view_desc = {

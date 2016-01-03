@@ -704,7 +704,7 @@ bool GLGSRender::load_program()
 	size_t buffer_size = m_prog_buffer.get_fragment_constants_buffer_size(&fragment_program);
 	glBufferData(GL_UNIFORM_BUFFER, buffer_size, nullptr, GL_STATIC_DRAW);
 	buffer = (float*)glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
-	m_prog_buffer.fill_fragment_constans_buffer(buffer, &fragment_program);
+	m_prog_buffer.fill_fragment_constants_buffer({ buffer, gsl::narrow<int>(buffer_size / sizeof(float)) }, &fragment_program);
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 
 	return true;
