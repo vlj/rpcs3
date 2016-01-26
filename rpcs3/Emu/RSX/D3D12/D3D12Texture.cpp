@@ -47,7 +47,11 @@ namespace
 		const u8 format = texture.format() & ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN);
 		DXGI_FORMAT dxgi_format = get_texture_format(format);
 
-		if (texture.dimension() == 2) // 2D texture or cubemap
+		if (texture.dimension() == 1) // 1D texture or cubemap
+		{
+			return CD3DX12_RESOURCE_DESC::Tex2D(dxgi_format, texture.width(), 1, 1, texture.mipmap());
+		}
+		else if (texture.dimension() == 2) // 2D texture or cubemap
 		{
 //			if (texture.depth() < 2);
 			size_t depth = (texture.cubemap()) ? 6 : 1;
