@@ -17,6 +17,7 @@ PFN_D3D12_GET_DEBUG_INTERFACE wrapD3D12GetDebugInterface;
 PFN_D3D12_SERIALIZE_ROOT_SIGNATURE wrapD3D12SerializeRootSignature;
 PFN_D3D11ON12_CREATE_DEVICE wrapD3D11On12CreateDevice;
 pD3DCompile wrapD3DCompile;
+pD3DReadFileToBlob wrapD3DReadFileToBlob;
 
 namespace
 {
@@ -34,6 +35,7 @@ void loadD3D12FunctionPointers()
 	wrapD3D11On12CreateDevice = (PFN_D3D11ON12_CREATE_DEVICE)GetProcAddress(D3D11Module, "D3D11On12CreateDevice");
 	CHECK_ASSERTION(D3DCompiler = LoadLibrary(L"d3dcompiler_47.dll"));
 	wrapD3DCompile = (pD3DCompile)GetProcAddress(D3DCompiler, "D3DCompile");
+	wrapD3DReadFileToBlob = (pD3DReadFileToBlob)GetProcAddress(D3DCompiler, "D3DReadFileToBlob");
 }
 
 void unloadD3D12FunctionPointers()

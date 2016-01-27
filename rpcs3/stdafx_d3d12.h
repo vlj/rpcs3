@@ -14,4 +14,7 @@
 #pragma comment(lib, "DXGI")
 #pragma comment(lib, "Dwrite")
 
+typedef HRESULT(WINAPI *pD3DReadFileToBlob)
+(_In_ LPCWSTR pFileName, _Out_ ID3DBlob** ppContents);
+
 #endif

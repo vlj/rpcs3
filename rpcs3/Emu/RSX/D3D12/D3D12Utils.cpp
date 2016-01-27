@@ -7,6 +7,7 @@
 
 extern PFN_D3D12_SERIALIZE_ROOT_SIGNATURE wrapD3D12SerializeRootSignature;
 extern pD3DCompile wrapD3DCompile;
+extern pD3DReadFileToBlob wrapD3DReadFileToBlob;
 
  /**
  * returns bytecode and root signature of a Compute Shader converting texture from
@@ -49,50 +50,11 @@ std::pair<ID3DBlob *, ID3DBlob *> compileF32toU8CS()
 
 void D3D12GSRender::shader::init(ID3D12Device *device, ID3D12CommandQueue *gfx_command_queue)
 {
-	const char *fsCode = STRINGIFY(
-		Texture2D InputTexture : register(t0); \n
-		sampler bilinearSampler : register(s0); \n
-
-	struct PixelInput \n
-	{ \n
-		float4 Pos : SV_POSITION; \n
-		float2 TexCoords : TEXCOORDS0; \n
-	}; \n
-
-		float4 main(PixelInput In) : SV_TARGET \n
-	{ \n
-		return InputTexture.Sample(bilinearSampler, In.TexCoords); \n
-	}
-	);
-
 	Microsoft::WRL::ComPtr<ID3DBlob> fsBytecode;
-	Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
-	CHECK_HRESULT(wrapD3DCompile(fsCode, strlen(fsCode), "test", nullptr, nullptr, "main", "ps_5_0", 0, 0, &fsBytecode, errorBlob.GetAddressOf()));
-
-	const char *vsCode = STRINGIFY(
-	struct VertexInput \n
-	{ \n
-		float2 Pos : POSITION; \n
-		float2 TexCoords : TEXCOORDS0; \n
-	}; \n
-
-	struct PixelInput \n
-	{ \n
-		float4 Pos : SV_POSITION; \n
-		float2 TexCoords : TEXCOORDS0; \n
-	}; \n
-
-		PixelInput main(VertexInput In) \n
-	{ \n
-		PixelInput Out; \n
-		Out.Pos = float4(In.Pos, 0., 1.); \n
-		Out.TexCoords = In.TexCoords; \n
-		return Out; \n
-	}
-	);
+	wrapD3DReadFileToBlob(L"pixel_shader_passthrough.cso", fsBytecode.GetAddressOf());
 
 	Microsoft::WRL::ComPtr<ID3DBlob> vsBytecode;
-	CHECK_HRESULT(wrapD3DCompile(vsCode, strlen(vsCode), "test", nullptr, nullptr, "main", "vs_5_0", 0, 0, &vsBytecode, errorBlob.GetAddressOf()));
+	wrapD3DReadFileToBlob(L"vertex_shader_passthrough.cso", vsBytecode.GetAddressOf());
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 	psoDesc.PS.BytecodeLength = fsBytecode->GetBufferSize();
@@ -141,7 +103,7 @@ void D3D12GSRender::shader::init(ID3D12Device *device, ID3D12CommandQueue *gfx_c
 	rootSignatureDesc.pParameters = RP;
 
 	Microsoft::WRL::ComPtr<ID3DBlob> rootSignatureBlob;
-
+	Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
 	CHECK_HRESULT(wrapD3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootSignatureBlob, &errorBlob));
 	CHECK_HRESULT(device->CreateRootSignature(0, rootSignatureBlob->GetBufferPointer(), rootSignatureBlob->GetBufferSize(), IID_PPV_ARGS(&root_signature)));
 

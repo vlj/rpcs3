@@ -6,6 +6,9 @@
       <Extensions>
       </Extensions>
     </Filter>
+    <Filter Include="hlsl">
+      <UniqueIdentifier>{224f93d2-f4a8-4638-b6c8-38da2198afd3}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Emu\RSX\D3D12\D3D12CommonDecompiler.h">
@@ -79,5 +82,13 @@
     <ClCompile Include="Emu\RSX\D3D12\D3D12MemoryHelpers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Emu\RSX\D3D12\vertex_shader_passthrough.hlsl">
+      <Filter>hlsl</Filter>
+    </FxCompile>
+    <FxCompile Include="Emu\RSX\D3D12\pixel_shader_passthrough.hlsl">
+      <Filter>hlsl</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>
