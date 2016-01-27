@@ -1696,7 +1696,7 @@ void ppu_interpreter::TW(PPUThread& CPU, ppu_opcode_t op)
 		((u32)a < (u32)b && (op.bo & 0x2)) ||
 		((u32)a >(u32)b && (op.bo & 0x1)))
 	{
-		throw EXCEPTION("");
+		//throw EXCEPTION("");
 	}
 }
 

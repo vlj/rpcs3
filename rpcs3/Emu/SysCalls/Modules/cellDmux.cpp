@@ -678,7 +678,7 @@ void dmuxOpen(u32 dmux_id) // TODO: call from the constructor
 				//}
 				else
 				{
-					throw EXCEPTION("dmuxEnableEs: unknown filter (0x%x, 0x%x, 0x%x, 0x%x)", es.fidMajor, es.fidMinor, es.sup1, es.sup2);
+					//throw EXCEPTION("dmuxEnableEs: unknown filter (0x%x, 0x%x, 0x%x, 0x%x)", es.fidMajor, es.fidMinor, es.sup1, es.sup2);
 				}
 				es.dmux = &dmux;
 				break;

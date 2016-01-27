@@ -209,6 +209,26 @@ D3D12GSRender::D3D12GSRender()
 			)
 		);
 
+	CHECK_HRESULT(
+		m_device->CreateCommittedResource(
+			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+			D3D12_HEAP_FLAG_NONE,
+			&CD3DX12_RESOURCE_DESC::Buffer(4096 * 4096 * 4),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			nullptr,
+			IID_PPV_ARGS(m_texture_reinterpret_buffer.GetAddressOf())
+			)
+		);
+
+	for (unsigned i = 0; i < 16; i++)
+	{
+		CHECK_HRESULT(
+			m_device->CreateHeap(
+				&CD3DX12_HEAP_DESC(4096 * 4096 * 4, D3D12_HEAP_TYPE_DEFAULT, 0, D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES),
+				IID_PPV_ARGS(m_texture_reinterpret_heap[i].GetAddressOf()))
+			);
+	}
+
 	if (rpcs3::config.rsx.d3d12.overlay.value())
 		init_d2d_structures();
 }

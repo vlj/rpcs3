@@ -117,6 +117,10 @@ private:
 	data_heap m_readback_resources;
 	ComPtr<ID3D12Resource> m_vertex_buffer_data;
 
+
+	ComPtr<ID3D12Resource> m_texture_reinterpret_buffer; // Used to reinterpret texture
+	ComPtr<ID3D12Heap> m_texture_reinterpret_heap[16];
+
 	rsx::render_targets m_rtts;
 
 	INT m_descriptor_stride_srv_cbv_uav;

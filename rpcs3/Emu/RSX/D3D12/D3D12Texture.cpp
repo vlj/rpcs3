@@ -173,7 +173,7 @@ void D3D12GSRender::upload_and_bind_textures(ID3D12GraphicsCommandList *command_
 			used_texture++;
 			continue;
 		}
-		size_t w = textures[i].width(), h = textures[i].height();
+		u16 w = textures[i].width(), h = textures[i].height();
 //		if (!w || !h) continue;
 
 		const u32 texaddr = rsx::get_address(textures[i].offset(), textures[i].location());
@@ -192,6 +192,36 @@ void D3D12GSRender::upload_and_bind_textures(ID3D12GraphicsCommandList *command_
 		else if (vram_texture = m_rtts.get_texture_from_depth_stencil_if_applicable(texaddr))
 		{
 			is_depth_stencil_texture = true;
+			if (format == CELL_GCM_TEXTURE_A8R8G8B8)
+			{
+				UINT width = w;
+				UINT height = h;
+				UINT row_pitch = align(width * 4, 256);
+				command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(vram_texture, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COPY_SOURCE));
+				command_list->CopyTextureRegion(&CD3DX12_TEXTURE_COPY_LOCATION(m_texture_reinterpret_buffer.Get(), { 0, { DXGI_FORMAT_R32_TYPELESS, width, height, 1, row_pitch } }), 0, 0, 0,
+					&CD3DX12_TEXTURE_COPY_LOCATION(vram_texture, 0), nullptr);
+				command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(vram_texture, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE));
+				command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_texture_reinterpret_buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE));
+
+				ComPtr<ID3D12Resource> reinterpreted_depth;
+				CHECK_HRESULT(m_device->CreatePlacedResource(
+					m_texture_reinterpret_heap[i].Get(),
+					0,
+					&CD3DX12_RESOURCE_DESC::Tex2D(get_texture_format(format), vram_texture->GetDesc().Width, vram_texture->GetDesc().Height),
+					D3D12_RESOURCE_STATE_COPY_DEST,
+					nullptr,
+					IID_PPV_ARGS(reinterpreted_depth.GetAddressOf())
+					));
+				command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Aliasing(nullptr, reinterpreted_depth.Get()));
+				command_list->CopyTextureRegion(&CD3DX12_TEXTURE_COPY_LOCATION(reinterpreted_depth.Get(), 0), 0, 0, 0,
+					&CD3DX12_TEXTURE_COPY_LOCATION(m_texture_reinterpret_buffer.Get(), { 0, { get_texture_format(format), width, height, 1, row_pitch } }), nullptr);
+
+				command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_texture_reinterpret_buffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST));
+				command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(reinterpreted_depth.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_GENERIC_READ));
+
+				vram_texture = reinterpreted_depth.Get();
+				get_current_resource_storage().dirty_textures.push_back(reinterpreted_depth);
+			}
 		}
 		else if (cached_texture != nullptr && (cached_texture->first == texture_entry(format, w, h, textures[i].depth(), textures[i].mipmap())))
 		{
@@ -252,6 +282,14 @@ void D3D12GSRender::upload_and_bind_textures(ID3D12GraphicsCommandList *command_
 		case CELL_GCM_TEXTURE_R5G6B5:
 			shared_resource_view_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 			break;
+		case CELL_GCM_TEXTURE_DEPTH24_D8:
+		case CELL_GCM_TEXTURE_DEPTH24_D8_FLOAT:
+			shared_resource_view_desc.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0);
+			break;
 		case CELL_GCM_TEXTURE_A8R8G8B8:
 		case CELL_GCM_TEXTURE_D8R8G8B8:
 		{
@@ -281,12 +319,11 @@ void D3D12GSRender::upload_and_bind_textures(ID3D12GraphicsCommandList *command_
 			}
 			else if (is_depth_stencil_texture)
 			{
-				shared_resource_view_desc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
 				shared_resource_view_desc.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(
+					D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_2,
+					D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_1,
 					D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
-					D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
-					D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
-					D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0);
+					D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_3);
 			}
 			else
 			{
@@ -314,8 +351,6 @@ void D3D12GSRender::upload_and_bind_textures(ID3D12GraphicsCommandList *command_
 		case CELL_GCM_TEXTURE_COMPRESSED_DXT45:
 		case CELL_GCM_TEXTURE_G8B8:
 		case CELL_GCM_TEXTURE_R6G5B5:
-		case CELL_GCM_TEXTURE_DEPTH24_D8:
-		case CELL_GCM_TEXTURE_DEPTH24_D8_FLOAT:
 		case CELL_GCM_TEXTURE_DEPTH16:
 		case CELL_GCM_TEXTURE_DEPTH16_FLOAT:
 		case CELL_GCM_TEXTURE_X16:
