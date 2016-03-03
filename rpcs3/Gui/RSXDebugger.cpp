@@ -418,6 +418,14 @@ namespace
 			auto ptr = gsl::as_span<const u8>(orig_buffer);
 			return{ ptr[3 + idx * 4], ptr[2 + idx * 4], ptr[1 + idx * 4] };
 		}
+		case rsx::surface_color_format::r5g6b5:
+		{
+			u16 value = gsl::as_span<const u16>(orig_buffer)[idx];
+			u8 blue = value & 0x1F;
+			u8 green = (value >> 5) & 0x3F;
+			u8 red = (value >> 11) & 0x1F;
+			return { static_cast<u8>(255.f * red / 31.f), static_cast<u8>(255.f * green / 63.f), static_cast<u8>(255.f * blue / 31.f) };
+		}
 		case rsx::surface_color_format::w16z16y16x16:
 		{
 			auto ptr = gsl::as_span<const u16>(orig_buffer);
@@ -434,7 +442,6 @@ namespace
 			return{ val0, val1, val2 };
 		}
 		case rsx::surface_color_format::g8b8:
-		case rsx::surface_color_format::r5g6b5:
 		case rsx::surface_color_format::x1r5g5b5_o1r5g5b5:
 		case rsx::surface_color_format::x1r5g5b5_z1r5g5b5:
 		case rsx::surface_color_format::w32z32y32x32:
