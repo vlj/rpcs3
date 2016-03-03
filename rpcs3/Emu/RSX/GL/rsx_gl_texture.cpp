@@ -7,6 +7,37 @@
 #include "../rsx_utils.h"
 #include "../Common/TextureUtils.h"
 
+namespace
+{
+	std::tuple<GLenum, GLenum, GLenum> get_internal_format_format_type(u32 texture_format)
+	{
+		switch (texture_format)
+		{
+		case CELL_GCM_TEXTURE_B8: return std::make_tuple(GL_RGBA, GL_BLUE, GL_UNSIGNED_BYTE);
+		case CELL_GCM_TEXTURE_A1R5G5B5: return std::make_tuple(GL_RGBA, GL_BGRA, GL_UNSIGNED_SHORT_1_5_5_5_REV);
+		case CELL_GCM_TEXTURE_A4R4G4B4: return std::make_tuple(GL_RGBA, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4);
+		case CELL_GCM_TEXTURE_R5G6B5: return std::make_tuple(GL_RGB, GL_RGB, GL_UNSIGNED_SHORT_5_6_5);
+		case CELL_GCM_TEXTURE_A8R8G8B8: return std::make_tuple(GL_RGBA, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8);
+		case CELL_GCM_TEXTURE_G8B8: return std::make_tuple(GL_RGBA, GL_RG, GL_UNSIGNED_BYTE);
+		case CELL_GCM_TEXTURE_R6G5B5: return std::make_tuple(GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE);
+		case CELL_GCM_TEXTURE_DEPTH24_D8: return std::make_tuple(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE);
+		case CELL_GCM_TEXTURE_DEPTH24_D8_FLOAT: return std::make_tuple(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_FLOAT);
+		case CELL_GCM_TEXTURE_DEPTH16: return std::make_tuple(GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_SHORT);
+		case CELL_GCM_TEXTURE_DEPTH16_FLOAT: return std::make_tuple(GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_FLOAT);
+		case CELL_GCM_TEXTURE_X16: return std::make_tuple(GL_RGBA, GL_RED, GL_UNSIGNED_SHORT);
+		case CELL_GCM_TEXTURE_Y16_X16: return std::make_tuple(GL_RGBA, GL_RG, GL_UNSIGNED_SHORT);
+		case CELL_GCM_TEXTURE_R5G5B5A1: return std::make_tuple(GL_RGBA, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1);
+		case CELL_GCM_TEXTURE_W16_Z16_Y16_X16_FLOAT: return std::make_tuple(GL_RGBA, GL_RGBA, GL_HALF_FLOAT);
+		case CELL_GCM_TEXTURE_W32_Z32_Y32_X32_FLOAT: return std::make_tuple(GL_RGBA, GL_RGBA, GL_FLOAT);
+		case CELL_GCM_TEXTURE_X32_FLOAT: return std::make_tuple(GL_RGBA, GL_RED, GL_FLOAT);
+		case CELL_GCM_TEXTURE_D1R5G5B5: return std::make_tuple(GL_RGBA, GL_BGRA, GL_UNSIGNED_SHORT_1_5_5_5_REV);
+		case CELL_GCM_TEXTURE_D8R8G8B8: return std::make_tuple(GL_RGBA, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8);
+		case CELL_GCM_TEXTURE_Y16_X16_FLOAT: return std::make_tuple(GL_RGBA, GL_RG, GL_HALF_FLOAT);
+		}
+		throw EXCEPTION("Unknow texture format %x", texture_format);
+	}
+}
+
 namespace rsx
 {
 	namespace gl

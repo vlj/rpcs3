@@ -93,7 +93,7 @@ SettingsDialog::SettingsDialog(wxWindow *parent, rpcs3::config_t* cfg)
 	if (was_running || Emu.IsReady()) cfg = &rpcs3::state.config;
 
 	static const u32 width = 458;
-	static const u32 height = 400;
+	static const u32 height = 600;
 
 	// Settings panels
 	wxNotebook* nb_config = new wxNotebook(this, wxID_ANY, wxPoint(6, 6), wxSize(width, height));
