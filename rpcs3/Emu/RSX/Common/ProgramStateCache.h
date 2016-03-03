@@ -238,6 +238,28 @@ public:
 		}
 	}
 
+	std::vector<std::tuple<u32, std::array<f32, 4> > > get_current_fragment_constants(const RSXFragmentProgram &fragment_program) const
+	{
+		const auto I = m_fragment_shader_cache.find(fragment_program);
+		if (I == m_fragment_shader_cache.end())
+			throw EXCEPTION("fragment program not found");
+
+		std::vector<std::tuple<u32, std::array<f32, 4> > > result;
+		for (size_t offset_in_fragment_program : I->second.FragmentConstantOffsetCache)
+		{
+			void *data = (char*)fragment_program.addr + (u32)offset_in_fragment_program;
+			u32* casted_data = (u32*)data;
+			std::array<f32, 4> values{
+				reinterpret_cast<f32&>(casted_data[0]),
+				reinterpret_cast<f32&>(casted_data[1]),
+				reinterpret_cast<f32&>(casted_data[2]),
+				reinterpret_cast<f32&>(casted_data[3])
+			};
+			result.emplace_back((u32)offset_in_fragment_program, values);
+		}
+		return result;
+	}
+
 	void clear()
 	{
 		m_storage.clear();

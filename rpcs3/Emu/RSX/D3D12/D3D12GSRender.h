@@ -195,4 +195,5 @@ protected:
 	virtual std::array<std::vector<gsl::byte>, 4> copy_render_targets_to_memory() override;
 	virtual std::array<std::vector<gsl::byte>, 2> copy_depth_stencil_buffer_to_memory() override;
 	virtual std::pair<std::string, std::string> get_programs() const override;
+	virtual std::vector<std::tuple<u32, std::array<f32, 4> > > get_current_fragment_constants() const override;
 };

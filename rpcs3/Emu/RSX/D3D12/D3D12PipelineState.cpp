@@ -244,4 +244,9 @@ std::pair<std::string, std::string> D3D12GSRender::get_programs() const
 {
 	return std::make_pair(m_pso_cache.get_transform_program(m_vertex_program).content, m_pso_cache.get_shader_program(m_fragment_program).content);
 }
+
+std::vector<std::tuple<u32, std::array<f32, 4> > > D3D12GSRender::get_current_fragment_constants() const
+{
+	return m_pso_cache.get_current_fragment_constants(m_fragment_program);
+}
 #endif

@@ -24,6 +24,7 @@ struct frame_capture_data
 		std::array<std::vector<gsl::byte>, 4> color_buffer;
 		rsx::surface_depth_format depth_format;
 		std::array<std::vector<gsl::byte>, 2> depth_stencil;
+		std::vector<std::tuple<u32, std::array<f32, 4> > > fragment_constants;
 	};
 	std::vector<std::pair<u32, u32> > command_queue;
 	std::vector<draw_state> draw_calls;
@@ -378,6 +379,14 @@ namespace rsx
 		virtual std::array<std::vector<gsl::byte>, 4> copy_render_targets_to_memory() {
 			return  std::array<std::vector<gsl::byte>, 4>();
 		};
+
+		/**
+		 * Return fragment constants used by currently bound shader program.
+		 */
+		virtual std::vector<std::tuple<u32, std::array<f32, 4> > > get_current_fragment_constants() const
+		{
+			return std::vector<std::tuple<u32, std::array<f32, 4> > >();
+		}
 
 		/**
 		* Copy depth and stencil content to buffers.

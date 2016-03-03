@@ -163,16 +163,21 @@ RSXDebugger::RSXDebugger(wxWindow* parent)
 	wxPanel* p_buffers = new wxPanel(state_rsx, wxID_ANY);
 	wxPanel* p_transform_program = new wxPanel(state_rsx, wxID_ANY);
 	wxPanel* p_shader_program = new wxPanel(state_rsx, wxID_ANY);
+	wxPanel* p_fragment_constants = new wxPanel(state_rsx, wxID_ANY);
 
 	state_rsx->AddPage(p_buffers, wxT("RTTs and DS"));
 	state_rsx->AddPage(p_transform_program, wxT("Transform program"));
 	state_rsx->AddPage(p_shader_program, wxT("Shader program"));
+	state_rsx->AddPage(p_fragment_constants, wxT("Fragment constants"));
 
 	m_text_transform_program = new wxTextCtrl(p_transform_program, wxID_ANY, "", wxPoint(1, 3), wxSize(720, 720), wxTE_MULTILINE | wxTE_READONLY);
 	m_text_transform_program->SetFont(wxFont(8, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
 
 	m_text_shader_program = new wxTextCtrl(p_shader_program, wxID_ANY, "", wxPoint(1, 3), wxSize(720, 720), wxTE_MULTILINE | wxTE_READONLY);
 	m_text_shader_program->SetFont(wxFont(8, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+
+	m_list_fragment_constants = new wxListView(p_fragment_constants, wxID_ANY, wxPoint(1, 3), wxSize(720, 720));
+	m_list_fragment_constants->SetFont(wxFont(8, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
 
 	//Buffers
 	wxBoxSizer* s_buffers1 = new wxBoxSizer(wxVERTICAL);
@@ -559,6 +564,23 @@ void RSXDebugger::OnClickDrawCalls(wxMouseEvent& event)
 	m_text_transform_program->AppendText(frame_debug.draw_calls[draw_id].programs.first);
 	m_text_shader_program->Clear();
 	m_text_shader_program->AppendText(frame_debug.draw_calls[draw_id].programs.second);
+
+	m_list_fragment_constants->ClearAll();
+	m_list_fragment_constants->InsertColumn(0, "offset", 0, 100);
+	m_list_fragment_constants->InsertColumn(1, "x", 0, 100);
+	m_list_fragment_constants->InsertColumn(2, "y", 0, 100);
+	m_list_fragment_constants->InsertColumn(3, "z", 0, 100);
+	m_list_fragment_constants->InsertColumn(4, "w", 0, 100);
+	size_t i = 0;
+	for (const auto &fragment_constant : frame_debug.draw_calls[draw_id].fragment_constants)
+	{
+		m_list_fragment_constants->InsertItem(i, std::to_string(std::get<0>(fragment_constant)));
+		m_list_fragment_constants->SetItem(i, 1, std::to_string(std::get<1>(fragment_constant)[0]));
+		m_list_fragment_constants->SetItem(i, 2, std::to_string(std::get<1>(fragment_constant)[1]));
+		m_list_fragment_constants->SetItem(i, 3, std::to_string(std::get<1>(fragment_constant)[2]));
+		m_list_fragment_constants->SetItem(i, 4, std::to_string(std::get<1>(fragment_constant)[3]));
+		i++;
+	}
 }
 
 void RSXDebugger::GoToGet(wxCommandEvent& event)

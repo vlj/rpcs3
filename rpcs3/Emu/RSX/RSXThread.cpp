@@ -301,6 +301,7 @@ namespace rsx
 		draw_state.depth_stencil = std::move(copy_depth_stencil_buffer_to_memory());
 		draw_state.programs = get_programs();
 		draw_state.name = name;
+		draw_state.fragment_constants = std::move(get_current_fragment_constants());
 		frame_debug.draw_calls.push_back(draw_state);
 	}
 
