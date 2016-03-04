@@ -249,11 +249,15 @@ public:
 		{
 			void *data = (char*)fragment_program.addr + (u32)offset_in_fragment_program;
 			u32* casted_data = (u32*)data;
+			f32 f0 = casted_data[0] << 16 | casted_data[0] >> 16;
+			f32 f1 = casted_data[1] << 16 | casted_data[1] >> 16;
+			f32 f2 = casted_data[2] << 16 | casted_data[2] >> 16;
+			f32 f3 = casted_data[3] << 16 | casted_data[3] >> 16;
 			std::array<f32, 4> values{
-				reinterpret_cast<f32&>(casted_data[0]),
-				reinterpret_cast<f32&>(casted_data[1]),
-				reinterpret_cast<f32&>(casted_data[2]),
-				reinterpret_cast<f32&>(casted_data[3])
+				reinterpret_cast<f32&>(f0),
+				reinterpret_cast<f32&>(f1),
+				reinterpret_cast<f32&>(f2),
+				reinterpret_cast<f32&>(f3)
 			};
 			result.emplace_back((u32)offset_in_fragment_program, values);
 		}
