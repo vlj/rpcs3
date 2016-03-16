@@ -382,202 +382,92 @@ namespace vk
 			}
 		}
 
+		namespace
+		{
+			std::tuple<VkPipelineLayout, VkDescriptorSetLayout> get_shared_pipeline_layout(VkDevice dev)
+			{
+				std::array<VkDescriptorSetLayoutBinding, 35> bindings = {};
+
+				size_t idx = 0;
+				// Vertex buffer
+				for (int i = 0; i < 16; i++)
+				{
+					bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+					bindings[idx].descriptorCount = 1;
+					bindings[idx].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+					bindings[idx].binding = 3 + i;
+					idx++;
+				}
+
+				bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+				bindings[idx].descriptorCount = 1;
+				bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+				bindings[idx].binding = 2;
+
+				idx++;
+
+				bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+				bindings[idx].descriptorCount = 1;
+				bindings[idx].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+				bindings[idx].binding = 1;
+
+				idx++;
+
+				for (int i = 0; i < 16; i++)
+				{
+					bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+					bindings[idx].descriptorCount = 1;
+					bindings[idx].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+					bindings[idx].binding = 19 + i;
+					idx++;
+				}
+
+				bindings[idx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+				bindings[idx].descriptorCount = 1;
+				bindings[idx].stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS;
+				bindings[idx].binding = 0;
+
+				VkDescriptorSetLayoutCreateInfo infos = {};
+				infos.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+				infos.pBindings = bindings.data();
+				infos.bindingCount = bindings.size();
+
+				VkDescriptorSetLayout set_layout;
+				CHECK_RESULT(vkCreateDescriptorSetLayout(dev, &infos, nullptr, &set_layout));
+
+				VkPipelineLayoutCreateInfo layout_info = {};
+				layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+				layout_info.setLayoutCount = 1;
+				layout_info.pSetLayouts = &set_layout;
+
+				VkPipelineLayout result;
+				CHECK_RESULT(vkCreatePipelineLayout(dev, &layout_info, nullptr, &result));
+				return std::make_tuple(result, set_layout);
+			}
+		}
+
 		void program::init_descriptor_layout()
 		{
-			if (pstate.descriptor_layouts[0] != nullptr)
-				throw EXCEPTION("Existing descriptors found!");
-
 			if (descriptor_pool.valid())
 				descriptor_pool.destroy();
 
-			std::vector<VkDescriptorSetLayoutBinding> layout_bindings[2];
-			std::vector<VkDescriptorPoolSize> sizes;
+			std::tie(pstate.pipeline_layout, pstate.descriptor_layouts[0]) = get_shared_pipeline_layout(*device);
 
-			program_input_type types[] = { input_type_uniform_buffer, input_type_texel_buffer, input_type_texture };
-			program_domain stages[] = { glsl_vertex_program, glsl_fragment_program };
+			VkDescriptorPoolSize uniform_buffer_pool = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 3};
+			VkDescriptorPoolSize uniform_texel_pool = { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER , 16};
+			VkDescriptorPoolSize texture_pool = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER , 16 };
 
-			VkDescriptorType vk_ids[] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER };
-			VkShaderStageFlags vk_stages[] = { VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT };
-
-			for (auto &input : uniforms)
-			{
-				VkDescriptorSetLayoutBinding binding;
-				binding.binding = input.location;
-				binding.descriptorCount = 1;
-				binding.descriptorType = vk_ids[(u32)input.type];
-				binding.pImmutableSamplers = nullptr;
-				binding.stageFlags = vk_stages[(u32)input.domain];
-
-				layout_bindings[(u32)input.domain].push_back(binding);
-			}
-
-			for (int i = 0; i < 3; ++i)
-			{
-				u32 count = 0;
-				for (auto &input : uniforms)
-				{
-					if (input.type == types[i])
-						count++;
-				}
-
-				if (!count) continue;
-
-				VkDescriptorPoolSize size;
-				size.descriptorCount = count;
-				size.type = vk_ids[i];
-
-				sizes.push_back(size);
-			}
+			std::vector<VkDescriptorPoolSize> sizes{ uniform_buffer_pool, uniform_texel_pool, texture_pool };
 
 			descriptor_pool.create((*device), sizes.data(), sizes.size());
 
-			VkDescriptorSetLayoutCreateInfo infos;
-			infos.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-			infos.pNext = nullptr;
-			infos.flags = 0;
-			infos.pBindings = layout_bindings[0].data();
-			infos.bindingCount = layout_bindings[0].size();
-
-			CHECK_RESULT(vkCreateDescriptorSetLayout((*device), &infos, nullptr, &pstate.descriptor_layouts[0]));
-
-			infos.pBindings = layout_bindings[1].data();
-			infos.bindingCount = layout_bindings[1].size();
-
-			CHECK_RESULT(vkCreateDescriptorSetLayout((*device), &infos, nullptr, &pstate.descriptor_layouts[1]));
-
-			VkPipelineLayoutCreateInfo layout_info;
-			layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-			layout_info.pNext = nullptr;
-			layout_info.setLayoutCount = 2;
-			layout_info.pSetLayouts = pstate.descriptor_layouts;
-			layout_info.flags = 0;
-			layout_info.pPushConstantRanges = nullptr;
-			layout_info.pushConstantRangeCount = 0;
-
-			CHECK_RESULT(vkCreatePipelineLayout((*device), &layout_info, nullptr, &pstate.pipeline_layout));
-
-			VkDescriptorSetAllocateInfo alloc_info;
+			VkDescriptorSetAllocateInfo alloc_info = {};
 			alloc_info.descriptorPool = descriptor_pool;
-			alloc_info.descriptorSetCount = 2;
-			alloc_info.pNext = nullptr;
+			alloc_info.descriptorSetCount = 1;
 			alloc_info.pSetLayouts = pstate.descriptor_layouts;
 			alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 
 			CHECK_RESULT(vkAllocateDescriptorSets((*device), &alloc_info, pstate.descriptor_sets));
-		}
-
-		void program::update_descriptors()
-		{
-			if (!pstate.descriptor_layouts[0])
-				init_descriptor_layout();
-
-			std::vector<VkWriteDescriptorSet> descriptor_writers;
-			std::vector<VkDescriptorImageInfo> images(16);
-			std::vector<VkDescriptorBufferInfo> buffers(16);
-			std::vector<VkDescriptorBufferInfo> texel_buffers(16);
-			std::vector<std::unique_ptr<vk::buffer_view>> texel_buffer_views(16);
-			VkWriteDescriptorSet write;
-
-			int image_index = 0;
-			int buffer_index = 0;
-			int texel_buffer_index = 0;
-
-			for (auto &input : uniforms)
-			{
-				switch (input.type)
-				{
-				case input_type_texture:
-				{
-					auto &image = images[image_index++];
-					image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					image.sampler = null_sampler();
-					image.imageView = null_image_view();
-
-					if (input.as_sampler.sampler && input.as_sampler.image_view)
-					{
-						image.imageView = input.as_sampler.image_view;
-						image.sampler = input.as_sampler.sampler;
-						image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					}
-					else
-						LOG_ERROR(RSX, "Texture object was not bound: %s", input.name);
-
-					memset(&write, 0, sizeof(write));
-					write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-					write.pImageInfo = &image;
-					write.descriptorCount = 1;
-
-					break;
-				}
-				case input_type_uniform_buffer:
-				{
-					auto &buffer = buffers[buffer_index++];
-					buffer.buffer = VK_NULL_HANDLE;
-					buffer.offset = 0;
-					buffer.range = 0;
-
-					if (input.as_buffer.buffer)
-					{
-						buffer.buffer = input.as_buffer.buffer;
-						buffer.range = input.as_buffer.size;
-						buffer.offset = input.as_buffer.offset;
-					}
-					else
-					{
-						LOG_ERROR(RSX, "UBO was not bound: %s", input.name);
-					}
-
-					memset(&write, 0, sizeof(write));
-					write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-					write.pBufferInfo = &buffer;
-					write.descriptorCount = 1;
-					break;
-				}
-				case input_type_texel_buffer:
-				{
-					auto &buffer_view = texel_buffer_views[texel_buffer_index];
-
-					auto &buffer = texel_buffers[texel_buffer_index++];
-					buffer.buffer = VK_NULL_HANDLE;
-					buffer.offset = 0;
-					buffer.range = 0;
-
-					if (input.as_buffer.buffer && input.as_buffer.format != VK_FORMAT_UNDEFINED)
-					{
-						buffer.offset = input.as_buffer.offset;
-						buffer.buffer = input.as_buffer.buffer;
-						buffer.range = input.as_buffer.size;
-					}
-					else
-					{
-						LOG_ERROR(RSX, "Texel buffer was not bound: %s", input.name);
-					}
-
-					buffer_view.reset(new vk::buffer_view(*device, input.as_buffer.buffer, input.as_buffer.format, input.as_buffer.offset, input.as_buffer.size));
-
-					memset(&write, 0, sizeof(write));
-					write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
-					write.pTexelBufferView = &(buffer_view->value);
-					write.descriptorCount = 1;
-					break;
-				}
-				default:
-					throw EXCEPTION("Unhandled input type!");
-				}
-
-				write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				write.dstSet = pstate.descriptor_sets[input.domain];
-				write.pNext = nullptr;
-
-				write.dstBinding = input.location;
-				descriptor_writers.push_back(write);
-			}
-
-			if (!descriptor_writers.size()) return;
-			if (descriptor_writers.size() != uniforms.size())
-				throw EXCEPTION("Undefined uniform detected");
-
-			vkUpdateDescriptorSets((*device), descriptor_writers.size(), descriptor_writers.data(), 0, nullptr);
 		}
 
 		void program::destroy_descriptors()
@@ -627,7 +517,6 @@ namespace vk
 		{
 			if (/*uniforms_changed*/true)
 			{
-				update_descriptors();
 				uniforms_changed = false;
 			}
 
@@ -661,7 +550,7 @@ namespace vk
 			}
 
 			vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pstate.pipeline_handle);
-			vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pstate.pipeline_layout, 0, 2, pstate.descriptor_sets, 0, nullptr);
+			vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pstate.pipeline_layout, 0, 1, pstate.descriptor_sets, 0, nullptr);
 		}
 
 		bool program::has_uniform(program_domain domain, std::string uniform_name)
@@ -676,28 +565,10 @@ namespace vk
 			return false;
 		}
 
-		bool program::bind_uniform(program_domain domain, std::string uniform_name)
-		{
-			for (auto &uniform : uniforms)
-			{
-				if (uniform.name == uniform_name &&
-					uniform.domain == domain)
-				{
-					uniform.as_buffer.buffer = nullptr;
-					uniform.as_buffer.format = VK_FORMAT_UNDEFINED;
-					uniform.as_sampler.image_view = nullptr;
-					uniform.as_sampler.sampler = nullptr;
-
-					uniforms_changed = true;
-					return true;
-				}
-			}
-
-			return false;
-		}
-
 		bool program::bind_uniform(program_domain domain, std::string uniform_name, vk::texture &_texture)
 		{
+			if (!pstate.descriptor_layouts[0])
+				init_descriptor_layout();
 			for (auto &uniform : uniforms)
 			{
 				if (uniform.name == uniform_name &&
@@ -722,57 +593,36 @@ namespace vk
 			return false;
 		}
 
-		bool program::bind_uniform(program_domain domain, std::string uniform_name, VkBuffer _buffer, VkDeviceSize offset, VkDeviceSize size)
+		void program::bind_uniform(VkDescriptorBufferInfo buffer_descriptor, uint32_t binding_point)
 		{
-			for (auto &uniform : uniforms)
-			{
-				if (uniform.name == uniform_name &&
-					uniform.domain == domain)
-				{
-					if (uniform.as_buffer.buffer != _buffer ||
-						uniform.as_buffer.size != size ||
-						uniform.as_buffer.offset != offset)
-					{
-						uniform.as_buffer.size = size;
-						uniform.as_buffer.buffer = _buffer;
-						uniform.as_buffer.format = VK_FORMAT_UNDEFINED; //UBOs cannot be viewed!
-						uniform.as_buffer.offset = offset;
+			if (!pstate.descriptor_layouts[0])
+				init_descriptor_layout();
+			VkWriteDescriptorSet descriptor_writer = {};
+			descriptor_writer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			descriptor_writer.dstSet = pstate.descriptor_sets[0];
+			descriptor_writer.descriptorCount = 1;
+			descriptor_writer.pBufferInfo = &buffer_descriptor;
+			descriptor_writer.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			descriptor_writer.dstArrayElement = 0;
+			descriptor_writer.dstBinding = binding_point;
 
-						uniforms_changed = true;
-					}
-
-					uniform.type = input_type_uniform_buffer;
-					return true;
-				}
-			}
+			vkUpdateDescriptorSets((*device), 1, &descriptor_writer, 0, nullptr);
 		}
 
-		bool program::bind_uniform(program_domain domain, std::string uniform_name, VkBuffer _buffer, VkDeviceSize offset, VkDeviceSize size, VkFormat format)
+		void program::bind_uniform(const VkBufferView &buffer_view, uint32_t binding_point)
 		{
-			for (auto &uniform : uniforms)
-			{
-				if (uniform.name == uniform_name &&
-					uniform.domain == domain)
-				{
-					if (uniform.as_buffer.buffer != _buffer ||
-						uniform.as_buffer.format != format ||
-						uniform.as_buffer.size != size ||
-						uniform.as_buffer.offset != 0)
-					{
-						uniform.as_buffer.size = size;
-						uniform.as_buffer.buffer = _buffer;
-						uniform.as_buffer.format = format;
-						uniform.as_buffer.offset = offset;
+			if (!pstate.descriptor_layouts[0])
+				init_descriptor_layout();
+			VkWriteDescriptorSet descriptor_writer = {};
+			descriptor_writer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			descriptor_writer.dstSet = pstate.descriptor_sets[0];
+			descriptor_writer.descriptorCount = 1;
+			descriptor_writer.pTexelBufferView = &buffer_view;
+			descriptor_writer.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+			descriptor_writer.dstArrayElement = 0;
+			descriptor_writer.dstBinding = binding_point;
 
-						uniforms_changed = true;
-					}
-
-					uniform.type = input_type_texel_buffer;
-					return true;
-				}
-			}
-
-			return false;
+			vkUpdateDescriptorSets((*device), 1, &descriptor_writer, 0, nullptr);
 		}
 
 		void program::destroy()

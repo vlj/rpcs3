@@ -1183,8 +1183,8 @@ namespace vk
 				VkShaderModule vs, fs;
 				VkPipeline pipeline_handle = nullptr;
 
-				VkDescriptorSetLayout descriptor_layouts[2];;
-				VkDescriptorSet descriptor_sets[2];
+				VkDescriptorSetLayout descriptor_layouts[1];
+				VkDescriptorSet descriptor_sets[1];
 				VkPipelineLayout pipeline_layout;
 
 				int num_targets = 1;
@@ -1232,7 +1232,6 @@ namespace vk
 			void set_primitive_restart(VkBool32 state);
 			
 			void init_descriptor_layout();
-			void update_descriptors();
 			void destroy_descriptors();
 
 			void set_draw_buffer_count(u8 draw_buffers);
@@ -1242,10 +1241,14 @@ namespace vk
 			void use(vk::command_buffer& commands, VkRenderPass pass, u32 subpass);
 
 			bool has_uniform(program_domain domain, std::string uniform_name);
-			bool bind_uniform(program_domain domain, std::string uniform_name);
+#define VERTEX_BUFFERS_SLOT 0
+#define FRAGMENT_CONSTANT_BUFFERS_SLOT 1
+#define VERTEX_CONSTANT_BUFFERS_SLOT 2
+#define TEXTURES_SLOT 3
+#define SCALE_OFFSET_SLOT 4
 			bool bind_uniform(program_domain domain, std::string uniform_name, vk::texture &_texture);
-			bool bind_uniform(program_domain domain, std::string uniform_name, VkBuffer _buffer, VkDeviceSize offset, VkDeviceSize size);
-			bool bind_uniform(program_domain domain, std::string uniform_name, VkBuffer _buffer, VkDeviceSize offset, VkDeviceSize size, VkFormat format);
+			void bind_uniform(VkDescriptorBufferInfo buffer_descriptor, uint32_t binding_point);
+			void bind_uniform(const VkBufferView &buffer_view, uint32_t binding_point);
 
 			program& operator = (const program&) = delete;
 			program& operator = (program&& other);

@@ -285,7 +285,6 @@ VKGSRender::upload_vertex_data()
 
 			if (!vertex_info.size) // disabled
 			{
-				m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index]);
 				continue;
 			}
 
@@ -334,7 +333,8 @@ VKGSRender::upload_vertex_data()
 			m_attrib_buffers->unmap();
 
 			//Link texture to uniform location
-			m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index], m_attrib_buffers->value, offset_in_attrib_buffer, data_size, format);
+			vk::buffer_view bv(*m_device, m_attrib_buffers->value, format, offset_in_attrib_buffer, data_size);
+			m_program->bind_uniform(bv.value, 3 + index);
 		}
 	}
 
@@ -350,14 +350,13 @@ VKGSRender::upload_vertex_data()
 	{
 		for (int index = 0; index < rsx::limits::vertex_count; ++index)
 		{
+			bool enabled = !!(input_mask & (1 << index));
+
 			if (!m_program->has_uniform(vk::glsl::glsl_vertex_program, reg_table[index]))
 				continue;
-		
-			bool enabled = !!(input_mask & (1 << index));
 
 			if (!enabled)
 			{
-				m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index]);
 				continue;
 			}
 
@@ -425,7 +424,8 @@ VKGSRender::upload_vertex_data()
 				memcpy(buf, data_ptr, data_size);
 				m_attrib_buffers->unmap();
 
-				m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index], m_attrib_buffers->value, offset_in_attrib_buffer, data_size, format);
+				vk::buffer_view bv(*m_device, m_attrib_buffers->value, format, offset_in_attrib_buffer, data_size);
+				m_program->bind_uniform(bv.value, 3 + index);
 			}
 			else if (register_vertex_info[index].size > 0)
 			{
@@ -465,7 +465,8 @@ VKGSRender::upload_vertex_data()
 					memcpy(buf, data_ptr, data_size);
 					m_attrib_buffers->unmap();
 
-					m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index], m_attrib_buffers->value, offset_in_attrib_buffer, data_size, format);
+					vk::buffer_view bv(*m_device, m_attrib_buffers->value, format, offset_in_attrib_buffer, data_size);
+					m_program->bind_uniform(bv.value, 3 + index);
 					break;
 				}
 				default:
