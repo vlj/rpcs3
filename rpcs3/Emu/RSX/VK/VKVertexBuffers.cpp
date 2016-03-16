@@ -334,7 +334,7 @@ VKGSRender::upload_vertex_data()
 
 			//Link texture to uniform location
 			vk::buffer_view bv(*m_device, m_attrib_buffers->value, format, offset_in_attrib_buffer, data_size);
-			m_program->bind_uniform(bv.value, 3 + index);
+			m_program->bind_uniform(bv.value, reg_table[index]);
 		}
 	}
 
@@ -425,7 +425,7 @@ VKGSRender::upload_vertex_data()
 				m_attrib_buffers->unmap();
 
 				vk::buffer_view bv(*m_device, m_attrib_buffers->value, format, offset_in_attrib_buffer, data_size);
-				m_program->bind_uniform(bv.value, 3 + index);
+				m_program->bind_uniform(bv.value, reg_table[index]);
 			}
 			else if (register_vertex_info[index].size > 0)
 			{
@@ -466,7 +466,7 @@ VKGSRender::upload_vertex_data()
 					m_attrib_buffers->unmap();
 
 					vk::buffer_view bv(*m_device, m_attrib_buffers->value, format, offset_in_attrib_buffer, data_size);
-					m_program->bind_uniform(bv.value, 3 + index);
+					m_program->bind_uniform(bv.value, reg_table[index]);
 					break;
 				}
 				default:

@@ -609,20 +609,30 @@ namespace vk
 			vkUpdateDescriptorSets((*device), 1, &descriptor_writer, 0, nullptr);
 		}
 
-		void program::bind_uniform(const VkBufferView &buffer_view, uint32_t binding_point)
+		void program::bind_uniform(const VkBufferView &buffer_view, const std::string &binding_name)
 		{
 			if (!pstate.descriptor_layouts[0])
 				init_descriptor_layout();
-			VkWriteDescriptorSet descriptor_writer = {};
-			descriptor_writer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			descriptor_writer.dstSet = pstate.descriptor_sets[0];
-			descriptor_writer.descriptorCount = 1;
-			descriptor_writer.pTexelBufferView = &buffer_view;
-			descriptor_writer.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
-			descriptor_writer.dstArrayElement = 0;
-			descriptor_writer.dstBinding = binding_point;
 
-			vkUpdateDescriptorSets((*device), 1, &descriptor_writer, 0, nullptr);
+
+			for (auto &uniform : uniforms)
+			{
+				if (uniform.name == binding_name)
+				{
+					VkWriteDescriptorSet descriptor_writer = {};
+					descriptor_writer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+					descriptor_writer.dstSet = pstate.descriptor_sets[0];
+					descriptor_writer.descriptorCount = 1;
+					descriptor_writer.pTexelBufferView = &buffer_view;
+					descriptor_writer.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+					descriptor_writer.dstArrayElement = 0;
+					descriptor_writer.dstBinding = uniform.location + 3;
+
+					vkUpdateDescriptorSets((*device), 1, &descriptor_writer, 0, nullptr);
+					return;
+				}
+			}
+			throw EXCEPTION("vertex buffer not found");
 		}
 
 		void program::destroy()

@@ -454,7 +454,7 @@ namespace vk
 
 		~buffer_view()
 		{
-			vkDestroyBufferView(m_device, value, nullptr);
+//			vkDestroyBufferView(m_device, value, nullptr);
 		}
 
 		buffer_view(const buffer_view&) = delete;
@@ -1248,7 +1248,7 @@ namespace vk
 #define SCALE_OFFSET_SLOT 4
 			bool bind_uniform(program_domain domain, std::string uniform_name, vk::texture &_texture);
 			void bind_uniform(VkDescriptorBufferInfo buffer_descriptor, uint32_t binding_point);
-			void bind_uniform(const VkBufferView &buffer_view, uint32_t binding_point);
+			void bind_uniform(const VkBufferView &buffer_view, const std::string &binding_name);
 
 			program& operator = (const program&) = delete;
 			program& operator = (program&& other);
