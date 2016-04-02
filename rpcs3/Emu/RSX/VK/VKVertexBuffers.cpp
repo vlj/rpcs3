@@ -147,53 +147,6 @@ namespace vk
 		}
 	}
 
-	template <typename T, u32 padding>
-	void copy_inlined_data_to_buffer(void *src_data, void *dst_data, u32 vertex_count, rsx::vertex_base_type type, u8 src_channels, u8 dst_channels, u16 element_size, u16 stride)
-	{
-		u8 *src = static_cast<u8*>(src_data);
-		u8 *dst = static_cast<u8*>(dst_data);
-
-		for (u32 i = 0; i < vertex_count; ++i)
-		{
-			T* src_ptr = reinterpret_cast<T*>(src);
-			T* dst_ptr = reinterpret_cast<T*>(dst);
-
-			switch (type)
-			{
-			case rsx::vertex_base_type::ub:
-			{
-				if (src_channels == 4)
-				{
-					dst[0] = src[3];
-					dst[1] = src[2];
-					dst[2] = src[1];
-					dst[3] = src[0];
-
-					break;
-				}
-			}
-			default:
-			{
-				for (u8 ch = 0; ch < dst_channels; ++ch)
-				{
-					if (ch < src_channels)
-					{
-						*dst_ptr = *src_ptr;
-						src_ptr++;
-					}
-					else
-						*dst_ptr = (T)(padding);
-
-					dst_ptr++;
-				}
-			}
-			}
-
-			src += stride;
-			dst += element_size;
-		}
-	}
-
 	void prepare_buffer_for_writing(void *data, rsx::vertex_base_type type, u8 vertex_size, u32 vertex_count)
 	{
 		switch (type)
@@ -216,11 +169,22 @@ namespace vk
 	}
 }
 
-std::tuple<VkPrimitiveTopology, bool, u32, VkDeviceSize, VkIndexType>
-VKGSRender::upload_vertex_data()
+std::tuple<bool, u32, VkDeviceSize, VkIndexType> VKGSRender::upload_vertex_data()
 {
-	//initialize vertex attributes
-	std::vector<u8> vertex_arrays_data;
+	std::vector<std::pair<u32, u32> > vertex_ranges;
+	bool is_indexed_draw;
+	rsx::index_array_type index_format;
+
+	size_t offset_in_index_buffer;
+
+	std::tie(vertex_ranges, is_indexed_draw, vertex_draw_count, index_format) = vertex_loader_helper::set_index(draw_command, draw_mode, vertex_arrays_info, inline_vertex_array.size() * sizeof(u32), first_count_commands,
+		[&offset_in_index_buffer, this](size_t size) {
+		offset_in_index_buffer = m_index_buffer_ring_info.alloc<256>(size);
+		void* buf = m_index_buffer_ring_info.heap->map(offset_in_index_buffer, size);
+		return gsl::span<gsl::byte> { reinterpret_cast<gsl::byte*>(buf), gsl::narrow<int>(size) };
+	},
+		[this]() {m_index_buffer_ring_info.heap->unmap(); }
+		);
 
 	const std::string reg_table[] =
 	{
@@ -232,346 +196,82 @@ VKGSRender::upload_vertex_data()
 		"in_tc4_buffer", "in_tc5_buffer", "in_tc6_buffer", "in_tc7_buffer"
 	};
 
-	u32 input_mask = rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_INPUT_MASK];
-
-	std::vector<u8> vertex_index_array;
-	vertex_draw_count = 0;
-	u32 min_index, max_index;
-
-	if (draw_command == rsx::draw_command::indexed)
-	{
-		rsx::index_array_type type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
-		u32 type_size = gsl::narrow<u32>(get_index_type_size(type));
-		for (const auto& first_count : first_count_commands)
-		{
-			vertex_draw_count += first_count.second;
-		}
-
-		vertex_index_array.resize(vertex_draw_count * type_size);
-
-		switch (type)
-		{
-		case rsx::index_array_type::u32:
-			std::tie(min_index, max_index) = write_index_array_data_to_buffer_untouched(gsl::span<u32>((u32*)vertex_index_array.data(), vertex_draw_count), first_count_commands);
-			break;
-		case rsx::index_array_type::u16:
-			std::tie(min_index, max_index) = write_index_array_data_to_buffer_untouched(gsl::span<u16>((u16*)vertex_index_array.data(), vertex_draw_count), first_count_commands);
-			break;
-		}
-	}
-
 	if (draw_command == rsx::draw_command::inlined_array)
 	{
-		u32 stride = 0;
-		u32 offsets[rsx::limits::vertex_count] = { 0 };
+		std::vector<std::tuple<u8, size_t, u32> > vertex_buffer_index_offset_size;
+		auto map_function = [this, &vertex_buffer_index_offset_size](u8 index, u32 requested_size) {
+			u32 size = requested_size;
+			size_t offset_in_attrib_buffer = m_attrib_ring_info.alloc<256>(requested_size);
+			void* buf = m_attrib_ring_info.heap->map(offset_in_attrib_buffer, requested_size);
+			vertex_buffer_index_offset_size.push_back(std::make_tuple(index, offset_in_attrib_buffer, requested_size));
+			return gsl::span<gsl::byte> { reinterpret_cast<gsl::byte*>(buf), gsl::narrow<int>(requested_size) };
+		};
+		auto unmap_function = [this]() { m_attrib_ring_info.heap->unmap(); };
 
-		for (u32 i = 0; i < rsx::limits::vertex_count; ++i)
+		vertex_loader_helper::set_vertex_array_inlined(vertex_arrays_info, inline_vertex_array, vk::get_suitable_vk_size, map_function, unmap_function);
+
+		for (const auto &vb_info : vertex_buffer_index_offset_size)
 		{
-			const auto &info = vertex_arrays_info[i];
-			if (!info.size) continue;
+			u8 index;
+			size_t offset;
+			u32 size;
+			std::tie(index, offset, size) = vb_info;
 
-			offsets[i] = stride;
-			stride += rsx::get_vertex_type_size_on_host(info.type, info.size);
+			if (!m_program->has_uniform(reg_table[index])) continue;
+
+			const VkFormat format = vk::get_suitable_vk_format(vertex_arrays_info[index].type, vertex_arrays_info[index].size);
+			m_buffer_view_to_clean.push_back(std::make_unique<vk::buffer_view>(*m_device, m_attrib_ring_info.heap->value, format, offset, size));
+			m_program->bind_uniform(m_buffer_view_to_clean.back()->value, reg_table[index], descriptor_sets);
 		}
+		return std::make_tuple(is_indexed_draw, vertex_draw_count, offset_in_index_buffer, vk::get_index_type(index_format));
+	}
 
-		vertex_draw_count = (u32)(inline_vertex_array.size() * sizeof(u32)) / stride;
+	u32 input_mask = rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_INPUT_MASK];
 
-		for (int index = 0; index < rsx::limits::vertex_count; ++index)
+	for (int index = 0; index < rsx::limits::vertex_count; ++index)
+	{
+		bool enabled = !!(input_mask & (1 << index));
+
+		if (!m_program->has_uniform(reg_table[index])) continue;
+		if (!enabled) continue;
+
+		if (vertex_arrays_info[index].size > 0)
 		{
-			auto &vertex_info = vertex_arrays_info[index];
+			size_t offset_in_attrib_buffer;
+			u32 size;
 
-			if (!m_program->has_uniform(reg_table[index]))
-				continue;
+			auto map_function = [this, &offset_in_attrib_buffer, &size](u32 requested_size) {
+				size = requested_size;
+				offset_in_attrib_buffer = m_attrib_ring_info.alloc<256>(requested_size);
+				void* buf = m_attrib_ring_info.heap->map(offset_in_attrib_buffer, requested_size);
+				return gsl::span<gsl::byte> { reinterpret_cast<gsl::byte*>(buf), gsl::narrow<int>(requested_size) };
+			};
+			auto unmap_function = [this]() { m_attrib_ring_info.heap->unmap(); };
 
-			if (!vertex_info.size) // disabled
-			{
-				continue;
-			}
+			vertex_loader_helper::set_vertex_array(vertex_arrays_info[index], index, vertex_ranges, vk::get_suitable_vk_size, map_function, unmap_function);
+			const VkFormat format = vk::get_suitable_vk_format(vertex_arrays_info[index].type, vertex_arrays_info[index].size);
+			m_buffer_view_to_clean.push_back(std::make_unique<vk::buffer_view>(*m_device, m_attrib_ring_info.heap->value, format, offset_in_attrib_buffer, size));
+			m_program->bind_uniform(m_buffer_view_to_clean.back()->value, reg_table[index], descriptor_sets);
+		}
+		else if (register_vertex_info[index].size > 0)
+		{
+			size_t offset_in_attrib_buffer;
+			u32 size;
 
-			const u32 element_size = vk::get_suitable_vk_size(vertex_info.type, vertex_info.size);
-			const u32 data_size = element_size * vertex_draw_count;
-			const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
+			auto map_function = [this, &offset_in_attrib_buffer, &size](u32 requested_size) {
+				size = requested_size;
+				offset_in_attrib_buffer = m_attrib_ring_info.alloc<256>(requested_size);
+				void* buf = m_attrib_ring_info.heap->map(offset_in_attrib_buffer, requested_size);
+				return gsl::span<gsl::byte> { reinterpret_cast<gsl::byte*>(buf), gsl::narrow<int>(requested_size) };
+			};
+			auto unmap_function = [this]() { m_attrib_ring_info.heap->unmap(); };
 
-			vertex_arrays_data.resize(data_size);
-			u8 *src = reinterpret_cast<u8*>(inline_vertex_array.data());
-			u8 *dst = vertex_arrays_data.data();
-
-			src += offsets[index];
-			u8 opt_size = vertex_info.size;
-
-			if (vertex_info.size == 3)
-				opt_size = 4;
-
-			//TODO: properly handle cmp type
-			if (vertex_info.type == rsx::vertex_base_type::cmp)
-				LOG_ERROR(RSX, "Compressed vertex attributes not supported for inlined arrays yet");
-
-			switch (vertex_info.type)
-			{
-			case rsx::vertex_base_type::f:
-				vk::copy_inlined_data_to_buffer<float, 1>(src, dst, vertex_draw_count, vertex_info.type, vertex_info.size, opt_size, element_size, stride);
-				break;
-			case rsx::vertex_base_type::sf:
-				vk::copy_inlined_data_to_buffer<u16, 0x3c00>(src, dst, vertex_draw_count, vertex_info.type, vertex_info.size, opt_size, element_size, stride);
-				break;
-			case rsx::vertex_base_type::s1:
-			case rsx::vertex_base_type::ub:
-			case rsx::vertex_base_type::ub256:
-				vk::copy_inlined_data_to_buffer<u8, 1>(src, dst, vertex_draw_count, vertex_info.type, vertex_info.size, opt_size, element_size, stride);
-				break;
-			case rsx::vertex_base_type::s32k:
-			case rsx::vertex_base_type::cmp:
-				vk::copy_inlined_data_to_buffer<u16, 1>(src, dst, vertex_draw_count, vertex_info.type, vertex_info.size, opt_size, element_size, stride);
-				break;
-			default:
-				throw EXCEPTION("Unknown base type %d", vertex_info.type);
-			}
-
-			size_t offset_in_attrib_buffer = data_heap_alloc::alloc_and_copy(m_attrib_ring_info, data_size, [&vertex_arrays_data, data_size](gsl::span<gsl::byte> ptr) { memcpy(ptr.data(), vertex_arrays_data.data(), data_size); });
-
-			m_buffer_view_to_clean.push_back(std::make_unique<vk::buffer_view>(*m_device, m_attrib_ring_info.heap->value, format, offset_in_attrib_buffer, data_size));
+			vertex_loader_helper::set_vertex_register(register_vertex_info[index], register_vertex_data[index], vk::get_suitable_vk_size, map_function, unmap_function);
+			VkFormat format = vk::get_suitable_vk_format(register_vertex_info[index].type, register_vertex_info[index].size);
+			m_buffer_view_to_clean.push_back(std::make_unique<vk::buffer_view>(*m_device, m_attrib_ring_info.heap->value, format, offset_in_attrib_buffer, size));
 			m_program->bind_uniform(m_buffer_view_to_clean.back()->value, reg_table[index], descriptor_sets);
 		}
 	}
 
-	if (draw_command == rsx::draw_command::array)
-	{
-		for (const auto &first_count : first_count_commands)
-		{
-			vertex_draw_count += first_count.second;
-		}
-	}
-
-	if (draw_command == rsx::draw_command::array || draw_command == rsx::draw_command::indexed)
-	{
-		for (int index = 0; index < rsx::limits::vertex_count; ++index)
-		{
-			bool enabled = !!(input_mask & (1 << index));
-
-			if (!m_program->has_uniform(reg_table[index]))
-				continue;
-
-			if (!enabled)
-			{
-				continue;
-			}
-
-			if (vertex_arrays_info[index].size > 0)
-			{
-				auto &vertex_info = vertex_arrays_info[index];
-				// Active vertex array
-				std::vector<gsl::byte> vertex_array;
-
-				// Fill vertex_array
-				u32 element_size = rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
-				vertex_array.resize(vertex_draw_count * element_size);
-
-				// Get source pointer
-				u32 base_offset = rsx::method_registers[NV4097_SET_VERTEX_DATA_BASE_OFFSET];
-				u32 offset = rsx::method_registers[NV4097_SET_VERTEX_DATA_ARRAY_OFFSET + index];
-				u32 address = base_offset + rsx::get_address(offset & 0x7fffffff, offset >> 31);
-				const gsl::byte *src_ptr = gsl::narrow_cast<const gsl::byte*>(vm::base(address));
-
-				u32 num_stored_verts = vertex_draw_count;
-
-				if (draw_command == rsx::draw_command::array)
-				{
-					size_t offset = 0;
-					gsl::span<gsl::byte> dest_span(vertex_array);
-					vk::prepare_buffer_for_writing(vertex_array.data(), vertex_info.type, vertex_info.size, vertex_draw_count);
-
-					for (const auto &first_count : first_count_commands)
-					{
-						write_vertex_array_data_to_buffer(dest_span.subspan(offset), src_ptr, first_count.first, first_count.second, vertex_info.type, vertex_info.size, vertex_info.stride);
-						offset += first_count.second * element_size;
-					}
-				}
-				if (draw_command == rsx::draw_command::indexed)
-				{
-					num_stored_verts = (max_index + 1);
-					vertex_array.resize((max_index + 1) * element_size);
-					gsl::span<gsl::byte> dest_span(vertex_array);
-					vk::prepare_buffer_for_writing(vertex_array.data(), vertex_info.type, vertex_info.size, vertex_draw_count);
-
-					write_vertex_array_data_to_buffer(dest_span, src_ptr, 0, max_index + 1, vertex_info.type, vertex_info.size, vertex_info.stride);
-				}
-
-				std::vector<u8> converted_buffer;
-				void *data_ptr = vertex_array.data();
-
-				if (vk::requires_component_expansion(vertex_info.type, vertex_info.size))
-				{
-					switch (vertex_info.type)
-					{
-					case rsx::vertex_base_type::f:
-						vk::expand_array_components<float, 3, 4, 1>(reinterpret_cast<float*>(vertex_array.data()), converted_buffer, num_stored_verts);
-						break;
-					}
-
-					data_ptr = static_cast<void*>(converted_buffer.data());
-				}
-
-				const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
-				const u32 data_size = vk::get_suitable_vk_size(vertex_info.type, vertex_info.size) * num_stored_verts;
-
-				size_t offset_in_attrib_buffer = data_heap_alloc::alloc_and_copy(m_attrib_ring_info, data_size, [data_ptr, data_size](gsl::span<gsl::byte> ptr) { memcpy(ptr.data(), data_ptr, data_size); });
-				m_buffer_view_to_clean.push_back(std::make_unique<vk::buffer_view>(*m_device, m_attrib_ring_info.heap->value, format, offset_in_attrib_buffer, data_size));
-				m_program->bind_uniform(m_buffer_view_to_clean.back()->value, reg_table[index], descriptor_sets);
-			}
-			else if (register_vertex_info[index].size > 0)
-			{
-				//Untested!
-				auto &vertex_data = register_vertex_data[index];
-				auto &vertex_info = register_vertex_info[index];
-
-				switch (vertex_info.type)
-				{
-				case rsx::vertex_base_type::f:
-				{
-					size_t data_size = vertex_data.size();
-					const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
-
-					std::vector<u8> converted_buffer;
-					void *data_ptr = vertex_data.data();
-
-					if (vk::requires_component_expansion(vertex_info.type, vertex_info.size))
-					{
-						switch (vertex_info.type)
-						{
-						case rsx::vertex_base_type::f:
-						{
-							const u32 num_stored_verts = static_cast<u32>(data_size / (sizeof(float) * vertex_info.size));
-							vk::expand_array_components<float, 3, 4, 1>(reinterpret_cast<float*>(vertex_data.data()), converted_buffer, num_stored_verts);
-							break;
-						}
-						}
-
-						data_ptr = static_cast<void*>(converted_buffer.data());
-						data_size = converted_buffer.size();
-					}
-
-
-					size_t offset_in_attrib_buffer = data_heap_alloc::alloc_and_copy(m_attrib_ring_info, data_size, [data_ptr, data_size](gsl::span<gsl::byte> ptr) { memcpy(ptr.data(), data_ptr, data_size); });
-					m_buffer_view_to_clean.push_back(std::make_unique<vk::buffer_view>(*m_device, m_attrib_ring_info.heap->value, format, offset_in_attrib_buffer, data_size));
-					m_program->bind_uniform(m_buffer_view_to_clean.back()->value, reg_table[index], descriptor_sets);
-					break;
-				}
-				default:
-					LOG_ERROR(RSX, "bad non array vertex data format (type = %d, size = %d)", vertex_info.type, vertex_info.size);
-					break;
-				}
-			}
-		}
-	}
-
-	bool is_indexed_draw = (draw_command == rsx::draw_command::indexed);
-	bool index_buffer_filled = false;
-	bool primitives_emulated = false;
-	u32  index_count = vertex_draw_count;
-
-	VkIndexType index_format = VK_INDEX_TYPE_UINT16;
-	VkPrimitiveTopology prims = vk::get_appropriate_topology(draw_mode, primitives_emulated);
-
-	size_t offset_in_index_buffer = -1;
-
-	if (primitives_emulated)
-	{
-		//Line loops are line-strips with loop-back; using line-strips-with-adj doesnt work for vulkan
-		if (draw_mode == rsx::primitive_type::line_loop)
-		{
-			std::vector<u16> indices;
-
-			if (!is_indexed_draw)
-			{
-				index_count = vk::expand_line_loop_array_to_strip(vertex_draw_count, indices);
-				size_t upload_size = index_count * sizeof(u16);
-				offset_in_index_buffer = m_index_buffer_ring_info.alloc<256>(upload_size);
-				void* buf = m_index_buffer_ring_info.heap->map(offset_in_index_buffer, upload_size);
-				memcpy(buf, indices.data(), upload_size);
-				m_index_buffer_ring_info.heap->unmap();
-			}
-			else
-			{
-				rsx::index_array_type indexed_type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
-				if (indexed_type == rsx::index_array_type::u32)
-				{
-					index_format = VK_INDEX_TYPE_UINT32;
-					std::vector<u32> indices32;
-
-					index_count = vk::expand_indexed_line_loop_to_strip(vertex_draw_count, (u32*)vertex_index_array.data(), indices32);
-					size_t upload_size = index_count * sizeof(u32);
-					offset_in_index_buffer = m_index_buffer_ring_info.alloc<256>(upload_size);
-					void* buf = m_index_buffer_ring_info.heap->map(offset_in_index_buffer, upload_size);
-					memcpy(buf, indices32.data(), upload_size);
-					m_index_buffer_ring_info.heap->unmap();
-				}
-				else
-				{
-					index_count = vk::expand_indexed_line_loop_to_strip(vertex_draw_count, (u16*)vertex_index_array.data(), indices);
-					size_t upload_size = index_count * sizeof(u16);
-					offset_in_index_buffer = m_index_buffer_ring_info.alloc<256>(upload_size);
-					void* buf = m_index_buffer_ring_info.heap->map(offset_in_index_buffer, upload_size);
-					memcpy(buf, indices.data(), upload_size);
-					m_index_buffer_ring_info.heap->unmap();
-				}
-			}
-		}
-		else
-		{
-			index_count = static_cast<u32>(get_index_count(draw_mode, vertex_draw_count));
-			std::vector<u16> indices(index_count);
-
-			if (is_indexed_draw)
-			{
-				rsx::index_array_type indexed_type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
-				size_t index_size = get_index_type_size(indexed_type);
-
-				std::vector<std::pair<u32, u32>> ranges;
-				ranges.push_back(std::pair<u32, u32>(0, vertex_draw_count));
-
-				gsl::span<gsl::byte> dst = { (gsl::byte*)indices.data(), gsl::narrow<int>(index_count * 2) };
-				write_index_array_data_to_buffer(dst, rsx::index_array_type::u16, draw_mode, ranges);
-			}
-			else
-			{
-				write_index_array_for_non_indexed_non_native_primitive_to_buffer(reinterpret_cast<char*>(indices.data()), draw_mode, 0, vertex_draw_count);
-			}
-
-			size_t upload_size = index_count * sizeof(u16);
-			offset_in_index_buffer = m_index_buffer_ring_info.alloc<256>(upload_size);
-			void* buf = m_index_buffer_ring_info.heap->map(offset_in_index_buffer, upload_size);
-			memcpy(buf, indices.data(), upload_size);
-			m_index_buffer_ring_info.heap->unmap();
-		}
-
-		is_indexed_draw = true;
-		index_buffer_filled = true;
-	}
-
-	if (!index_buffer_filled && is_indexed_draw)
-	{
-		rsx::index_array_type indexed_type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
-		index_format = VK_INDEX_TYPE_UINT16;
-		VkFormat fmt = VK_FORMAT_R16_UINT;
-		
-		u32 elem_size = static_cast<u32>(get_index_type_size(indexed_type));
-
-		if (indexed_type == rsx::index_array_type::u32)
-		{
-			index_format = VK_INDEX_TYPE_UINT32;
-			fmt = VK_FORMAT_R32_UINT;
-		}
-
-		u32 index_sz = static_cast<u32>(vertex_index_array.size()) / elem_size;
-		if (index_sz != vertex_draw_count)
-			LOG_ERROR(RSX, "Vertex draw count mismatch!");
-
-		size_t upload_size = vertex_index_array.size();
-		offset_in_index_buffer = m_index_buffer_ring_info.alloc<256>(upload_size);
-		void* buf = m_index_buffer_ring_info.heap->map(offset_in_index_buffer, upload_size);
-		memcpy(buf, vertex_index_array.data(), upload_size);
-		m_index_buffer_ring_info.heap->unmap();
-	}
-
-	return std::make_tuple(prims, is_indexed_draw, index_count, offset_in_index_buffer, index_format);
+	return std::make_tuple(is_indexed_draw, vertex_draw_count, offset_in_index_buffer, vk::get_index_type(index_format));
 }

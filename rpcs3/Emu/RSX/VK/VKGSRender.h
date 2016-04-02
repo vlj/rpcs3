@@ -83,7 +83,7 @@ private:
 	void sync_at_semaphore_release();
 	void prepare_rtts();
 	/// returns primitive topology, is_indexed, index_count, offset in index buffer, index type
-	std::tuple<VkPrimitiveTopology, bool, u32, VkDeviceSize, VkIndexType> upload_vertex_data();
+	std::tuple<bool, u32, VkDeviceSize, VkIndexType> upload_vertex_data();
 
 public:
 	bool load_program();

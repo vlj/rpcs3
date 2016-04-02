@@ -39,6 +39,18 @@ VkFormat get_compatible_depth_surface_format(const gpu_formats_support &support,
 	throw EXCEPTION("Invalid format (0x%x)", format);
 }
 
+VkIndexType get_index_type(rsx::index_array_type format)
+{
+	switch (format)
+	{
+	case rsx::index_array_type::u16:
+		return VK_INDEX_TYPE_UINT16;
+	case rsx::index_array_type::u32:
+		return VK_INDEX_TYPE_UINT32;
+	}
+	throw EXCEPTION("Unknow index format");
+}
+
 std::tuple<VkFilter, VkSamplerMipmapMode> get_min_filter_and_mip(rsx::texture_minify_filter min_filter)
 {
 	switch (min_filter)

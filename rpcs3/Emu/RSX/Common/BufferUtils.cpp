@@ -458,3 +458,228 @@ void stream_vector_from_memory(void *dst, void *src)
 	const __m128i &vector = _mm_loadu_si128((__m128i*)src);
 	_mm_stream_si128((__m128i*)dst, vector);
 }
+
+std::tuple<std::vector<std::pair<u32, u32> >, bool, u32, rsx::index_array_type> vertex_loader_helper::set_index(
+	rsx::draw_command draw_command,
+	rsx::primitive_type draw_mode,
+	const gsl::span<rsx::data_array_format_info, 16> &vertex_array_info,
+	size_t inlined_array_size,
+	const std::vector<std::pair<u32, u32> > &first_count_commands,
+	std::function<gsl::span<gsl::byte>(u32)> map_function,
+	std::function<void()> unmap_function)
+{
+	u32 vertex_draw_count = 0;
+	if (draw_command == rsx::draw_command::inlined_array)
+	{
+		// Need to compute the number of element
+		u32 stride = 0;
+		for (u32 i = 0; i < rsx::limits::vertex_count; ++i)
+		{
+			const auto &info = vertex_array_info[i];
+			if (!info.size) continue;
+			stride += rsx::get_vertex_type_size_on_host(info.type, info.size);
+		}
+		vertex_draw_count = static_cast<u32>(inlined_array_size / stride);
+	}
+	else
+	{
+		for (const auto& first_count : first_count_commands)
+		{
+			vertex_draw_count += first_count.second;
+		}
+	}
+
+	if (draw_command == rsx::draw_command::indexed)
+	{
+		u32 index_count = static_cast<u32>(get_index_count(draw_mode, vertex_draw_count));
+		rsx::index_array_type type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
+		u32 type_size = gsl::narrow<u32>(get_index_type_size(type));
+
+		gsl::span<gsl::byte> dst = map_function(index_count * type_size);
+
+		u32 min_index, max_index;
+		std::tie(min_index, max_index) = write_index_array_data_to_buffer(dst, type, draw_mode, first_count_commands);
+
+		unmap_function();
+
+		const std::vector<std::pair<u32, u32> > &ranges = { { 0, max_index + 1 } };
+		return std::make_tuple(ranges, true, index_count, type);
+	}
+
+	if (!is_primitive_native(draw_mode))
+	{
+		u32 index_count = static_cast<u32>(get_index_count(draw_mode, vertex_draw_count));
+		gsl::span<gsl::byte> dst = map_function(index_count * sizeof(u16));
+
+		write_index_array_for_non_indexed_non_native_primitive_to_buffer(reinterpret_cast<char*>(dst.data()), draw_mode, 0, index_count);
+		unmap_function();
+		return std::make_tuple(first_count_commands, true, index_count, rsx::index_array_type::u16);
+	}
+
+	// Indexing info won't be relevant
+	return std::make_tuple(first_count_commands, false, vertex_draw_count, rsx::index_array_type::u16);
+}
+
+void vertex_loader_helper::set_vertex_array(
+	const rsx::data_array_format_info &vertex_info,
+	u8 index,
+	const std::vector<std::pair<u32, u32> > &vertex_ranges,
+	std::function<u32(rsx::vertex_base_type, u8)> get_stride_function,
+	std::function<gsl::span<gsl::byte>(u32)> map_function,
+	std::function<void()> unmap_function)
+{
+	u32 num_stored_verts = 0;
+	for (const auto &first_count : vertex_ranges)
+	{
+		num_stored_verts += first_count.second;
+	}
+
+	// Fill vertex_array
+	u32 element_size = get_stride_function(vertex_info.type, vertex_info.size);
+	gsl::span<gsl::byte> dst = map_function(element_size * num_stored_verts);
+
+	// Get source pointer
+	u32 base_offset = rsx::method_registers[NV4097_SET_VERTEX_DATA_BASE_OFFSET];
+	u32 offset = rsx::method_registers[NV4097_SET_VERTEX_DATA_ARRAY_OFFSET + index];
+	u32 address = base_offset + rsx::get_address(offset & 0x7fffffff, offset >> 31);
+	const gsl::byte *src_ptr = gsl::narrow_cast<const gsl::byte*>(vm::base(address));
+
+	size_t dst_offset = 0;
+	for (const auto &first_count : vertex_ranges)
+	{
+		write_vertex_array_data_to_buffer(dst.subspan(dst_offset), src_ptr, first_count.first, first_count.second, vertex_info.type, vertex_info.size, vertex_info.stride, element_size);
+		dst_offset += first_count.second * element_size;
+	}
+
+	unmap_function();
+	return;
+}
+
+
+void vertex_loader_helper::set_vertex_register(
+	const rsx::data_array_format_info &vertex_info,
+	const std::vector<u8> &vertex_data,
+	std::function<u32(rsx::vertex_base_type, u8)> get_stride_function,
+	std::function<gsl::span<gsl::byte>(u32)> map_function,
+	std::function<void()> unmap_function)
+{
+	u32 data_size = get_stride_function(vertex_info.type, vertex_info.size);
+	gsl::span<gsl::byte> dst = map_function(data_size);
+	memcpy(dst.data(), vertex_data.data(), vertex_data.size());
+	unmap_function();
+	return;
+}
+
+
+namespace
+{
+	template <typename T, u32 padding>
+	void copy_inlined_data_to_buffer(void *src_data, void *dst_data, u32 vertex_count, rsx::vertex_base_type type, u8 src_channels, u8 dst_channels, u16 element_size, u16 stride)
+	{
+		u8 *src = static_cast<u8*>(src_data);
+		u8 *dst = static_cast<u8*>(dst_data);
+
+		for (u32 i = 0; i < vertex_count; ++i)
+		{
+			T* src_ptr = reinterpret_cast<T*>(src);
+			T* dst_ptr = reinterpret_cast<T*>(dst);
+
+			switch (type)
+			{
+			case rsx::vertex_base_type::ub:
+			{
+				if (src_channels == 4)
+				{
+					dst[0] = src[3];
+					dst[1] = src[2];
+					dst[2] = src[1];
+					dst[3] = src[0];
+
+					break;
+				}
+			}
+			default:
+			{
+				for (u8 ch = 0; ch < dst_channels; ++ch)
+				{
+					if (ch < src_channels)
+					{
+						*dst_ptr = *src_ptr;
+						src_ptr++;
+					}
+					else
+						*dst_ptr = (T)(padding);
+
+					dst_ptr++;
+				}
+			}
+			}
+
+			src += stride;
+			dst += element_size;
+		}
+	}
+}
+
+void vertex_loader_helper::set_vertex_array_inlined(
+	gsl::span<const rsx::data_array_format_info, 16> vertex_arrays_info,
+	const std::vector<u32> &inline_vertex_array,
+	std::function<u32(rsx::vertex_base_type, u8)> get_stride_function,
+	std::function<gsl::span<gsl::byte>(u8, u32)> map_function,
+	std::function<void()> unmap_function)
+{
+	u32 stride = 0;
+	for (u32 i = 0; i < rsx::limits::vertex_count; ++i)
+	{
+		const auto &info = vertex_arrays_info[i];
+		if (!info.size) continue;
+		stride += rsx::get_vertex_type_size_on_host(info.type, info.size);
+	}
+	u32 vertex_draw_count = static_cast<u32>(inline_vertex_array.size() * sizeof(u32) / stride);
+	const u8 *src = reinterpret_cast<const u8*>(inline_vertex_array.data());
+
+	for (int index = 0; index < rsx::limits::vertex_count; ++index)
+	{
+		auto &vertex_info = vertex_arrays_info[index];
+
+		if (!vertex_info.size) continue;
+
+		const u32 element_size = get_stride_function(vertex_info.type, vertex_info.size);
+		const u32 data_size = element_size * vertex_draw_count;
+
+		gsl::span<gsl::byte> dst = map_function(index, data_size);
+
+		u8 opt_size = vertex_info.size;
+
+		if (vertex_info.size == 3)
+			opt_size = 4;
+
+		//TODO: properly handle cmp type
+		if (vertex_info.type == rsx::vertex_base_type::cmp)
+			LOG_ERROR(RSX, "Compressed vertex attributes not supported for inlined arrays yet");
+
+		switch (vertex_info.type)
+		{
+		case rsx::vertex_base_type::f:
+			copy_inlined_data_to_buffer<float, 1>((void*)src, (void*)dst.data(), vertex_draw_count, vertex_info.type, vertex_info.size, opt_size, element_size, stride);
+			break;
+		case rsx::vertex_base_type::sf:
+			copy_inlined_data_to_buffer<u16, 0x3c00>((void*)src, (void*)dst.data(), vertex_draw_count, vertex_info.type, vertex_info.size, opt_size, element_size, stride);
+			break;
+		case rsx::vertex_base_type::s1:
+		case rsx::vertex_base_type::ub:
+		case rsx::vertex_base_type::ub256:
+			copy_inlined_data_to_buffer<u8, 1>((void*)src, (void*)dst.data(), vertex_draw_count, vertex_info.type, vertex_info.size, opt_size, element_size, stride);
+			break;
+		case rsx::vertex_base_type::s32k:
+		case rsx::vertex_base_type::cmp:
+			copy_inlined_data_to_buffer<u16, 1>((void*)src, (void*)dst.data(), vertex_draw_count, vertex_info.type, vertex_info.size, opt_size, element_size, stride);
+			break;
+		default:
+			throw EXCEPTION("Unknown base type %d", vertex_info.type);
+		}
+		src += rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
+		unmap_function();
+	}
+	return;
+}
