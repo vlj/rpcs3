@@ -872,6 +872,9 @@
     <ClCompile Include="Emu\RSX\gcm_enums.ixx">
       <Filter>Emu\GPU\RSX</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\rsx_texture.ixx">
+      <Filter>Emu\GPU\RSX</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">

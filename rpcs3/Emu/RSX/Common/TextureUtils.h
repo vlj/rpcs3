@@ -1,6 +1,10 @@
 #pragma once
-
+#ifdef MODULE_ENABLED
+import RSX_texture;
+#else
+#include "../GCM.h"
 #include "../RSXTexture.h"
+#endif
 
 #include <vector>
 #include "Utilities/GSL.h"
