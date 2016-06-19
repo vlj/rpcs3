@@ -3,8 +3,12 @@
 #include "stdafx_d3d12.h"
 #include "D3D12Formats.h"
 #include "D3D12Utils.h"
-#include "Emu/RSX/GCM.h"
 
+#ifdef MODULE_ENABLED
+import GCM_enums;
+#else
+#include "../gcm_enums.h"
+#endif
 
 D3D12_BLEND_OP get_blend_op(u16 op)
 {

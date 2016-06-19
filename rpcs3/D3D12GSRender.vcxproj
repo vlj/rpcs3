@@ -61,6 +61,36 @@
     <Import Project="..\rpcs3_llvm.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug - MemLeak|x64'">
+    <ClCompile>
+      <AdditionalOptions>/experimental:module /module:search . %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>MODULE_ENABLED;MSVC_CRT_MEMLEAK_DETECTION;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release - LLVM|x64'">
+    <ClCompile>
+      <AdditionalOptions>/experimental:module /module:search . %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>MODULE_ENABLED;LLVM_AVAILABLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalOptions>/experimental:module /module:search . %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>MODULE_ENABLED;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalOptions>/experimental:module /module:search . %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>MODULE_ENABLED;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug - LLVM|x64'">
+    <ClCompile>
+      <AdditionalOptions>/experimental:module /module:search . %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>MODULE_ENABLED;LLVM_AVAILABLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Emu\RSX\D3D12\D3D12Utils.h" />
     <ClInclude Include="Emu\RSX\D3D12\D3D12CommonDecompiler.h" />

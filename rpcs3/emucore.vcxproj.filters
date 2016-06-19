@@ -869,6 +869,9 @@
     <ClCompile Include="rpcs3_version.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\gcm_enums.ixx">
+      <Filter>Emu\GPU\RSX</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">

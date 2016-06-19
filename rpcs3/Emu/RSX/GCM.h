@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Emu/Memory/vm.h"
-#include "gcm_enums.ixx"
+#include "gcm_enums.h"
 
 namespace rsx
 {
