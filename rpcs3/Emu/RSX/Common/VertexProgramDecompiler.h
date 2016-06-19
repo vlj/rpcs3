@@ -1,5 +1,10 @@
 #pragma once
+#ifdef MODULE_ENABLED
+import RSX_vp;
+#else
 #include "Emu/RSX/RSXVertexProgram.h"
+#endif
+
 #include <vector>
 #include <set>
 #include <sstream>

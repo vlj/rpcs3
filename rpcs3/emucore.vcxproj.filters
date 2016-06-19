@@ -1666,5 +1666,8 @@
     <ClInclude Include="Emu\RSX\gcm_enums.h">
       <Filter>Emu\GPU\RSX</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\RSX\rsx_vp.ixx">
+      <Filter>Emu\GPU\RSX</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
