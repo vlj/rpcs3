@@ -1,7 +1,12 @@
 #pragma once
 #include "D3D12Utils.h"
 #include "d3dx12.h"
+#ifdef MODULE_ENABLED
+import RSX_ring_buffer_helper;
+#else
 #include "../Common/ring_buffer_helper.h"
+#endif
+
 #include <list>
 #include <mutex>
 

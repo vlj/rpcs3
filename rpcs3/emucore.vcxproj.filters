@@ -875,6 +875,7 @@
     <ClCompile Include="Emu\RSX\rsx_texture.ixx">
       <Filter>Emu\GPU\RSX</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\rsx_vp.ixx" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">
@@ -1666,8 +1667,10 @@
     <ClInclude Include="Emu\RSX\gcm_enums.h">
       <Filter>Emu\GPU\RSX</Filter>
     </ClInclude>
-    <ClInclude Include="Emu\RSX\rsx_vp.ixx">
-      <Filter>Emu\GPU\RSX</Filter>
-    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Emu\RSX\Common\ring_buffer_helper.ixx">
+      <Filter>Emu\GPU\RSX\Common</Filter>
+    </None>
   </ItemGroup>
 </Project>
