@@ -1,16 +1,27 @@
+#ifdef _MSC_VER
 #include "stdafx.h"
 #include "stdafx_d3d12.h"
-#ifdef _MSC_VER
+#include "Utilities/Config.h"
 #include "D3D12GSRender.h"
 #include <wrl/client.h>
 #include <dxgi1_4.h>
 #include <thread>
 #include <chrono>
+#include <locale>
+#include <codecvt>
+#include <cmath>
 #include "d3dx12.h"
 #include <d3d11on12.h>
-#include "Emu/state.h"
 #include "D3D12Formats.h"
 #include "../rsx_methods.h"
+
+extern cfg::bool_entry g_cfg_rsx_vsync;
+extern cfg::bool_entry g_cfg_rsx_debug_output;
+extern cfg::bool_entry g_cfg_rsx_overlay;
+
+static cfg::node s_cfg_d3d12(cfg::root.video, "D3D12");
+
+cfg::string_entry g_cfg_d3d12_adapter(s_cfg_d3d12, "Adapter");
 
 PFN_D3D12_CREATE_DEVICE wrapD3D12CreateDevice;
 PFN_D3D12_GET_DEBUG_INTERFACE wrapD3D12GetDebugInterface;
@@ -33,13 +44,13 @@ HMODULE D3DCompiler;
 
 void loadD3D12FunctionPointers()
 {
-	CHECK_ASSERTION(D3D12Module = LoadLibrary(L"d3d12.dll"));
+	VERIFY(D3D12Module = LoadLibrary(L"d3d12.dll"));
 	wrapD3D12CreateDevice = (PFN_D3D12_CREATE_DEVICE)GetProcAddress(D3D12Module, "D3D12CreateDevice");
 	wrapD3D12GetDebugInterface = (PFN_D3D12_GET_DEBUG_INTERFACE)GetProcAddress(D3D12Module, "D3D12GetDebugInterface");
 	wrapD3D12SerializeRootSignature = (PFN_D3D12_SERIALIZE_ROOT_SIGNATURE)GetProcAddress(D3D12Module, "D3D12SerializeRootSignature");
-	CHECK_ASSERTION(D3D11Module = LoadLibrary(L"d3d11.dll"));
+	VERIFY(D3D11Module = LoadLibrary(L"d3d11.dll"));
 	wrapD3D11On12CreateDevice = (PFN_D3D11ON12_CREATE_DEVICE)GetProcAddress(D3D11Module, "D3D11On12CreateDevice");
-	CHECK_ASSERTION(D3DCompiler = LoadLibrary(L"d3dcompiler_47.dll"));
+	VERIFY(D3DCompiler = LoadLibrary(L"d3dcompiler_47.dll"));
 	wrapD3DCompile = (pD3DCompile)GetProcAddress(D3DCompiler, "D3DCompile");
 }
 
@@ -130,9 +141,11 @@ namespace
 }
 
 D3D12GSRender::D3D12GSRender()
-	: GSRender(frame_type::DX12), m_d3d12_lib(), m_current_pso({})
+	: GSRender(frame_type::DX12)
+	, m_d3d12_lib()
+	, m_current_pso({})
 {
-	if (rpcs3::config.rsx.d3d12.debug_output.value())
+	if (g_cfg_rsx_debug_output)
 	{
 		Microsoft::WRL::ComPtr<ID3D12Debug> debugInterface;
 		wrapD3D12GetDebugInterface(IID_PPV_ARGS(&debugInterface));
@@ -141,10 +154,31 @@ D3D12GSRender::D3D12GSRender()
 
 	Microsoft::WRL::ComPtr<IDXGIFactory4> dxgi_factory;
 	CHECK_HRESULT(CreateDXGIFactory(IID_PPV_ARGS(&dxgi_factory)));
+
 	// Create adapter
-	ComPtr<IDXGIAdapter> adaptater = nullptr;
-	CHECK_HRESULT(dxgi_factory->EnumAdapters(rpcs3::state.config.rsx.d3d12.adaptater.value(), adaptater.GetAddressOf()));
-	CHECK_HRESULT(wrapD3D12CreateDevice(adaptater.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device)));
+	ComPtr<IDXGIAdapter> adapter;
+	const std::wstring& adapter_name = std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>>().from_bytes(g_cfg_d3d12_adapter);
+	
+	for (UINT id = 0; dxgi_factory->EnumAdapters(id, adapter.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; id++)
+	{
+		DXGI_ADAPTER_DESC desc;
+		adapter->GetDesc(&desc);
+		
+		// Adapter with specified name
+		if (adapter_name == desc.Description)
+		{
+			vram_size = desc.DedicatedVideoMemory != 0 ? desc.DedicatedVideoMemory : desc.DedicatedSystemMemory;
+			break;
+		}
+
+		// Default adapter
+		if (id == 1 && adapter_name.empty())
+		{
+			break;
+		}
+	}
+
+	CHECK_HRESULT(wrapD3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device)));
 
 	// Queues
 	D3D12_COMMAND_QUEUE_DESC graphic_queue_desc = { D3D12_COMMAND_LIST_TYPE_DIRECT };
@@ -211,7 +245,7 @@ D3D12GSRender::D3D12GSRender()
 
 	m_rtts.init(m_device.Get());
 	m_readback_resources.init(m_device.Get(), 1024 * 1024 * 128, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
-	m_buffer_data.init(m_device.Get(), 1024 * 1024 * 896, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+	m_buffer_data.init(m_device.Get(), std::min((size_t)(1024 * 1024 * 896), (size_t)(vram_size - (1024 * 1024 * 128))), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
 
 	CHECK_HRESULT(
 		m_device->CreateCommittedResource(
@@ -224,7 +258,7 @@ D3D12GSRender::D3D12GSRender()
 			)
 		);
 
-	if (rpcs3::config.rsx.d3d12.overlay.value())
+	if (g_cfg_rsx_overlay)
 		init_d2d_structures();
 }
 
@@ -418,7 +452,7 @@ void D3D12GSRender::end()
 	m_timers.draw_calls_duration += std::chrono::duration_cast<std::chrono::microseconds>(end_duration - start_duration).count();
 	m_timers.draw_calls_count++;
 
-	if (rpcs3::config.rsx.d3d12.debug_output.value())
+	if (g_cfg_rsx_debug_output)
 	{
 		CHECK_HRESULT(get_current_resource_storage().command_list->Close());
 		m_command_queue->ExecuteCommandLists(1, (ID3D12CommandList**)get_current_resource_storage().command_list.GetAddressOf());
@@ -454,7 +488,7 @@ void D3D12GSRender::flip(int buffer)
 	if (!is_flip_surface_in_global_memory(rsx::to_surface_target(rsx::method_registers[NV4097_SET_SURFACE_COLOR_TARGET])))
 	{
 		resource_storage &storage = get_current_resource_storage();
-		assert(storage.ram_framebuffer == nullptr);
+		VERIFY(storage.ram_framebuffer == nullptr);
 
 		size_t w = 0, h = 0, row_pitch = 0;
 
@@ -476,23 +510,26 @@ void D3D12GSRender::flip(int buffer)
 				memcpy((char*)mapped_buffer + row * row_pitch, (char*)src_buffer + row * w * 4, w * 4);
 			m_buffer_data.unmap(CD3DX12_RANGE(heap_offset, heap_offset + texture_size));
 			offset = heap_offset;
-		}
 
-		CHECK_HRESULT(
-			m_device->CreateCommittedResource(
-				&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-				D3D12_HEAP_FLAG_NONE,
-				&CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, (UINT)w, (UINT)h, 1, 1),
-				D3D12_RESOURCE_STATE_COPY_DEST,
-				nullptr,
-				IID_PPV_ARGS(storage.ram_framebuffer.GetAddressOf())
+			CHECK_HRESULT(
+				m_device->CreateCommittedResource(
+					&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+					D3D12_HEAP_FLAG_NONE,
+					&CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, (UINT)w, (UINT)h, 1, 1),
+					D3D12_RESOURCE_STATE_COPY_DEST,
+					nullptr,
+					IID_PPV_ARGS(storage.ram_framebuffer.GetAddressOf())
 				)
 			);
-		get_current_resource_storage().command_list->CopyTextureRegion(&CD3DX12_TEXTURE_COPY_LOCATION(storage.ram_framebuffer.Get(), 0), 0, 0, 0,
-			&CD3DX12_TEXTURE_COPY_LOCATION(m_buffer_data.get_heap(), { offset, { DXGI_FORMAT_R8G8B8A8_UNORM, (UINT)w, (UINT)h, 1, (UINT)row_pitch } }), nullptr);
+			get_current_resource_storage().command_list->CopyTextureRegion(&CD3DX12_TEXTURE_COPY_LOCATION(storage.ram_framebuffer.Get(), 0), 0, 0, 0,
+				&CD3DX12_TEXTURE_COPY_LOCATION(m_buffer_data.get_heap(), { offset,{ DXGI_FORMAT_R8G8B8A8_UNORM, (UINT)w, (UINT)h, 1, (UINT)row_pitch } }), nullptr);
 
-		get_current_resource_storage().command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(storage.ram_framebuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_GENERIC_READ));
-		resource_to_flip = storage.ram_framebuffer.Get();
+			get_current_resource_storage().command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(storage.ram_framebuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_GENERIC_READ));
+			resource_to_flip = storage.ram_framebuffer.Get();
+		}
+		else
+			resource_to_flip = nullptr;
+
 		viewport_w = (float)w, viewport_h = (float)h;
 	}
 	else
@@ -583,21 +620,21 @@ void D3D12GSRender::flip(int buffer)
 	if (resource_to_flip)
 		get_current_resource_storage().command_list->DrawInstanced(4, 1, 0, 0);
 
-	if (!rpcs3::config.rsx.d3d12.overlay.value())
+	if (!g_cfg_rsx_overlay)
 		get_current_resource_storage().command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_backbuffer[m_swap_chain->GetCurrentBackBufferIndex()].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 	if (is_flip_surface_in_global_memory(rsx::to_surface_target(rsx::method_registers[NV4097_SET_SURFACE_COLOR_TARGET])) && resource_to_flip != nullptr)
 		get_current_resource_storage().command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(resource_to_flip, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET));
 	CHECK_HRESULT(get_current_resource_storage().command_list->Close());
 	m_command_queue->ExecuteCommandLists(1, (ID3D12CommandList**)get_current_resource_storage().command_list.GetAddressOf());
 
-	if(rpcs3::config.rsx.d3d12.overlay.value())
+	if (g_cfg_rsx_overlay)
 		render_overlay();
 
 	reset_timer();
 
 	std::chrono::time_point<std::chrono::system_clock> flip_start = std::chrono::system_clock::now();
 
-	CHECK_HRESULT(m_swap_chain->Present(rpcs3::state.config.rsx.vsync.value() ? 1 : 0, 0));
+	CHECK_HRESULT(m_swap_chain->Present(g_cfg_rsx_vsync ? 1 : 0, 0));
 	// Add an event signaling queue completion
 
 	resource_storage &storage = get_non_current_resource_storage();

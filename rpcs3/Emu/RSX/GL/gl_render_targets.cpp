@@ -1,7 +1,12 @@
 #include "stdafx.h"
+#include "Utilities/Config.h"
 #include "../rsx_methods.h"
 #include "GLGSRender.h"
-#include "Emu/state.h"
+
+extern cfg::bool_entry g_cfg_rsx_write_color_buffers;
+extern cfg::bool_entry g_cfg_rsx_write_depth_buffer;
+extern cfg::bool_entry g_cfg_rsx_read_color_buffers;
+extern cfg::bool_entry g_cfg_rsx_read_depth_buffer;
 
 color_format rsx::internals::surface_color_format_to_gl(rsx::surface_color_format color_format)
 {
@@ -14,6 +19,12 @@ color_format rsx::internals::surface_color_format_to_gl(rsx::surface_color_forma
 	case rsx::surface_color_format::a8r8g8b8:
 		return{ ::gl::texture::type::uint_8_8_8_8, ::gl::texture::format::bgra, false, 4, 1 };
 
+	//These formats discard their alpha component (always 1)
+	case rsx::surface_color_format::x1r5g5b5_o1r5g5b5:
+	case rsx::surface_color_format::x1r5g5b5_z1r5g5b5:
+	case rsx::surface_color_format::x8r8g8b8_z8r8g8b8:
+	case rsx::surface_color_format::x8b8g8r8_o8b8g8r8:
+	case rsx::surface_color_format::x8b8g8r8_z8b8g8r8:
 	case rsx::surface_color_format::x8r8g8b8_o8r8g8b8:
 		return{ ::gl::texture::type::uint_8_8_8_8, ::gl::texture::format::bgra, false, 4, 1,
 		{ ::gl::texture::channel::one, ::gl::texture::channel::r, ::gl::texture::channel::g, ::gl::texture::channel::b } };
@@ -25,13 +36,14 @@ color_format rsx::internals::surface_color_format_to_gl(rsx::surface_color_forma
 		return{ ::gl::texture::type::f32, ::gl::texture::format::rgba, true, 4, 4 };
 
 	case rsx::surface_color_format::b8:
-	case rsx::surface_color_format::x1r5g5b5_o1r5g5b5:
-	case rsx::surface_color_format::x1r5g5b5_z1r5g5b5:
-	case rsx::surface_color_format::x8r8g8b8_z8r8g8b8:
+		return{ ::gl::texture::type::ubyte, ::gl::texture::format::red, false, 1, 1 };
+
 	case rsx::surface_color_format::g8b8:
+		return{ ::gl::texture::type::ubyte, ::gl::texture::format::rg, false, 2, 1 };
+
 	case rsx::surface_color_format::x32:
-	case rsx::surface_color_format::x8b8g8r8_o8b8g8r8:
-	case rsx::surface_color_format::x8b8g8r8_z8b8g8r8:
+		return{ ::gl::texture::type::f32, ::gl::texture::format::red, false, 1, 4 };
+
 	case rsx::surface_color_format::a8b8g8r8:
 	default:
 		LOG_ERROR(RSX, "Surface color buffer: Unsupported surface color format (0x%x)", color_format);
@@ -76,6 +88,7 @@ void GLGSRender::init_buffers(bool skip_reading)
 
 	if (draw_fbo && !m_rtts_dirty)
 		return;
+
 	m_rtts_dirty = false;
 
 	m_rtts.prepare_render_target(nullptr, surface_format, clip_horizontal, clip_vertical, rsx::to_surface_target(rsx::method_registers[NV4097_SET_SURFACE_COLOR_TARGET]),
@@ -88,9 +101,12 @@ void GLGSRender::init_buffers(bool skip_reading)
 		if (std::get<0>(m_rtts.m_bound_render_targets[i]) != 0)
 			__glcheck draw_fbo.color[i] = *std::get<1>(m_rtts.m_bound_render_targets[i]);
 	}
+
 	if (std::get<0>(m_rtts.m_bound_depth_stencil) != 0)
 		__glcheck draw_fbo.depth = *std::get<1>(m_rtts.m_bound_depth_stencil);
+
 	__glcheck draw_fbo.check();
+	__glcheck draw_fbo.read_buffer(draw_fbo.color[0]);
 
 
 	switch (rsx::to_surface_target(rsx::method_registers[NV4097_SET_SURFACE_COLOR_TARGET]))
@@ -102,8 +118,11 @@ void GLGSRender::init_buffers(bool skip_reading)
 		break;
 
 	case rsx::surface_target::surface_b:
+	{
 		__glcheck draw_fbo.draw_buffer(draw_fbo.color[1]);
+		__glcheck draw_fbo.read_buffer(draw_fbo.color[1]);
 		break;
+	}
 
 	case rsx::surface_target::surfaces_a_b:
 		__glcheck draw_fbo.draw_buffers({ draw_fbo.color[0], draw_fbo.color[1] });
@@ -144,7 +163,7 @@ void GLGSRender::read_buffers()
 
 	glDisable(GL_STENCIL_TEST);
 
-	if (rpcs3::state.config.rsx.opengl.read_color_buffers)
+	if (g_cfg_rsx_read_color_buffers)
 	{
 		auto color_format = rsx::internals::surface_color_format_to_gl(m_surface.color_format);
 
@@ -215,7 +234,7 @@ void GLGSRender::read_buffers()
 		}
 	}
 
-	if (rpcs3::state.config.rsx.opengl.read_depth_buffer)
+	if (g_cfg_rsx_read_depth_buffer)
 	{
 		//TODO: use pitch
 		u32 pitch = rsx::method_registers[NV4097_SET_SURFACE_PITCH_Z];
@@ -272,7 +291,7 @@ void GLGSRender::write_buffers()
 	//TODO: Detect when the data is actually being used by cell and issue download command on-demand (mark as not present?)
 	//Should also mark cached resources as dirty so that read buffers works out-of-the-box without modification
 
-	if (rpcs3::state.config.rsx.opengl.write_color_buffers)
+	if (g_cfg_rsx_write_color_buffers)
 	{
 		auto color_format = rsx::internals::surface_color_format_to_gl(m_surface.color_format);
 
@@ -330,7 +349,7 @@ void GLGSRender::write_buffers()
 		}
 	}
 
-	if (rpcs3::state.config.rsx.opengl.write_depth_buffer)
+	if (g_cfg_rsx_write_depth_buffer)
 	{
 		//TODO: use pitch
 		u32 pitch = rsx::method_registers[NV4097_SET_SURFACE_PITCH_Z];

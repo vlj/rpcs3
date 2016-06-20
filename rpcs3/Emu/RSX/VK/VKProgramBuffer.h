@@ -11,6 +11,9 @@ namespace vk
 		VkPipelineInputAssemblyStateCreateInfo ia;
 		VkPipelineDepthStencilStateCreateInfo ds;
 		VkPipelineColorBlendAttachmentState att_state[4];
+		VkPipelineColorBlendStateCreateInfo cs;
+		VkPipelineRasterizationStateCreateInfo rs;
+		
 		VkRenderPass render_pass;
 		int num_targets;
 
@@ -21,6 +24,10 @@ namespace vk
 			if (memcmp(&ds, &other.ds, sizeof(VkPipelineDepthStencilStateCreateInfo)))
 				return false;
 			if (memcmp(&att_state[0], &other.att_state[0], sizeof(VkPipelineColorBlendAttachmentState)))
+				return false;
+			if (memcmp(&cs, &other.cs, sizeof(VkPipelineColorBlendStateCreateInfo)))
+				return false;
+			if (memcmp(&rs, &other.rs, sizeof(VkPipelineRasterizationStateCreateInfo)))
 				return false;
 			return num_targets == other.num_targets;
 		}

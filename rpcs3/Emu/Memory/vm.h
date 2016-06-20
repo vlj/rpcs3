@@ -1,6 +1,9 @@
 #pragma once
 
-#include "Utilities/Thread.h"
+#include <map>
+#include <mutex>
+
+class thread_ctrl;
 
 namespace vm
 {
@@ -30,73 +33,15 @@ namespace vm
 		page_allocated          = (1 << 7),
 	};
 
-	struct waiter_t
+	// Address type
+	enum addr_t : u32 {};
+
+	struct access_violation : std::runtime_error
 	{
-		u32 addr = 0;
-		u32 mask = ~0;
-		named_thread_t* thread = nullptr;
-
-		std::function<bool()> pred;
-
-		waiter_t() = default;
-
-		waiter_t* reset(u32 addr, u32 size, named_thread_t& thread)
-		{
-			this->addr = addr;
-			this->mask = ~(size - 1);
-			this->thread = &thread;
-
-			// must be null at this point
-			if (pred)
-			{
-				throw EXCEPTION("Unexpected");
-			}
-
-			return this;
-		}
-
-		bool try_notify();
+		access_violation(u64 addr, const char* cause);
 	};
 
-	class waiter_lock_t
-	{
-		waiter_t* m_waiter;
-		std::unique_lock<std::mutex> m_lock;
-
-	public:
-		waiter_lock_t(named_thread_t& thread, u32 addr, u32 size);
-
-		waiter_t* operator ->() const
-		{
-			return m_waiter;
-		}
-
-		void wait();
-
-		~waiter_lock_t();
-	};
-
-	// Wait until pred() returns true, addr must be aligned to size which must be a power of 2, pred() may be called by any thread
-	template<typename F, typename... Args> auto wait_op(named_thread_t& thread, u32 addr, u32 size, F pred, Args&&... args) -> decltype(static_cast<void>(pred(args...)))
-	{
-		// return immediately if condition passed (optimistic case)
-		if (pred(args...)) return;
-
-		// initialize waiter and locker
-		waiter_lock_t lock(thread, addr, size);
-
-		// initialize predicate
-		lock->pred = WRAP_EXPR(pred(args...));
-
-		// start waiting
-		lock.wait();
-	}
-
-	// Notify waiters on specific addr, addr must be aligned to size which must be a power of 2
-	void notify_at(u32 addr, u32 size);
-
-	// Try to poll each waiter's condition (false if try_lock failed)
-	bool notify_all();
+	[[noreturn]] void throw_access_violation(u64 addr, const char* cause);
 
 	// This flag is changed by various reservation functions and may have different meaning.
 	// reservation_break() - true if the reservation was successfully broken.
@@ -119,7 +64,7 @@ namespace vm
 	bool reservation_query(u32 addr, u32 size, bool is_writing, std::function<bool()> callback);
 
 	// Returns true if the current thread owns reservation
-	bool reservation_test(const thread_ctrl* current = thread_ctrl::get_current());
+	bool reservation_test(thread_ctrl* current);
 
 	// Break all reservations created by the current thread
 	void reservation_free();
@@ -192,11 +137,11 @@ namespace vm
 	std::shared_ptr<block_t> get(memory_location_t location, u32 addr = 0);
 
 	// Get PS3/PSV virtual memory address from the provided pointer (nullptr always converted to 0)
-	inline u32 get_addr(const void* real_ptr)
+	inline vm::addr_t get_addr(const void* real_ptr)
 	{
 		if (!real_ptr)
 		{
-			return 0;
+			return vm::addr_t{};
 		}
 
 		const std::ptrdiff_t diff = static_cast<const u8*>(real_ptr) - g_base_addr;
@@ -204,10 +149,10 @@ namespace vm
 
 		if (res == diff)
 		{
-			return res;
+			return static_cast<vm::addr_t>(res);
 		}
 
-		throw EXCEPTION("Not a virtual memory pointer (%p)", real_ptr);
+		throw fmt::exception("Not a virtual memory pointer (%p)", real_ptr);
 	}
 
 	// Convert pointer-to-member to a vm address compatible offset
@@ -216,38 +161,64 @@ namespace vm
 		return static_cast<u32>(reinterpret_cast<std::uintptr_t>(&reinterpret_cast<char const volatile&>(reinterpret_cast<T*>(0ull)->*member_ptr)));
 	}
 
-	template<typename T> struct cast_ptr
+	template<typename T>
+	struct cast_impl
 	{
-		static_assert(std::is_same<T, u32>::value, "Unsupported VM_CAST() type");
+		static_assert(std::is_same<T, u32>::value, "vm::cast() error: unsupported type");
 	};
 
-	template<> struct cast_ptr<u32>
+	template<>
+	struct cast_impl<u32>
 	{
-		static u32 cast(const u32 addr, const char* file, int line, const char* func)
+		static vm::addr_t cast(u32 addr, const char* loc)
 		{
-			return addr;
+			return static_cast<vm::addr_t>(addr);
+		}
+
+		static vm::addr_t cast(u32 addr)
+		{
+			return static_cast<vm::addr_t>(addr);
 		}
 	};
 
-	template<> struct cast_ptr<u64>
+	template<>
+	struct cast_impl<u64>
 	{
-		static u32 cast(const u64 addr, const char* file, int line, const char* func)
+		static vm::addr_t cast(u64 addr, const char* loc)
 		{
-			return static_cast<u32>(addr) == addr ? static_cast<u32>(addr) : throw fmt::exception(file, line, func, "VM_CAST failed (addr=0x%llx)", addr);
+			return static_cast<vm::addr_t>(fmt::narrow<u32>("Memory address out of range: 0x%llx%s", addr, loc));
+		}
+
+		static vm::addr_t cast(u64 addr)
+		{
+			return static_cast<vm::addr_t>(fmt::narrow<u32>("Memory address out of range: 0x%llx", addr));
 		}
 	};
 
-	template<typename T, bool Se> struct cast_ptr<se_t<T, Se>>
+	template<typename T, bool Se>
+	struct cast_impl<se_t<T, Se>>
 	{
-		static u32 cast(const se_t<T, Se>& addr, const char* file, int line, const char* func)
+		static vm::addr_t cast(const se_t<T, Se>& addr, const char* loc)
 		{
-			return cast_ptr<T>::cast(addr, file, line, func);
+			return cast_impl<T>::cast(addr, loc);
+		}
+
+		static vm::addr_t cast(const se_t<T, Se>& addr)
+		{
+			return cast_impl<T>::cast(addr);
 		}
 	};
 
-	template<typename T> u32 impl_cast(const T& addr, const char* file, int line, const char* func)
+	template<typename T>
+	vm::addr_t cast(const T& addr, const char* loc)
 	{
-		return cast_ptr<T>::cast(addr, file, line, func);
+		return cast_impl<T>::cast(addr, loc);
+	}
+
+	template<typename T>
+	vm::addr_t cast(const T& addr)
+	{
+		return cast_impl<T>::cast(addr);
 	}
 
 	// Convert specified PS3/PSV virtual memory address to a pointer for common access
@@ -392,47 +363,11 @@ namespace vm
 	}
 
 	void close();
-}
-
-#include "vm_ptr.h"
-
-namespace vm
-{
-	class stack
-	{
-		u32 m_begin;
-		u32 m_size;
-		int m_page_size;
-		int m_position;
-		u8 m_align;
-
-	public:
-		void init(u32 begin, u32 size, u32 page_size = 180, u8 align = 0x10)
-		{
-			m_begin = begin;
-			m_size = size;
-			m_page_size = page_size;
-			m_position = 0;
-			m_align = align;
-		}
-
-		u32 alloc_new_page()
-		{
-			assert(m_position + m_page_size < (int)m_size);
-			m_position += (int)m_page_size;
-			return m_begin + m_position;
-		}
-
-		u32 dealloc_new_page()
-		{
-			assert(m_position - m_page_size > 0);
-			m_position -= (int)m_page_size;
-			return m_begin + m_position;
-		}
-	};
 
 	u32 stack_push(u32 size, u32 align_v);
-	void stack_pop(u32 addr, u32 size);
+	void stack_pop_verbose(u32 addr, u32 size) noexcept;
+
+	extern thread_local u64 g_tls_fault_count;
 }
 
 #include "vm_var.h"

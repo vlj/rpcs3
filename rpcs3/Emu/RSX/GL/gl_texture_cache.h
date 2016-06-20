@@ -62,12 +62,20 @@ namespace gl
 		std::vector<gl_cached_texture> texture_cache;
 		std::vector<cached_rtt> rtt_cache;
 		u32 frame_ctr;
+		std::pair<u64, u64> texture_cache_range = std::make_pair(0xFFFFFFFF, 0);
+		u32 max_tex_address = 0;
 
 		bool lock_memory_region(u32 start, u32 size)
 		{
 			static const u32 memory_page_size = 4096;
 			start = start & ~(memory_page_size - 1);
 			size = (u32)align(size, memory_page_size);
+
+			if (start < texture_cache_range.first)
+				texture_cache_range = std::make_pair(start, texture_cache_range.second);
+
+			if ((start+size) > texture_cache_range.second)
+				texture_cache_range = std::make_pair(texture_cache_range.first, (start+size));
 
 			return vm::page_protect(start, size, 0, 0, vm::page_writable);
 		}
@@ -109,9 +117,6 @@ namespace gl
 				{
 					if (w && h && mipmap && (tex.h != h || tex.w != w || tex.mipmap != mipmap))
 					{
-						LOG_ERROR(RSX, "Texture params are invalid for block starting 0x%X!", tex.data_addr);
-						LOG_ERROR(RSX, "Params passed w=%d, h=%d, mip=%d, found w=%d, h=%d, mip=%d", w, h, mipmap, tex.w, tex.h, tex.mipmap);
-
 						continue;
 					}
 
@@ -240,7 +245,6 @@ namespace gl
 
 				if (region_overlaps(rtt_aligned_base, (rtt_aligned_base + rtt_block_sz), base, base+size))
 				{
-					LOG_NOTICE(RSX, "Dirty RTT FOUND addr=0x%X", base);
 					rtt.is_dirty = true;
 					if (rtt.locked)
 					{
@@ -322,8 +326,6 @@ namespace gl
 						rtt.data_addr = base;
 						rtt.is_dirty = true;
 
-						LOG_NOTICE(RSX, "New RTT created for block 0x%X + 0x%X", (u32)rtt.data_addr, rtt.block_sz);
-
 						lock_memory_region((u32)rtt.data_addr, rtt.block_sz);
 						rtt.locked = true;
 
@@ -342,10 +344,8 @@ namespace gl
 
 				if (region->locked && region->block_sz != size)
 				{
-					LOG_NOTICE(RSX, "Unlocking RTT since size has changed!");
 					unlock_memory_region((u32)region->data_addr, region->block_sz);
 
-					LOG_NOTICE(RSX, "Locking down RTT after size change!");
 					region->block_sz = size;
 					lock_memory_region((u32)region->data_addr, region->block_sz);
 					region->locked = true;
@@ -508,6 +508,10 @@ namespace gl
 
 		bool mark_as_dirty(u32 address)
 		{
+			if (address < texture_cache_range.first ||
+				address > texture_cache_range.second)
+				return false;
+
 			bool response = false;
 
 			for (gl_cached_texture &tex: texture_cache)
@@ -517,7 +521,6 @@ namespace gl
 				if (tex.protected_block_start <= address &&
 					tex.protected_block_sz >(address - tex.protected_block_start))
 				{
-					LOG_NOTICE(RSX, "Texture object is dirty! %d", tex.gl_id);
 					unlock_gl_object(tex);
 
 					invalidate_rtts_in_range((u32)tex.data_addr, tex.block_sz);
@@ -541,7 +544,6 @@ namespace gl
 					u32 offset = address - rtt_aligned_base;
 					if (offset >= rtt_block_sz) continue;
 
-					LOG_NOTICE(RSX, "Dirty non-texture RTT FOUND! addr=0x%X", rtt.data_addr);
 					rtt.is_dirty = true;
 
 					unlock_memory_region(rtt_aligned_base, rtt_block_sz);

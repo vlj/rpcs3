@@ -1,26 +1,65 @@
-﻿#include "stdafx.h"
-#include "Thread.h"
+﻿#include "Log.h"
 #include "File.h"
-#include "Log.h"
+#include "StrFmt.h"
 
-#ifdef _WIN32
-#include <Windows.h>
+#include <cstdarg>
+#include <string>
+
+// Thread-specific log prefix provider
+thread_local std::string(*g_tls_log_prefix)() = nullptr;
+
+#ifndef _MSC_VER
+constexpr DECLARE(bijective<logs::level, const char*>::map);
 #endif
 
-namespace _log
+namespace logs
 {
-	logger& get_logger()
+	struct listener
 	{
-		// Use magic static for global logger instance
-		static logger instance;
-		return instance;
+		listener() = default;
+
+		virtual ~listener() = default;
+
+		virtual void log(const channel& ch, level sev, const std::string& text) = 0;
+	};
+
+	class file_writer
+	{
+		// Could be memory-mapped file
+		fs::file m_file;
+
+	public:
+		file_writer(const std::string& name);
+
+		virtual ~file_writer() = default;
+
+		// Append raw data
+		void log(const std::string& text);
+
+		// Get current file size (may be used by secondary readers)
+		std::size_t size() const;
+	};
+
+	struct file_listener : public file_writer, public listener
+	{
+		file_listener(const std::string& name)
+			: file_writer(name)
+			, listener()
+		{
+		}
+
+		// Encode level, current thread name, channel name and write log message
+		virtual void log(const channel& ch, level sev, const std::string& text) override;
+	};
+
+	static file_listener& get_logger()
+	{
+		// Use magic static
+		static file_listener logger("RPCS3.log");
+		return logger;
 	}
 
-	file_listener g_log_file(_PRGNAME_ ".log");
-
-	file_writer g_tty_file("TTY.log");
-
-	channel GENERAL("", level::notice);
+	channel GENERAL(nullptr, level::notice);
 	channel LOADER("LDR", level::notice);
 	channel MEMORY("MEM", level::notice);
 	channel RSX("RSX", level::notice);
@@ -30,84 +69,42 @@ namespace _log
 	channel ARMv7("ARMv7");
 }
 
-_log::listener::listener()
+void logs::channel::broadcast(const logs::channel& ch, logs::level sev, const char* fmt...)
 {
-	// Register self
-	get_logger().add_listener(this);
+	va_list args;
+	va_start(args, fmt);
+	get_logger().log(ch, sev, fmt::unsafe_vformat(fmt, args));
+	va_end(args);
 }
 
-_log::listener::~listener()
-{
-	// Unregister self
-	get_logger().remove_listener(this);
-}
+[[noreturn]] extern void catch_all_exceptions();
 
-_log::channel::channel(const std::string& name, _log::level init_level)
-	: name{ name }
-	, enabled{ init_level }
-{
-	// TODO: register config property "name" associated with "enabled" member
-}
-
-void _log::logger::add_listener(_log::listener* listener)
-{
-	std::lock_guard<shared_mutex> lock(m_mutex);
-
-	m_listeners.emplace(listener);
-}
-
-void _log::logger::remove_listener(_log::listener* listener)
-{
-	std::lock_guard<shared_mutex> lock(m_mutex);
-
-	m_listeners.erase(listener);
-}
-
-void _log::logger::broadcast(const _log::channel& ch, _log::level sev, const std::string& text) const
-{
-	reader_lock lock(m_mutex);
-
-	for (auto listener : m_listeners)
-	{
-		listener->log(ch, sev, text);
-	}
-}
-
-void _log::broadcast(const _log::channel& ch, _log::level sev, const std::string& text)
-{
-	get_logger().broadcast(ch, sev, text);
-}
-
-_log::file_writer::file_writer(const std::string& name)
+logs::file_writer::file_writer(const std::string& name)
 {
 	try
 	{
-		if (!m_file.open(fs::get_config_dir() + name, fom::rewrite | fom::append))
+		if (!m_file.open(fs::get_config_dir() + name, fs::rewrite + fs::append))
 		{
-			throw EXCEPTION("Can't create log file %s (error %d)", name, errno);
+			throw fmt::exception("Can't create log file %s (error %d)", name, fs::g_tls_error);
 		}
 	}
-	catch (const fmt::exception& e)
+	catch (...)
 	{
-#ifdef _WIN32
-		MessageBoxA(0, e.what(), "_log::file_writer() failed", MB_ICONERROR);
-#else
-		std::printf("_log::file_writer() failed: %s\n", e.what());
-#endif
+		catch_all_exceptions();
 	}
 }
 
-void _log::file_writer::log(const std::string& text)
+void logs::file_writer::log(const std::string& text)
 {
 	m_file.write(text);
 }
 
-std::size_t _log::file_writer::size() const
+std::size_t logs::file_writer::size() const
 {
-	return m_file.seek(0, fs::seek_cur);
+	return m_file.pos();
 }
 
-void _log::file_listener::log(const _log::channel& ch, _log::level sev, const std::string& text)
+void logs::file_listener::log(const logs::channel& ch, logs::level sev, const std::string& text)
 {
 	std::string msg; msg.reserve(text.size() + 200);
 
@@ -126,14 +123,14 @@ void _log::file_listener::log(const _log::channel& ch, _log::level sev, const st
 
 	// TODO: print time?
 
-	if (auto t = thread_ctrl::get_current())
+	if (auto prefix = g_tls_log_prefix)
 	{
 		msg += '{';
-		msg += t->get_name();
+		msg += prefix();
 		msg += "} ";
 	}
-
-	if (ch.name.size())
+	
+	if (ch.name)
 	{
 		msg += ch.name;
 		msg += sev == level::todo ? " TODO: " : ": ";

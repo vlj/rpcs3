@@ -37,6 +37,8 @@ void VKFragmentDecompilerThread::insertHeader(std::stringstream & OS)
 	OS << "	mat4 scaleOffsetMat;" << std::endl;
 	OS << "	float fog_param0;" << std::endl;
 	OS << "	float fog_param1;" << std::endl;
+	OS << "	uint alpha_test;" << std::endl;
+	OS << "	float alpha_ref;" << std::endl;
 	OS << "};" << std::endl << std::endl;
 
 	vk::glsl::program_input in;
@@ -54,6 +56,9 @@ void VKFragmentDecompilerThread::insertIntputs(std::stringstream & OS)
 	{
 		for (const ParamItem& PI : PT.items)
 		{
+			//ssa is defined in the program body and is not a varying type
+			if (PI.name == "ssa") continue;
+
 			const vk::varying_register_t &reg = vk::get_varying_register(PI.name);
 			
 			std::string var_name = PI.name;
@@ -216,10 +221,14 @@ void VKFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 		{ "ocol3", m_ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS ? "r4" : "h8" },
 	};
 
+	std::string first_output_name;
 	for (int i = 0; i < sizeof(table) / sizeof(*table); ++i)
 	{
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", table[i].second))
+		{
 			OS << "	" << table[i].first << " = " << table[i].second << ";" << std::endl;
+			if (first_output_name.empty()) first_output_name = table[i].first;
+		}
 	}
 
 	if (m_ctrl & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT)
@@ -234,6 +243,30 @@ void VKFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 		}
 	}
 
+	if (!first_output_name.empty())
+	{
+		switch (m_prog.alpha_func)
+		{
+		case rsx::comparaison_function::equal:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a != alpha_ref) discard;\n";
+			break;
+		case rsx::comparaison_function::not_equal:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a == alpha_ref) discard;\n";
+			break;
+		case rsx::comparaison_function::less_or_equal:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a > alpha_ref) discard;\n";
+			break;
+		case rsx::comparaison_function::less:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a >= alpha_ref) discard;\n";
+			break;
+		case rsx::comparaison_function::greater:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a <= alpha_ref) discard;\n";
+			break;
+		case rsx::comparaison_function::greater_or_equal:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a < alpha_ref) discard;\n";
+			break;
+		}
+	}
 
 	OS << "}" << std::endl;
 }
@@ -273,7 +306,7 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 
 void VKFragmentProgram::Compile()
 {
-	fs::file(fs::get_config_dir() + "FragmentProgram.frag", fom::rewrite).write(shader);
+	fs::file(fs::get_config_dir() + "shaderlog/FragmentProgram.spirv", fs::rewrite).write(shader);
 
 	std::vector<u32> spir_v;
 	if (!vk::compile_glsl_to_spv(shader, vk::glsl::glsl_fragment_program, spir_v))

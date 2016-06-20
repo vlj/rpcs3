@@ -35,6 +35,8 @@ void VKVertexDecompilerThread::insertHeader(std::stringstream &OS)
 	OS << "	mat4 scaleOffsetMat;" << std::endl;
 	OS << "	float fog_param0;\n";
 	OS << "	float fog_param1;\n";
+	OS << "	uint alpha_test;\n";
+	OS << "	float alpha_ref;\n";
 	OS << "};" << std::endl;
 
 	vk::glsl::program_input in;
@@ -80,8 +82,19 @@ void VKVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::v
 					in.type = vk::glsl::input_type_texel_buffer;
 
 					this->inputs.push_back(in);
+					
+					bool is_int = false;
+					for (auto &attrib : rsx_vertex_program.rsx_vertex_inputs)
+					{
+						if (attrib.location == std::get<0>(item))
+						{
+							if (attrib.int_type) is_int = true;
+							break;
+						}
+					}
 
-					OS << "layout(set = 0, binding=" << 3 + location++ << ")" << "	uniform samplerBuffer" << " " << PI.name << "_buffer;" << std::endl;
+					std::string samplerType = is_int ? "isamplerBuffer" : "samplerBuffer";
+					OS << "layout(set = 0, binding=" << 3 + location++ << ")" << "	uniform " << samplerType << " " << PI.name << "_buffer;" << std::endl;
 				}
 			}
 		}
@@ -125,9 +138,13 @@ static const reg_info reg_table[] =
 	{ "gl_ClipDistance[1]", false, "dst_reg5", ".z", false },
 	{ "gl_ClipDistance[2]", false, "dst_reg5", ".w", false },
 	{ "gl_PointSize", false, "dst_reg6", ".x", false },
-	{ "gl_ClipDistance[3]", false, "dst_reg6", ".y", false },
-	{ "gl_ClipDistance[4]", false, "dst_reg6", ".z", false },
-	{ "gl_ClipDistance[5]", false, "dst_reg6", ".w", false },
+
+	//Disable user clip planes until they are properly handled
+
+	//{ "gl_ClipDistance[3]", false, "dst_reg6", ".y", false },
+	//{ "gl_ClipDistance[4]", false, "dst_reg6", ".z", false },
+	//{ "gl_ClipDistance[5]", false, "dst_reg6", ".w", false },
+
 	{ "tc0", true, "dst_reg7", "", false },
 	{ "tc1", true, "dst_reg8", "", false },
 	{ "tc2", true, "dst_reg9", "", false },
@@ -165,9 +182,13 @@ namespace vk
 			if (real_input.location != PI.location)
 				continue;
 
+			std::string vecType = "	vec4 ";
+			if (real_input.int_type)
+				vecType = "	ivec4 ";
+
 			if (!real_input.is_array)
 			{
-				OS << "	vec4 " << PI.name << " = texelFetch(" << PI.name << "_buffer, 0);" << std::endl;
+				OS << vecType << PI.name << " = texelFetch(" << PI.name << "_buffer, 0);" << std::endl;
 				return;
 			}
 
@@ -175,19 +196,19 @@ namespace vk
 			{
 				if (real_input.is_modulo)
 				{
-					OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex %" << real_input.frequency << ");" << std::endl;
+					OS << vecType << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex %" << real_input.frequency << ");" << std::endl;
 					return;
 				}
 
-				OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex /" << real_input.frequency << ");" << std::endl;
+				OS << vecType << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex /" << real_input.frequency << ");" << std::endl;
 				return;
 			}
 
-			OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex).rgba;" << std::endl;
+			OS << vecType << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex).rgba;" << std::endl;
 			return;
 		}
 
-		OS << "	vec4 " << PI.name << " = vec4(0., 0., 0., 1.);" << std::endl;
+		OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex).rgba;" << std::endl;
 	}
 }
 
@@ -253,7 +274,7 @@ void VKVertexProgram::Decompile(const RSXVertexProgram& prog)
 
 void VKVertexProgram::Compile()
 {
-	fs::file(fs::get_config_dir() + "VertexProgram.vert", fom::rewrite).write(shader);
+	fs::file(fs::get_config_dir() + "shaderlog/VertexProgram.spirv", fs::rewrite).write(shader);
 
 	std::vector<u32> spir_v;
 	if (!vk::compile_glsl_to_spv(shader, vk::glsl::glsl_vertex_program, spir_v))

@@ -1,15 +1,17 @@
 #pragma once
 
+#include <stack>
+#include <deque>
+#include <set>
+#include <mutex>
 #include "GCM.h"
 #include "RSXTexture.h"
 #include "RSXVertexProgram.h"
 #include "RSXFragmentProgram.h"
 
-#include <stack>
-#include "Utilities/Semaphore.h"
 #include "Utilities/Thread.h"
 #include "Utilities/Timer.h"
-#include "Utilities/convert.h"
+#include "Utilities/geometry.h"
 
 extern u64 get_system_time();
 
@@ -46,44 +48,25 @@ namespace rsx
 	enum class shader_language
 	{
 		glsl,
-		hlsl
+		hlsl,
 	};
 }
 
-namespace convert
+template<>
+struct unveil<rsx::shader_language>
 {
-	template<>
-	struct to_impl_t<rsx::shader_language, std::string>
+	static inline const char* get(rsx::shader_language in)
 	{
-		static rsx::shader_language func(const std::string &from)
+		switch (in)
 		{
-			if (from == "glsl")
-				return rsx::shader_language::glsl;
-
-			if (from == "hlsl")
-				return rsx::shader_language::hlsl;
-
-			throw;
+		case rsx::shader_language::glsl: return "glsl";
+		case rsx::shader_language::hlsl: return "hlsl";
 		}
-	};
 
-	template<>
-	struct to_impl_t<std::string, rsx::shader_language>
-	{
-		static std::string func(rsx::shader_language from)
-		{
-			switch (from)
-			{
-			case rsx::shader_language::glsl:
-				return "glsl";
-			case rsx::shader_language::hlsl:
-				return "hlsl";
-			}
+		return "";
+	}
+};
 
-			throw;
-		}
-	};
-}
 namespace rsx
 {
 	namespace limits
@@ -212,7 +195,7 @@ namespace rsx
 		indexed,
 	};
 
-	class thread : public named_thread_t
+	class thread : public named_thread
 	{
 	protected:
 		std::stack<u32> m_call_stack;
@@ -280,7 +263,6 @@ namespace rsx
 		u32 gcm_buffers_count;
 		u32 gcm_current_buffer;
 		u32 ctxt_addr;
-		u32 report_main_addr;
 		u32 label_addr;
 		rsx::draw_command draw_command;
 		primitive_type draw_mode;
@@ -305,7 +287,6 @@ namespace rsx
 		double fps_limit = 59.94;
 
 	public:
-		semaphore_t sem_flip;
 		u64 last_flip_time;
 		vm::ps3::ptr<void(u32)> flip_handler = vm::null;
 		vm::ps3::ptr<void(u32)> user_handler = vm::null;
@@ -324,10 +305,13 @@ namespace rsx
 	public:
 		virtual std::string get_name() const override;
 
+		virtual void on_init() override {} // disable start() (TODO)
+		virtual void on_stop() override {} // disable join()
+
 		virtual void begin();
 		virtual void end();
 
-		virtual void on_init() = 0;
+		virtual void on_init_rsx() = 0;
 		virtual void on_init_thread() = 0;
 		virtual bool do_method(u32 cmd, u32 value) { return false; }
 		virtual void flip(int buffer) = 0;
@@ -340,7 +324,7 @@ namespace rsx
 		struct internal_task_entry
 		{
 			std::function<bool()> callback;
-			std::promise<void> promise;
+			//std::promise<void> promise;
 
 			internal_task_entry(std::function<bool()> callback) : callback(callback)
 			{
@@ -351,8 +335,8 @@ namespace rsx
 		void do_internal_task();
 
 	public:
-		std::future<void> add_internal_task(std::function<bool()> callback);
-		void invoke(std::function<bool()> callback);
+		//std::future<void> add_internal_task(std::function<bool()> callback);
+		//void invoke(std::function<bool()> callback);
 
 		/**
 		 * Fill buffer with 4x4 scale offset matrix.

@@ -1,12 +1,23 @@
 #include "stdafx.h"
+#include "Utilities/Config.h"
 #include "rsx_methods.h"
 #include "RSXThread.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
-#include "Emu/state.h"
 #include "rsx_utils.h"
-#include "Emu/SysCalls/Callback.h"
-#include "Emu/SysCalls/CB_FUNC.h"
+#include "Emu/Cell/PPUCallback.h"
+
+#include <thread>
+
+cfg::map_entry<double> g_cfg_rsx_frame_limit(cfg::root.video, "Frame limit",
+{
+	{ "Off", 0. },
+	{ "59.94", 59.94 },
+	{ "50", 50. },
+	{ "60", 60. },
+	{ "30", 30. },
+	{ "Auto", -1. },
+});
 
 namespace rsx
 {
@@ -34,7 +45,7 @@ namespace rsx
 				if (Emu.IsStopped())
 					break;
 
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				std::this_thread::sleep_for(1ms);
 			}
 		}
 
@@ -244,7 +255,7 @@ namespace rsx
 				return;
 			}
 
-			vm::ps3::ptr<CellGcmReportData> result = { get_address(offset, location), vm::addr };
+			vm::ps3::ptr<CellGcmReportData> result = vm::cast(get_address(offset, location));
 
 			result->timer = rsx->timestamp();
 
@@ -442,7 +453,7 @@ namespace rsx
 			//	method_registers[NV3089_IMAGE_IN_SIZE], in_pitch, src_offset, double(1 << 20) / (method_registers[NV3089_DS_DX]), double(1 << 20) / (method_registers[NV3089_DT_DY]),
 			//	method_registers[NV3089_CLIP_SIZE], method_registers[NV3089_IMAGE_OUT_SIZE]);
 
-			std::unique_ptr<u8[]> temp1, temp2;
+			std::unique_ptr<u8[]> temp1, temp2, sw_temp;
 
 			AVPixelFormat in_format = src_color_format == CELL_GCM_TRANSFER_SCALE_FORMAT_R5G6B5 ? AV_PIX_FMT_RGB565BE : AV_PIX_FMT_ARGB;
 			AVPixelFormat out_format = dst_color_format == CELL_GCM_TRANSFER_SURFACE_FORMAT_R5G6B5 ? AV_PIX_FMT_RGB565BE : AV_PIX_FMT_ARGB;
@@ -564,7 +575,7 @@ namespace rsx
 				// Check and pad texture out if we are given non square texture for swizzle to be correct
 				if (sw_width != out_w || sw_height != out_h)
 				{
-					std::unique_ptr<u8[]> sw_temp(new u8[out_bpp * sw_width * sw_height]);
+					sw_temp.reset(new u8[out_bpp * sw_width * sw_height]);
 
 					switch (out_bpp)
 					{
@@ -665,26 +676,14 @@ namespace rsx
 			});
 		}
 
-		rsx->sem_flip.post_and_wait();
-
-		//sync
-		double limit;
-		switch (rpcs3::state.config.rsx.frame_limit.value())
+		if (double limit = g_cfg_rsx_frame_limit.get())
 		{
-		case rsx_frame_limit::_50: limit = 50.; break;
-		case rsx_frame_limit::_59_94: limit = 59.94; break;
-		case rsx_frame_limit::_30: limit = 30.; break;
-		case rsx_frame_limit::_60: limit = 60.; break;
-		case rsx_frame_limit::Auto: limit = rsx->fps_limit; break; //TODO
+			if (limit < 0) limit = rsx->fps_limit; // TODO
 
-		case rsx_frame_limit::Off:
-		default:
-			return;
+			std::this_thread::sleep_for(std::chrono::milliseconds((s64)(1000.0 / limit - rsx->timer_sync.GetElapsedTimeInMilliSec())));
+			rsx->timer_sync.Start();
+			rsx->local_transform_constants.clear();
 		}
-
-		std::this_thread::sleep_for(std::chrono::milliseconds((s64)(1000.0 / limit - rsx->timer_sync.GetElapsedTimeInMilliSec())));
-		rsx->timer_sync.Start();
-		rsx->local_transform_constants.clear();
 	}
 
 	void user_command(thread* rsx, u32 arg)

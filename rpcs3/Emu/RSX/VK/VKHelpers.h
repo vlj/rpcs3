@@ -8,13 +8,14 @@
 #include <memory>
 #include <unordered_map>
 
-#include <glm/glm.hpp>
-#include <glm/gtc/type_ptr.hpp>
-
-#include "Emu/state.h"
+#include "Utilities/Config.h"
 #include "VulkanAPI.h"
 #include "../GCM.h"
 #include "../Common/TextureUtils.h"
+#include "../Common/ring_buffer_helper.h"
+
+#define DESCRIPTOR_MAX_DRAW_CALLS 1024
+extern cfg::bool_entry g_cfg_rsx_debug_output;
 
 namespace rsx
 {
@@ -66,7 +67,7 @@ namespace vk
 	void copy_scaled_image(VkCommandBuffer cmd, VkImage &src, VkImage &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 src_width, u32 src_height, u32 dst_width, u32 dst_height, u32 mipmaps, VkImageAspectFlagBits aspect);
 
 	VkFormat get_compatible_sampler_format(u32 format);
-	VkFormat get_compatible_surface_format(rsx::surface_color_format color_format);
+	std::pair<VkFormat, VkComponentMapping> get_compatible_surface_format(rsx::surface_color_format color_format);
 	size_t get_render_pass_location(VkFormat color_surface_format, VkFormat depth_stencil_format, u8 color_surface_count);
 
 	struct memory_type_mapping
@@ -173,7 +174,7 @@ namespace vk
 
 			std::vector<const char *> layers;
 
-			if (rpcs3::config.rsx.d3d12.debug_output.value())
+			if (g_cfg_rsx_debug_output)
 				layers.push_back("VK_LAYER_LUNARG_standard_validation");
 
 			VkDeviceCreateInfo device;
@@ -336,6 +337,7 @@ namespace vk
 	struct image
 	{
 		VkImage value;
+		VkComponentMapping native_layout = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
 		VkImageCreateInfo info = {};
 		std::shared_ptr<vk::memory_block> memory;
 
@@ -499,7 +501,7 @@ namespace vk
 		void *map(u64 offset, u64 size)
 		{
 			void *data = nullptr;
-			CHECK_RESULT(vkMapMemory(m_device, memory->memory, offset, size, 0, &data));
+			CHECK_RESULT(vkMapMemory(m_device, memory->memory, offset, std::max<u64>(size, 1u), 0, &data));
 			return data;
 		}
 
@@ -569,7 +571,7 @@ namespace vk
 			info.minFilter = min_filter;
 			info.mipmapMode = mipmap_mode;
 			info.compareOp = VK_COMPARE_OP_NEVER;
-			info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+			info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
 
 			CHECK_RESULT(vkCreateSampler(m_device, &info, nullptr, &value));
 		}
@@ -1038,7 +1040,7 @@ namespace vk
 
 			std::vector<const char *> layers;
 
-			if (rpcs3::config.rsx.d3d12.debug_output.value())
+			if (g_cfg_rsx_debug_output)
 				layers.push_back("VK_LAYER_LUNARG_standard_validation");
 
 			VkInstanceCreateInfo instance_info = {};
@@ -1211,7 +1213,7 @@ namespace vk
 		{
 			VkDescriptorPoolCreateInfo infos = {};
 			infos.flags = 0;
-			infos.maxSets = 1000;
+			infos.maxSets = DESCRIPTOR_MAX_DRAW_CALLS;
 			infos.poolSizeCount = size_descriptors_count;
 			infos.pPoolSizes = sizes;
 			infos.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1308,86 +1310,20 @@ namespace vk
 		};
 	}
 
-
-
-	// TODO: factorize between backends
-	class data_heap
+	struct vk_data_heap : public data_heap
 	{
-		/**
-		* Does alloc cross get position ?
-		*/
-		template<int Alignement>
-		bool can_alloc(size_t size) const
+		std::unique_ptr<vk::buffer> heap;
+
+		void* map(size_t offset, size_t size)
 		{
-			size_t alloc_size = align(size, Alignement);
-			size_t aligned_put_pos = align(m_put_pos, Alignement);
-			if (aligned_put_pos + alloc_size < m_size)
-			{
-				// range before get
-				if (aligned_put_pos + alloc_size < m_get_pos)
-					return true;
-				// range after get
-				if (aligned_put_pos > m_get_pos)
-					return true;
-				return false;
-			}
-			else
-			{
-				// ..]....[..get..
-				if (aligned_put_pos < m_get_pos)
-					return false;
-				// ..get..]...[...
-				// Actually all resources extending beyond heap space starts at 0
-				if (alloc_size > m_get_pos)
-					return false;
-				return true;
-			}
+			return heap->map(offset, size);
 		}
 
-		size_t m_size;
-		size_t m_put_pos; // Start of free space
-	public:
-		data_heap() = default;
-		~data_heap() = default;
-		data_heap(const data_heap&) = delete;
-		data_heap(data_heap&&) = delete;
-
-		size_t m_get_pos; // End of free space
-
-		void init(size_t heap_size)
+		void unmap()
 		{
-			m_size = heap_size;
-			m_put_pos = 0;
-			m_get_pos = heap_size - 1;
-		}
-
-		template<int Alignement>
-		size_t alloc(size_t size)
-		{
-			if (!can_alloc<Alignement>(size)) throw EXCEPTION("Working buffer not big enough");
-			size_t alloc_size = align(size, Alignement);
-			size_t aligned_put_pos = align(m_put_pos, Alignement);
-			if (aligned_put_pos + alloc_size < m_size)
-			{
-				m_put_pos = aligned_put_pos + alloc_size;
-				return aligned_put_pos;
-			}
-			else
-			{
-				m_put_pos = alloc_size;
-				return 0;
-			}
-		}
-
-		/**
-		* return current putpos - 1
-		*/
-		size_t get_current_put_pos_minus_one() const
-		{
-			return (m_put_pos - 1 > 0) ? m_put_pos - 1 : m_size - 1;
+			heap->unmap();
 		}
 	};
-
 
 	/**
 	* Allocate enough space in upload_buffer and write all mipmap/layer data into the subbuffer.
@@ -1395,6 +1331,6 @@ namespace vk
 	* dst_image must be in TRANSFER_DST_OPTIMAL layout and upload_buffer have TRANSFER_SRC_BIT usage flag.
 	*/
 	void copy_mipmaped_image_using_buffer(VkCommandBuffer cmd, VkImage dst_image,
-		const std::vector<rsx_subresource_layout> subresource_layout, int format, bool is_swizzled,
-		vk::data_heap &upload_heap, vk::buffer* upload_buffer);
+		const std::vector<rsx_subresource_layout> subresource_layout, int format, bool is_swizzled, u16 mipmap_count,
+		vk::vk_data_heap &upload_heap, vk::buffer* upload_buffer);
 }

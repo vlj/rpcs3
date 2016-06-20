@@ -1,7 +1,6 @@
 #pragma once
 
 #include "D3D12Utils.h"
-#include "Utilities/rPlatform.h" // only for rImage
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
 #include "Emu/RSX/GSRender.h"
@@ -106,8 +105,8 @@ private:
 	resource_storage &get_non_current_resource_storage();
 
 	// Textures, constants, index and vertex buffers storage
-	data_heap m_buffer_data;
-	data_heap m_readback_resources;
+	d3d12_data_heap m_buffer_data;
+	d3d12_data_heap m_readback_resources;
 	ComPtr<ID3D12Resource> m_vertex_buffer_data;
 
 	rsx::render_targets m_rtts;
@@ -124,6 +123,8 @@ private:
 	u32 m_current_transform_constants_buffer_descriptor_id;
 	ComPtr<ID3D12DescriptorHeap> m_current_texture_descriptors;
 	ComPtr<ID3D12DescriptorHeap> m_current_sampler_descriptors;
+	size_t vram_size;
+
 public:
 	D3D12GSRender();
 	virtual ~D3D12GSRender();

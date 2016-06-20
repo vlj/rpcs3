@@ -20,7 +20,7 @@ namespace gl
 		case rsx::primitive_type::quad_strip: return GL_TRIANGLES;
 		case rsx::primitive_type::polygon: return GL_TRIANGLES;
 		}
-		throw new EXCEPTION("unknow primitive type");
+		throw EXCEPTION("unknow primitive type");
 	}
 
 #ifdef WIN32
@@ -120,6 +120,14 @@ namespace gl
 			ids.push_back(index.id());
 
 		__glcheck glDrawBuffers((GLsizei)ids.size(), ids.data());
+	}
+
+	void fbo::read_buffer(const attachment& buffer) const
+	{
+		save_binding_state save(*this);
+		GLenum buf = buffer.id();
+
+		__glcheck glReadBuffer(buf);
 	}
 
 	void fbo::draw_arrays(rsx::primitive_type mode, GLsizei count, GLint first) const

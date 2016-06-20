@@ -1,7 +1,8 @@
 #pragma once
 
-#include <gsl.h>
+#include "Utilities/GSL.h"
 #include "../GCM.h"
+#include <list>
 
 namespace rsx
 {

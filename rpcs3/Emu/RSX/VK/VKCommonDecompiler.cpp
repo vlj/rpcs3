@@ -30,7 +30,7 @@ namespace vk
 		case FUNCTION::FUNCTION_DP2:
 			return "vec4(dot($0.xy, $1.xy))";
 		case FUNCTION::FUNCTION_DP2A:
-			return "";
+			return "vec4(dot($0.xy, $1.xy) + $2.x)";
 		case FUNCTION::FUNCTION_DP3:
 			return "vec4(dot($0.xyz, $1.xyz))";
 		case FUNCTION::FUNCTION_DP4:
@@ -43,24 +43,32 @@ namespace vk
 			return "vec4(1., 1., 1., 1.)";
 		case FUNCTION::FUNCTION_FRACT:
 			return "fract($0)";
+		case FUNCTION::FUNCTION_REFL:
+			return "vec4($0 - 2.0 * (dot($0, $1)) * $1)";
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE1D:
 			return "texture($t, $0.x)";
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE1D_PROJ:
 			return "textureProj($t, $0.x, $1.x)"; // Note: $1.x is bias
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE1D_LOD:
 			return "textureLod($t, $0.x, $1.x)";
+		case FUNCTION::FUNCTION_TEXTURE_SAMPLE1D_GRAD:
+			return "textureGrad($t, $0.x, $1.x, $2.y)";
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE2D:
 			return "texture($t, $0.xy)";
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE2D_PROJ:
 			return "textureProj($t, $0.xyz, $1.x)"; // Note: $1.x is bias
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE2D_LOD:
 			return "textureLod($t, $0.xy, $1.x)";
+		case FUNCTION::FUNCTION_TEXTURE_SAMPLE2D_GRAD:
+			return "textureGrad($t, $0.xyz, $1.x, $2.y)"; // Note: $1.x is bias
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLECUBE:
 			return "texture($t, $0.xyz)";
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLECUBE_PROJ:
 			return "textureProj($t, $0.xyzw, $1.x)"; // Note: $1.x is bias
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLECUBE_LOD:
 			return "textureLod($t, $0.xyz, $1.x)";
+		case FUNCTION::FUNCTION_TEXTURE_SAMPLECUBE_GRAD:
+			return "textureGrad($t, $0.xyzw, $1.x, $2.y)";
 		case FUNCTION::FUNCTION_DFDX:
 			return "dFdx($0)";
 		case FUNCTION::FUNCTION_DFDY:

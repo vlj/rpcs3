@@ -1,9 +1,11 @@
-#include "stdafx.h"
-#pragma warning(push)
-#pragma message("TODO: remove wx dependency: <wx/string.h>")
-#pragma warning(disable : 4996)
-#include <wx/string.h>
-#pragma warning(pop)
+#include "StrFmt.h"
+#include "BEType.h"
+#include "StrUtil.h"
+
+#include <cassert>
+#include <array>
+#include <memory>
+#include <algorithm>
 
 std::string v128::to_hex() const
 {
@@ -15,70 +17,58 @@ std::string v128::to_xyzw() const
 	return fmt::format("x: %g y: %g z: %g w: %g", _f[3], _f[2], _f[1], _f[0]);
 }
 
-std::string fmt::to_hex(u64 value, u64 count)
+std::string fmt::unsafe_vformat(const char* fmt, va_list _args) noexcept
 {
-	if (count - 1 >= 16)
+	// Fixed stack buffer for the first attempt
+	std::array<char, 4096> fixed_buf;
+
+	// Possibly dynamically allocated buffer for the second attempt
+	std::unique_ptr<char[]> buf;
+
+	// Pointer to the current buffer
+	char* buf_addr = fixed_buf.data();
+
+	for (std::size_t buf_size = fixed_buf.size();;)
 	{
-		throw EXCEPTION("Invalid count: 0x%llx", count);
+		va_list args;
+		va_copy(args, _args);
+
+#ifndef _MSC_VER
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-security"
+#endif
+		const std::size_t len = std::vsnprintf(buf_addr, buf_size, fmt, args);
+#ifndef _MSC_VER
+#pragma GCC diagnostic pop
+#endif
+		va_end(args);
+
+		assert(len <= INT_MAX);
+
+		if (len < buf_size)
+		{
+			return{ buf_addr, len };
+		}
+
+		buf.reset(buf_addr = new char[buf_size = len + 1]);
 	}
-
-	count = std::max<u64>(count, 16 - cntlz64(value) / 4);
-
-	char res[16] = {};
-
-	for (size_t i = count - 1; ~i; i--, value /= 16)
-	{
-		res[i] = "0123456789abcdef"[value % 16];
-	}
-
-	return std::string(res, count);
 }
 
-std::string fmt::to_udec(u64 value)
+std::string fmt::unsafe_format(const char* fmt...) noexcept
 {
-	char res[20] = {};
-	size_t first = sizeof(res);
+	va_list args;
+	va_start(args, fmt);
+	auto result = unsafe_vformat(fmt, args);
+	va_end(args);
 
-	if (!value)
-	{
-		res[--first] = '0';
-	}
-
-	for (; value; value /= 10)
-	{
-		res[--first] = '0' + (value % 10);
-	}
-
-	return std::string(&res[first], sizeof(res) - first);
+	return result;
 }
 
-std::string fmt::to_sdec(s64 svalue)
+fmt::exception_base::exception_base(const char* fmt...)
+	: std::runtime_error((va_start(m_args, fmt), unsafe_vformat(fmt, m_args)))
 {
-	const bool sign = svalue < 0;
-	u64 value = sign ? -svalue : svalue;
-
-	char res[20] = {};
-	size_t first = sizeof(res);
-
-	if (!value)
-	{
-		res[--first] = '0';
-	}
-
-	for (; value; value /= 10)
-	{
-		res[--first] = '0' + (value % 10);
-	}
-
-	if (sign)
-	{
-		res[--first] = '-';
-	}
-
-	return std::string(&res[first], sizeof(res) - first);
+	va_end(m_args);
 }
-
-//extern const std::string fmt::placeholder = "???";
 
 std::string fmt::replace_first(const std::string& src, const std::string& from, const std::string& to)
 {
@@ -102,83 +92,6 @@ std::string fmt::replace_all(const std::string &src, const std::string& from, co
 	}
 
 	return target;
-}
-
-//TODO: move this wx Stuff somewhere else
-//convert a wxString to a std::string encoded in utf8
-//CAUTION, only use this to interface with wxWidgets classes
-std::string fmt::ToUTF8(const wxString& right)
-{
-	auto ret = std::string(((const char *)right.utf8_str()));
-	return ret;
-}
-
-//convert a std::string encoded in utf8 to a wxString
-//CAUTION, only use this to interface with wxWidgets classes
-wxString fmt::FromUTF8(const std::string& right)
-{
-	auto ret = wxString::FromUTF8(right.c_str());
-	return ret;
-}
-
-//TODO: remove this after every snippet that uses it is gone
-//WARNING: not fully compatible with CmpNoCase from wxString
-int fmt::CmpNoCase(const std::string& a, const std::string& b)
-{
-	if (a.length() != b.length())
-	{
-		return -1;
-	}
-	else
-	{
-		return std::equal(a.begin(),
-			a.end(),
-			b.begin(),
-			[](const char& a, const char& b){return ::tolower(a) == ::tolower(b); })
-			? 0 : -1;
-	}
-}
-
-//TODO: remove this after every snippet that uses it is gone
-//WARNING: not fully compatible with CmpNoCase from wxString
-void fmt::Replace(std::string &str, const std::string &searchterm, const std::string& replaceterm)
-{
-	size_t cursor = 0;
-	do
-	{
-		cursor = str.find(searchterm, cursor);
-		if (cursor != std::string::npos)
-		{
-			str.replace(cursor, searchterm.size(), replaceterm);
-			cursor += replaceterm.size();
-		}
-		else
-		{
-			break;
-		}
-	} while (true);
-}
-
-std::vector<std::string> fmt::rSplit(const std::string& source, const std::string& delim)
-{
-	std::vector<std::string> ret;
-	size_t cursor = 0;
-	do
-	{
-		size_t prevcurs = cursor;
-		cursor = source.find(delim, cursor);
-		if (cursor != std::string::npos)
-		{
-			ret.push_back(source.substr(prevcurs,cursor-prevcurs));
-			cursor += delim.size();
-		}
-		else
-		{
-			ret.push_back(source.substr(prevcurs));
-			break;
-		}
-	} while (true);
-	return ret;
 }
 
 std::vector<std::string> fmt::split(const std::string& source, std::initializer_list<std::string> separators, bool is_skip_empty)
@@ -222,42 +135,12 @@ std::string fmt::trim(const std::string& source, const std::string& values)
 	return source.substr(begin, source.find_last_not_of(values) + 1);
 }
 
-std::string fmt::tolower(std::string source)
+std::string fmt::to_upper(const std::string& string)
 {
-	std::transform(source.begin(), source.end(), source.begin(), ::tolower);
-
-	return source;
-}
-
-std::string fmt::toupper(std::string source)
-{
-	std::transform(source.begin(), source.end(), source.begin(), ::toupper);
-
-	return source;
-}
-
-std::string fmt::escape(std::string source)
-{
-	const std::pair<std::string, std::string> escape_list[] =
-	{
-		{ "\\", "\\\\" },
-		{ "\a", "\\a" },
-		{ "\b", "\\b" },
-		{ "\f", "\\f" },
-		{ "\n", "\\n\n" },
-		{ "\r", "\\r" },
-		{ "\t", "\\t" },
-		{ "\v", "\\v" },
-	};
-
-	source = fmt::replace_all(source, escape_list);
-
-	for (char c = 0; c < 32; c++)
-	{
-		if (c != '\n') source = fmt::replace_all(source, std::string(1, c), fmt::format("\\x%02X", c));
-	}
-
-	return source;
+	std::string result;
+	result.resize(string.size());
+	std::transform(string.begin(), string.end(), result.begin(), ::toupper);
+	return result;
 }
 
 bool fmt::match(const std::string &source, const std::string &mask)

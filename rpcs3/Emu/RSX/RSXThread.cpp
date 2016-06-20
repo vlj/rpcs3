@@ -1,21 +1,35 @@
 #include "stdafx.h"
+#include "Utilities/Config.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
-#include "Emu/state.h"
-#include "Emu/RSX/GSManager.h"
 #include "RSXThread.h"
 
-#include "Emu/SysCalls/Callback.h"
-#include "Emu/SysCalls/CB_FUNC.h"
-#include "Emu/SysCalls/lv2/sys_time.h"
+#include "Emu/Cell/PPUCallback.h"
 
 #include "Common/BufferUtils.h"
 #include "rsx_methods.h"
 
+#include "Utilities/GSL.h"
+#include "Utilities/StrUtil.h"
+
+#include <thread>
+
 #define CMD_DEBUG 0
+
+cfg::bool_entry g_cfg_rsx_write_color_buffers(cfg::root.video, "Write Color Buffers");
+cfg::bool_entry g_cfg_rsx_write_depth_buffer(cfg::root.video, "Write Depth Buffer");
+cfg::bool_entry g_cfg_rsx_read_color_buffers(cfg::root.video, "Read Color Buffers");
+cfg::bool_entry g_cfg_rsx_read_depth_buffer(cfg::root.video, "Read Depth Buffer");
+cfg::bool_entry g_cfg_rsx_log_programs(cfg::root.video, "Log shader programs");
+cfg::bool_entry g_cfg_rsx_vsync(cfg::root.video, "VSync");
+cfg::bool_entry g_cfg_rsx_3dtv(cfg::root.video, "3D Monitor");
+cfg::bool_entry g_cfg_rsx_debug_output(cfg::root.video, "Debug output");
+cfg::bool_entry g_cfg_rsx_overlay(cfg::root.video, "Debug overlay");
 
 bool user_asked_for_frame_capture = false;
 frame_capture_data frame_debug;
+
+namespace vm { using namespace ps3; }
 
 namespace rsx
 {
@@ -28,14 +42,14 @@ namespace rsx
 
 	void shaders_cache::load(const std::string &path, shader_language lang)
 	{
-		std::string lang_name = convert::to<std::string>(lang);
+		const std::string lang_name(::unveil<shader_language>::get(lang));
 
 		auto extract_hash = [](const std::string &string)
 		{
 			return std::stoull(string.substr(0, string.find('.')).c_str(), 0, 16);
 		};
 
-		for (const fs::dir::entry &entry : fs::dir{ path })
+		for (const auto& entry : fs::dir(path))
 		{
 			if (entry.name == "." || entry.name == "..")
 				continue;
@@ -106,7 +120,7 @@ namespace rsx
 				throw EXCEPTION("GetAddress(offset=0x%x, location=0x%x): RSXIO memory not mapped", offset, location);
 			}
 
-			//if (Emu.GetGSManager().GetRender().strict_ordering[offset >> 20])
+			//if (fxm::get<GSRender>()->strict_ordering[offset >> 20])
 			//{
 			//	_mm_mfence(); // probably doesn't have any effect on current implementation
 			//}
@@ -162,7 +176,7 @@ namespace rsx
 			}
 			throw EXCEPTION("Wrong vector size");
 		case vertex_base_type::cmp: return sizeof(u16) * 4;
-		case vertex_base_type::ub256: Expects(size == 4); return sizeof(u8) * 4;
+		case vertex_base_type::ub256: EXPECTS(size == 4); return sizeof(u8) * 4;
 		}
 		throw EXCEPTION("RSXVertexData::GetTypeSize: Bad vertex data type (%d)!", type);
 	}
@@ -308,18 +322,17 @@ namespace rsx
 				draw_state.vertex_count += range.second;
 			}
 			draw_state.index_type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
+
 			if (draw_state.index_type == rsx::index_array_type::u16)
 			{
 				draw_state.index.resize(2 * draw_state.vertex_count);
-				gsl::span<u16> dst = { (u16*)draw_state.index.data(), gsl::narrow<int>(draw_state.vertex_count) };
-				write_index_array_data_to_buffer(dst, draw_mode, first_count_commands);
 			}
 			if (draw_state.index_type == rsx::index_array_type::u32)
 			{
 				draw_state.index.resize(4 * draw_state.vertex_count);
-				gsl::span<u16> dst = { (u16*)draw_state.index.data(), gsl::narrow<int>(draw_state.vertex_count) };
-				write_index_array_data_to_buffer(dst, draw_mode, first_count_commands);
 			}
+			gsl::span<gsl::byte> dst = { (gsl::byte*)draw_state.index.data(), gsl::narrow<int>(draw_state.index.size()) };
+			write_index_array_data_to_buffer(dst, draw_state.index_type, draw_mode, first_count_commands);
 		}
 
 		draw_state.programs = get_programs();
@@ -354,7 +367,7 @@ namespace rsx
 
 		last_flip_time = get_system_time() - 1000000;
 
-		scope_thread_t vblank(PURE_EXPR("VBlank Thread"s), [this]()
+		scope_thread vblank("VBlank Thread", [this]()
 		{
 			const u64 start_time = get_system_time();
 
@@ -387,8 +400,8 @@ namespace rsx
 		{
 			CHECK_EMU_STATUS;
 
-			be_t<u32> get = ctrl->get;
-			be_t<u32> put = ctrl->put;
+			const u32 get = ctrl->get;
+			const u32 put = ctrl->put;
 
 			if (put == get || !Emu.IsRunning())
 			{
@@ -443,10 +456,7 @@ namespace rsx
 				u32 reg = cmd & CELL_GCM_METHOD_FLAG_NON_INCREMENT ? first_cmd : first_cmd + i;
 				u32 value = args[i];
 
-				if (rpcs3::config.misc.log.rsx_logging.value())
-				{
-					LOG_NOTICE(RSX, "%s(0x%x) = 0x%x", get_method_name(reg).c_str(), reg, value);
-				}
+				LOG_TRACE(RSX, "%s(0x%x) = 0x%x", get_method_name(reg).c_str(), reg, value);
 
 				method_registers[reg] = value;
 				if (capture_current_frame)
@@ -553,43 +563,44 @@ namespace rsx
 		}
 		else
 		{
-			std::lock_guard<std::mutex> lock{ m_mtx_task };
+			EXPECTS(0);
+			//std::lock_guard<std::mutex> lock{ m_mtx_task };
 
-			internal_task_entry &front = m_internal_tasks.front();
+			//internal_task_entry &front = m_internal_tasks.front();
 
-			if (front.callback())
-			{
-				front.promise.set_value();
-				m_internal_tasks.pop_front();
-			}
+			//if (front.callback())
+			//{
+			//	front.promise.set_value();
+			//	m_internal_tasks.pop_front();
+			//}
 		}
 	}
 
-	std::future<void> thread::add_internal_task(std::function<bool()> callback)
-	{
-		std::lock_guard<std::mutex> lock{ m_mtx_task };
-		m_internal_tasks.emplace_back(callback);
+	//std::future<void> thread::add_internal_task(std::function<bool()> callback)
+	//{
+	//	std::lock_guard<std::mutex> lock{ m_mtx_task };
+	//	m_internal_tasks.emplace_back(callback);
 
-		return m_internal_tasks.back().promise.get_future();
-	}
+	//	return m_internal_tasks.back().promise.get_future();
+	//}
 
-	void thread::invoke(std::function<bool()> callback)
-	{
-		if (get_thread_ctrl() == thread_ctrl::get_current())
-		{
-			while (true)
-			{
-				if (callback())
-				{
-					break;
-				}
-			}
-		}
-		else
-		{
-			add_internal_task(callback).wait();
-		}
-	}
+	//void thread::invoke(std::function<bool()> callback)
+	//{
+	//	if (operator->() == thread_ctrl::get_current())
+	//	{
+	//		while (true)
+	//		{
+	//			if (callback())
+	//			{
+	//				break;
+	//			}
+	//		}
+	//	}
+	//	else
+	//	{
+	//		add_internal_task(callback).wait();
+	//	}
+	//}
 
 	namespace
 	{
@@ -832,7 +843,7 @@ namespace rsx
 
 		m_used_gcm_commands.clear();
 
-		on_init();
+		on_init_rsx();
 		start();
 	}
 

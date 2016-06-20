@@ -7,11 +7,10 @@
 #include <memory>
 #include <unordered_map>
 
-#include <glm/glm.hpp>
-#include <glm/gtc/type_ptr.hpp>
-
 #include "OpenGL.h"
 #include "../GCM.h"
+
+#include "Utilities/geometry.h"
 
 namespace gl
 {
@@ -373,7 +372,9 @@ namespace gl
 			pixel_pack = GL_PIXEL_PACK_BUFFER,
 			pixel_unpack = GL_PIXEL_UNPACK_BUFFER,
 			array = GL_ARRAY_BUFFER,
-			element_array = GL_ELEMENT_ARRAY_BUFFER
+			element_array = GL_ELEMENT_ARRAY_BUFFER,
+			uniform = GL_UNIFORM_BUFFER,
+			texture = GL_TEXTURE_BUFFER
 		};
 		enum class access
 		{
@@ -422,6 +423,8 @@ namespace gl
 				case target::pixel_unpack: pname = GL_PIXEL_UNPACK_BUFFER_BINDING; break;
 				case target::array: pname = GL_ARRAY_BUFFER_BINDING; break;
 				case target::element_array: pname = GL_ELEMENT_ARRAY_BUFFER_BINDING; break;
+				case target::uniform: pname = GL_UNIFORM_BUFFER_BINDING; break;
+				case target::texture: pname = GL_TEXTURE_BUFFER_BINDING; break;
 				}
 
 				glGetIntegerv(pname, &m_last_binding);
@@ -466,11 +469,18 @@ namespace gl
 			data(size, data_);
 		}
 
+		void create(target target_, GLsizeiptr size, const void* data_ = nullptr)
+		{
+			create();
+			m_target = target_;
+			data(size, data_);
+		}
+
 		void data(GLsizeiptr size, const void* data_ = nullptr)
 		{
 			target target_ = current_target();
 			save_binding_state save(target_, *this);
-			glBufferData((GLenum)target_, size, data_, GL_STREAM_COPY);
+			glBufferData((GLenum)target_, size, data_, GL_STREAM_DRAW);
 			m_size = size;
 		}
 
@@ -567,6 +577,106 @@ namespace gl
 		void unmap()
 		{
 			glUnmapBuffer((GLenum)current_target());
+		}
+	};
+
+	class ring_buffer
+	{
+		buffer storage_buffer;
+		buffer::target m_target;
+		u32 m_data_loc = 0;
+		u32 m_size;
+
+		u32 m_mapped_block_size = 0;
+		u32 m_mapped_block_offset;
+		u32 m_mapped_reserve_offset;
+		u32 m_mapped_bytes_available;
+		void *m_mapped_base = nullptr;
+
+	public:
+		ring_buffer(u32 initial_size, buffer::target target)
+		{
+			storage_buffer.create();
+			storage_buffer.data(initial_size);
+			m_size = initial_size;
+			m_target = target;
+		}
+
+		void destroy()
+		{
+			storage_buffer.remove();
+		}
+
+		std::pair<void*, u32> alloc_and_map(u32 size)
+		{
+			size = (size + 255) & ~255;
+
+			glBindBuffer((GLenum)m_target, storage_buffer.id());
+			u32 limit = m_data_loc + size;
+			if (limit > m_size)
+			{
+				if (size > m_size)
+					m_size = size;
+
+				storage_buffer.data(m_size, nullptr);
+				m_data_loc = 0;
+			}
+
+			void *ptr = glMapBufferRange((GLenum)m_target, m_data_loc, size, GL_MAP_WRITE_BIT|GL_MAP_INVALIDATE_RANGE_BIT|GL_MAP_UNSYNCHRONIZED_BIT);
+			u32 offset = m_data_loc;
+			m_data_loc += size;
+			return std::make_pair(ptr, offset);
+		}
+
+		void unmap()
+		{
+			glUnmapBuffer((GLenum)m_target);
+			m_mapped_block_size = 0;
+			m_mapped_base = 0;
+		}
+
+		void reserve_and_map(u32 max_size)
+		{
+			max_size = (max_size + 4095) & ~4095;
+			auto mapping = alloc_and_map(max_size);
+			m_mapped_base = mapping.first;
+			m_mapped_block_offset = mapping.second;
+			m_mapped_reserve_offset = 0;
+			m_mapped_bytes_available = max_size;
+		}
+
+		std::pair<void*, u32> alloc_from_reserve(u32 size, u32 alignment = 16)
+		{
+			alignment -= 1;
+			size = (size + alignment) & ~alignment;
+
+			if (m_mapped_bytes_available < size || !m_mapped_base)
+			{
+				if (m_mapped_base)
+				{
+					//This doesn't really work for some reason, probably since the caller should bind the target
+					//before making this call as the block may be reallocated
+					LOG_ERROR(RSX, "reserved allocation exceeded. check for corruption!");
+					unmap();
+				}
+
+				reserve_and_map((size > 4096) ? size : 4096);
+			}
+
+			EXPECTS(m_mapped_bytes_available >= size);
+
+			void *ptr = (char*)m_mapped_base + m_mapped_reserve_offset;
+			u32 offset = m_mapped_reserve_offset + m_mapped_block_offset;
+			m_mapped_reserve_offset += size;
+			m_mapped_bytes_available -= size;
+
+			EXPECTS((offset & alignment) == 0);
+			return std::make_pair(ptr, offset);
+		}
+
+		buffer& get_buffer()
+		{
+			return storage_buffer;
 		}
 	};
 
@@ -1141,11 +1251,11 @@ namespace gl
 			if (get_target() != target::textureBuffer)
 				throw EXCEPTION("OpenGL error: texture cannot copy from buffer");
 
-			if (!offset)
+/*			if (!offset)
 			{
 				copy_from(buf, gl_format_type);
 				return;
-			}
+			}*/
 
 			if (glTextureBufferRangeEXT == nullptr)
 				throw EXCEPTION("OpenGL error: partial buffer access for textures is unsupported on your system");
@@ -1550,6 +1660,8 @@ namespace gl
 		void recreate();
 		void draw_buffer(const attachment& buffer) const;
 		void draw_buffers(const std::initializer_list<attachment>& indexes) const;
+		
+		void read_buffer(const attachment& buffer) const;
 
 		void draw_arrays(rsx::primitive_type mode, GLsizei count, GLint first = 0) const;
 		void draw_arrays(const buffer& buffer, rsx::primitive_type mode, GLsizei count, GLint first = 0) const;
@@ -1776,23 +1888,6 @@ namespace gl
 				void operator = (const color4i& rhs) const { m_program.use(); glUniform4i(location(), rhs.r, rhs.g, rhs.b, rhs.a); }
 				void operator = (const color4f& rhs) const { m_program.use(); glUniform4f(location(), rhs.r, rhs.g, rhs.b, rhs.a); }
 				//void operator = (const color4d& rhs) const { m_program.use(); glUniform4d(location(), rhs.r, rhs.g, rhs.b, rhs.a); }
-
-				void operator = (const glm::ivec2& rhs) const { m_program.use(); glUniform2i(location(), rhs.r, rhs.g); }
-				void operator = (const glm::vec2& rhs) const { m_program.use(); glUniform2f(location(), rhs.r, rhs.g); }
-				//void operator = (const glm::dvec2& rhs) const { m_program.use(); glUniform2d(location(), rhs.r, rhs.g); }
-				void operator = (const glm::ivec3& rhs) const { m_program.use(); glUniform3i(location(), rhs.r, rhs.g, rhs.b); }
-				void operator = (const glm::vec3& rhs) const { m_program.use(); glUniform3f(location(), rhs.r, rhs.g, rhs.b); }
-				//void operator = (const glm::dvec3& rhs) const { m_program.use(); glUniform3d(location(), rhs.r, rhs.g, rhs.b); }
-				void operator = (const glm::ivec4& rhs) const { m_program.use(); glUniform4i(location(), rhs.r, rhs.g, rhs.b, rhs.a); }
-				void operator = (const glm::vec4& rhs) const { m_program.use(); glUniform4f(location(), rhs.r, rhs.g, rhs.b, rhs.a); }
-				//void operator = (const glm::dvec4& rhs) const { m_program.use(); glUniform4d(location(), rhs.r, rhs.g, rhs.b, rhs.a); }
-
-				void operator = (const glm::mat2& rhs) const { m_program.use(); glUniformMatrix2fv(location(), 1, GL_FALSE, glm::value_ptr(rhs)); }
-				//void operator = (const glm::dmat2& rhs) const { m_program.use(); glUniformMatrix2dv(location(), 1, GL_FALSE, glm::value_ptr(rhs)); }
-				void operator = (const glm::mat3& rhs) const { m_program.use(); glUniformMatrix3fv(location(), 1, GL_FALSE, glm::value_ptr(rhs)); }
-				//void operator = (const glm::dmat3& rhs) const { m_program.use(); glUniformMatrix3dv(location(), 1, GL_FALSE, glm::value_ptr(rhs)); }
-				void operator = (const glm::mat4& rhs) const { m_program.use(); glUniformMatrix4fv(location(), 1, GL_FALSE, glm::value_ptr(rhs)); }
-				//void operator = (const glm::dmat4& rhs) const { m_program.use(); glUniformMatrix4dv(location(), 1, GL_FALSE, glm::value_ptr(rhs)); }
 			};
 
 			class attrib_t
@@ -1823,13 +1918,6 @@ namespace gl
 				void operator = (const color3d& rhs) const { glDisableVertexAttribArray(location()); glVertexAttrib3d(location(), rhs.r, rhs.g, rhs.b); }
 				void operator = (const color4f& rhs) const { glDisableVertexAttribArray(location()); glVertexAttrib4f(location(), rhs.r, rhs.g, rhs.b, rhs.a); }
 				void operator = (const color4d& rhs) const { glDisableVertexAttribArray(location()); glVertexAttrib4d(location(), rhs.r, rhs.g, rhs.b, rhs.a); }
-
-				void operator = (const glm::vec2& rhs) const { glDisableVertexAttribArray(location()); glVertexAttrib2f(location(), rhs.r, rhs.g); }
-				void operator = (const glm::dvec2& rhs) const { glDisableVertexAttribArray(location()); glVertexAttrib2d(location(), rhs.r, rhs.g); }
-				void operator = (const glm::vec3& rhs) const { glDisableVertexAttribArray(location()); glVertexAttrib3f(location(), rhs.r, rhs.g, rhs.b); }
-				void operator = (const glm::dvec3& rhs) const { glDisableVertexAttribArray(location()); glVertexAttrib3d(location(), rhs.r, rhs.g, rhs.b); }
-				void operator = (const glm::vec4& rhs) const { glDisableVertexAttribArray(location()); glVertexAttrib4f(location(), rhs.r, rhs.g, rhs.b, rhs.a); }
-				void operator = (const glm::dvec4& rhs) const { glDisableVertexAttribArray(location()); glVertexAttrib4d(location(), rhs.r, rhs.g, rhs.b, rhs.a); }
 
 				void operator =(buffer_pointer& pointer) const
 				{

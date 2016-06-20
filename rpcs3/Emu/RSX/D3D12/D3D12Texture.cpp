@@ -1,6 +1,6 @@
+#ifdef _MSC_VER
 #include "stdafx.h"
 #include "stdafx_d3d12.h"
-#ifdef _MSC_VER
 #include "D3D12GSRender.h"
 #include "d3dx12.h"
 #include "../Common/TextureUtils.h"
@@ -69,7 +69,7 @@ namespace {
 	void update_existing_texture(
 		const rsx::texture &texture,
 		ID3D12GraphicsCommandList *command_list,
-		data_heap &texture_buffer_heap,
+		d3d12_data_heap &texture_buffer_heap,
 		ID3D12Resource *existing_texture)
 	{
 		size_t w = texture.width(), h = texture.height();
@@ -123,7 +123,7 @@ ComPtr<ID3D12Resource> upload_single_texture(
 	const rsx::texture &texture,
 	ID3D12Device *device,
 	ID3D12GraphicsCommandList *command_list,
-	data_heap &texture_buffer_heap)
+	d3d12_data_heap &texture_buffer_heap)
 {
 	ComPtr<ID3D12Resource> result;
 	CHECK_HRESULT(device->CreateCommittedResource(
@@ -251,13 +251,31 @@ void D3D12GSRender::upload_textures(ID3D12GraphicsCommandList *command_list, siz
 
 		switch (format)
 		{
-		case CELL_GCM_TEXTURE_COMPRESSED_HILO8:
-		case CELL_GCM_TEXTURE_COMPRESSED_HILO_S8:
-		case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_B8R8_G8R8:
-		case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8:
 		default:
-			LOG_ERROR(RSX, "Unimplemented Texture format : 0x%x", format);
+			LOG_ERROR(RSX, "Unimplemented mapping for texture format: 0x%x", format);
 			break;
+		
+		case CELL_GCM_TEXTURE_COMPRESSED_HILO8:
+		case CELL_GCM_TEXTURE_COMPRESSED_DXT1:
+		case CELL_GCM_TEXTURE_COMPRESSED_DXT23:
+		case CELL_GCM_TEXTURE_COMPRESSED_DXT45:
+		case CELL_GCM_TEXTURE_DEPTH24_D8:
+		case CELL_GCM_TEXTURE_DEPTH24_D8_FLOAT:
+		case CELL_GCM_TEXTURE_DEPTH16:
+		case CELL_GCM_TEXTURE_DEPTH16_FLOAT:
+		case CELL_GCM_TEXTURE_X32_FLOAT:
+		case CELL_GCM_TEXTURE_W16_Z16_Y16_X16_FLOAT:
+		case CELL_GCM_TEXTURE_W32_Z32_Y32_X32_FLOAT:
+		case CELL_GCM_TEXTURE_R5G5B5A1:
+		case CELL_GCM_TEXTURE_D1R5G5B5:
+		case CELL_GCM_TEXTURE_A1R5G5B5:
+		case CELL_GCM_TEXTURE_A4R4G4B4:
+		case CELL_GCM_TEXTURE_R5G6B5:
+		case CELL_GCM_TEXTURE_COMPRESSED_B8R8_G8R8:
+		case CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8:
+			shared_resource_view_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			break;
+
 		case CELL_GCM_TEXTURE_B8:
 			shared_resource_view_desc.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(
 				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
@@ -265,11 +283,57 @@ void D3D12GSRender::upload_textures(ID3D12GraphicsCommandList *command_list, siz
 				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
 				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0);
 			break;
-		case CELL_GCM_TEXTURE_A1R5G5B5:
-		case CELL_GCM_TEXTURE_A4R4G4B4:
-		case CELL_GCM_TEXTURE_R5G6B5:
-			shared_resource_view_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+		case CELL_GCM_TEXTURE_G8B8:
+			shared_resource_view_desc.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_1,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_2,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_1,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_2);
 			break;
+
+		case CELL_GCM_TEXTURE_R6G5B5: // TODO: Remap it to another format here, so it's not glitched out
+			shared_resource_view_desc.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_1,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_2,
+				D3D12_SHADER_COMPONENT_MAPPING_FORCE_VALUE_0);
+			break;
+
+		case CELL_GCM_TEXTURE_X16:
+			shared_resource_view_desc.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(
+				D3D12_SHADER_COMPONENT_MAPPING_FORCE_VALUE_1,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
+				D3D12_SHADER_COMPONENT_MAPPING_FORCE_VALUE_1,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0);
+			break;
+
+		case CELL_GCM_TEXTURE_Y16_X16:
+		case CELL_GCM_TEXTURE_COMPRESSED_HILO_S8:
+			shared_resource_view_desc.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_1,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_1,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0);
+			break;
+
+		case CELL_GCM_TEXTURE_Y16_X16_FLOAT:
+			shared_resource_view_desc.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_1,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_1);
+			break;
+
+		case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_B8R8_G8R8:
+		case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8:
+			shared_resource_view_desc.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_1,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_2,
+				D3D12_SHADER_COMPONENT_MAPPING_FROM_MEMORY_COMPONENT_0,
+				D3D12_SHADER_COMPONENT_MAPPING_FORCE_VALUE_0);
+			break;
+			
 		case CELL_GCM_TEXTURE_A8R8G8B8:
 		case CELL_GCM_TEXTURE_D8R8G8B8:
 		{
@@ -279,6 +343,7 @@ void D3D12GSRender::upload_textures(ID3D12GraphicsCommandList *command_list, siz
 			u8 remap_r = (textures[i].remap() >> 2) & 0x3;
 			u8 remap_g = (textures[i].remap() >> 4) & 0x3;
 			u8 remap_b = (textures[i].remap() >> 6) & 0x3;
+
 			if (is_render_target)
 			{
 				// ARGB format
@@ -327,33 +392,6 @@ void D3D12GSRender::upload_textures(ID3D12GraphicsCommandList *command_list, siz
 
 			break;
 		}
-		case CELL_GCM_TEXTURE_COMPRESSED_DXT1:
-		case CELL_GCM_TEXTURE_COMPRESSED_DXT23:
-		case CELL_GCM_TEXTURE_COMPRESSED_DXT45:
-		case CELL_GCM_TEXTURE_G8B8:
-		case CELL_GCM_TEXTURE_R6G5B5:
-		case CELL_GCM_TEXTURE_DEPTH24_D8:
-		case CELL_GCM_TEXTURE_DEPTH24_D8_FLOAT:
-		case CELL_GCM_TEXTURE_DEPTH16:
-		case CELL_GCM_TEXTURE_DEPTH16_FLOAT:
-		case CELL_GCM_TEXTURE_X16:
-		case CELL_GCM_TEXTURE_Y16_X16:
-		case CELL_GCM_TEXTURE_R5G5B5A1:
-		case CELL_GCM_TEXTURE_W16_Z16_Y16_X16_FLOAT:
-		case CELL_GCM_TEXTURE_W32_Z32_Y32_X32_FLOAT:
-		case CELL_GCM_TEXTURE_X32_FLOAT:
-		case CELL_GCM_TEXTURE_D1R5G5B5:
-			shared_resource_view_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-			break;
-		case CELL_GCM_TEXTURE_Y16_X16_FLOAT:
-			shared_resource_view_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-			break;
-		case CELL_GCM_TEXTURE_COMPRESSED_B8R8_G8R8:
-			shared_resource_view_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-			break;
-		case CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8:
-			shared_resource_view_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-			break;
 		}
 
 		m_device->CreateShaderResourceView(vram_texture, &shared_resource_view_desc,

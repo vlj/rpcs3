@@ -1,6 +1,6 @@
+#ifdef _MSC_VER
 #include "stdafx.h"
 #include "stdafx_d3d12.h"
-#ifdef _MSC_VER
 #include "D3D12Formats.h"
 #include "D3D12Utils.h"
 #include "Emu/RSX/GCM.h"
@@ -40,11 +40,10 @@ D3D12_BLEND get_blend_factor(u16 factor)
 	case CELL_GCM_SRC_ALPHA_SATURATE: return D3D12_BLEND_SRC_ALPHA_SAT;
 	case CELL_GCM_CONSTANT_COLOR: return D3D12_BLEND_DEST_COLOR;
 	case CELL_GCM_ONE_MINUS_CONSTANT_COLOR: return D3D12_BLEND_INV_DEST_COLOR;
-	case CELL_GCM_CONSTANT_ALPHA:
-	case CELL_GCM_ONE_MINUS_CONSTANT_ALPHA:
-		break;
+	case CELL_GCM_CONSTANT_ALPHA: return D3D12_BLEND_DEST_ALPHA;
+	case CELL_GCM_ONE_MINUS_CONSTANT_ALPHA: return D3D12_BLEND_INV_DEST_ALPHA;
 	}
-	throw EXCEPTION("Invalid or unsupported blend factor (0x%x)", factor);
+	throw EXCEPTION("Invalid blend factor (0x%x)", factor);
 }
 
 D3D12_BLEND get_blend_factor_alpha(u16 factor)
@@ -62,13 +61,12 @@ D3D12_BLEND get_blend_factor_alpha(u16 factor)
 	case CELL_GCM_DST_COLOR: return D3D12_BLEND_DEST_ALPHA;
 	case CELL_GCM_ONE_MINUS_DST_COLOR: return D3D12_BLEND_INV_DEST_ALPHA;
 	case CELL_GCM_SRC_ALPHA_SATURATE: return D3D12_BLEND_SRC_ALPHA_SAT;
-	case CELL_GCM_CONSTANT_COLOR:
-	case CELL_GCM_ONE_MINUS_CONSTANT_COLOR:
-	case CELL_GCM_CONSTANT_ALPHA:
-	case CELL_GCM_ONE_MINUS_CONSTANT_ALPHA:
-		break;
+	case CELL_GCM_CONSTANT_COLOR: return D3D12_BLEND_DEST_ALPHA;
+	case CELL_GCM_ONE_MINUS_CONSTANT_COLOR: return D3D12_BLEND_INV_DEST_ALPHA;
+	case CELL_GCM_CONSTANT_ALPHA: return D3D12_BLEND_DEST_ALPHA;
+	case CELL_GCM_ONE_MINUS_CONSTANT_ALPHA: return D3D12_BLEND_INV_DEST_ALPHA;
 	}
-	throw EXCEPTION("Invalid or unsupported blend alpha factor (0x%x)", factor);
+	throw EXCEPTION("Invalid blend alpha factor (0x%x)", factor);
 }
 
 /**
@@ -128,8 +126,6 @@ D3D12_COMPARISON_FUNC get_compare_func(u32 op)
 	case CELL_GCM_NOTEQUAL: return D3D12_COMPARISON_FUNC_NOT_EQUAL;
 	case CELL_GCM_GEQUAL: return D3D12_COMPARISON_FUNC_GREATER_EQUAL;
 	case CELL_GCM_ALWAYS: return D3D12_COMPARISON_FUNC_ALWAYS;
-	case CELL_GCM_ZERO:
-		break;
 	}
 	throw EXCEPTION("Invalid or unsupported compare func (0x%x)", op);
 }
@@ -147,26 +143,26 @@ DXGI_FORMAT get_texture_format(u8 format)
 	case CELL_GCM_TEXTURE_COMPRESSED_DXT23: return DXGI_FORMAT_BC2_UNORM;
 	case CELL_GCM_TEXTURE_COMPRESSED_DXT45: return DXGI_FORMAT_BC3_UNORM;
 	case CELL_GCM_TEXTURE_G8B8: return DXGI_FORMAT_G8R8_G8B8_UNORM;
-	case CELL_GCM_TEXTURE_R6G5B5: /*Not native*/ return DXGI_FORMAT_R8G8B8A8_UNORM;
-	case CELL_GCM_TEXTURE_DEPTH24_D8: return DXGI_FORMAT_R32_UINT;
-	case CELL_GCM_TEXTURE_DEPTH24_D8_FLOAT:	return DXGI_FORMAT_R32_FLOAT;
-	case CELL_GCM_TEXTURE_DEPTH16: return DXGI_FORMAT_R16_UNORM;
-	case CELL_GCM_TEXTURE_DEPTH16_FLOAT: return DXGI_FORMAT_R16_FLOAT;
+	case CELL_GCM_TEXTURE_R6G5B5: return DXGI_FORMAT_B5G6R5_UNORM;
+	case CELL_GCM_TEXTURE_DEPTH24_D8: return DXGI_FORMAT_R32_UINT; // Untested
+	case CELL_GCM_TEXTURE_DEPTH24_D8_FLOAT:	return DXGI_FORMAT_R32_FLOAT; // Untested
+	case CELL_GCM_TEXTURE_DEPTH16: return DXGI_FORMAT_R16_UINT; // Untested
+	case CELL_GCM_TEXTURE_DEPTH16_FLOAT: return DXGI_FORMAT_R16_FLOAT; // Untested
 	case CELL_GCM_TEXTURE_X16: return DXGI_FORMAT_R16_UNORM;
 	case CELL_GCM_TEXTURE_Y16_X16: return DXGI_FORMAT_R16G16_UNORM;
+	case CELL_GCM_TEXTURE_Y16_X16_FLOAT: return DXGI_FORMAT_R16G16_FLOAT;
+	case CELL_GCM_TEXTURE_X32_FLOAT: return DXGI_FORMAT_R32_FLOAT;
 	case CELL_GCM_TEXTURE_R5G5B5A1: return DXGI_FORMAT_B5G5R5A1_UNORM;
 	case CELL_GCM_TEXTURE_W16_Z16_Y16_X16_FLOAT: return DXGI_FORMAT_R16G16B16A16_FLOAT;
 	case CELL_GCM_TEXTURE_W32_Z32_Y32_X32_FLOAT: return DXGI_FORMAT_R32G32B32A32_FLOAT;
-	case CELL_GCM_TEXTURE_X32_FLOAT: return DXGI_FORMAT_R32_FLOAT;
 	case CELL_GCM_TEXTURE_D1R5G5B5: return DXGI_FORMAT_B5G5R5A1_UNORM;
 	case CELL_GCM_TEXTURE_D8R8G8B8: return DXGI_FORMAT_R8G8B8A8_UNORM;
 	case CELL_GCM_TEXTURE_COMPRESSED_B8R8_G8R8: return DXGI_FORMAT_G8R8_G8B8_UNORM;
 	case CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8: return DXGI_FORMAT_R8G8_B8G8_UNORM;
-	case CELL_GCM_TEXTURE_Y16_X16_FLOAT:
-	case CELL_GCM_TEXTURE_COMPRESSED_HILO8:
-	case CELL_GCM_TEXTURE_COMPRESSED_HILO_S8:
-	case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_B8R8_G8R8:
-	case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8:
+	case CELL_GCM_TEXTURE_COMPRESSED_HILO8: return DXGI_FORMAT_G8R8_G8B8_UNORM;
+	case CELL_GCM_TEXTURE_COMPRESSED_HILO_S8: return DXGI_FORMAT_R8G8_SNORM;
+	case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_B8R8_G8R8: return DXGI_FORMAT_G8R8_G8B8_UNORM;
+	case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8: return DXGI_FORMAT_R8G8_B8G8_UNORM;
 		break;
 	}
 	throw EXCEPTION("Invalid or unsupported texture format (0x%x)", format);
@@ -303,12 +299,12 @@ DXGI_FORMAT get_color_surface_format(rsx::surface_color_format format)
 	switch (format)
 	{
 	case rsx::surface_color_format::r5g6b5: return DXGI_FORMAT_B5G6R5_UNORM;
-	case rsx::surface_color_format::x8r8g8b8_o8r8g8b8:
-	case rsx::surface_color_format::x8r8g8b8_z8r8g8b8:
 	case rsx::surface_color_format::x8b8g8r8_o8b8g8r8:
 	case rsx::surface_color_format::x8b8g8r8_z8b8g8r8:
-			return DXGI_FORMAT_B8G8R8X8_UNORM; //BIT.TRIP Runner2 use this
-	case rsx::surface_color_format::a8b8g8r8:
+		return DXGI_FORMAT_B8G8R8X8_UNORM;
+	case rsx::surface_color_format::a8b8g8r8: return DXGI_FORMAT_B8G8R8A8_UNORM;
+	case rsx::surface_color_format::x8r8g8b8_o8r8g8b8:
+	case rsx::surface_color_format::x8r8g8b8_z8r8g8b8:
 	case rsx::surface_color_format::a8r8g8b8: return DXGI_FORMAT_R8G8B8A8_UNORM;
 	case rsx::surface_color_format::b8: return DXGI_FORMAT_R8_UNORM;
 	case rsx::surface_color_format::g8b8: return DXGI_FORMAT_R8G8_UNORM;

@@ -43,15 +43,38 @@ namespace vk
 		result.device_local = VK_MAX_MEMORY_TYPES;
 		result.host_visible_coherent = VK_MAX_MEMORY_TYPES;
 
+		bool host_visible_cached = false;
+		u32  host_visible_vram_size = 0;
+		u32  device_local_vram_size = 0;
+
 		for (u32 i = 0; i < memory_properties.memoryTypeCount; i++)
 		{
+			VkMemoryHeap &heap = memory_properties.memoryHeaps[memory_properties.memoryTypes[i].heapIndex];
+			
 			bool is_device_local = !!(memory_properties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 			if (is_device_local)
-				result.device_local = i;
+			{
+				if (device_local_vram_size < heap.size)
+				{
+					result.device_local = i;
+					device_local_vram_size = heap.size;
+				}
+			}
+
 			bool is_host_visible = !!(memory_properties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 			bool is_host_coherent = !!(memory_properties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+			bool is_cached = !!(memory_properties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+			
 			if (is_host_coherent && is_host_visible)
-				result.host_visible_coherent = i;
+			{
+				if ((is_cached && !host_visible_cached) ||
+					(host_visible_vram_size < heap.size))
+				{
+					result.host_visible_coherent = i;
+					host_visible_vram_size = heap.size;
+					host_visible_cached = is_cached;
+				}
+			}
 		}
 
 		if (result.device_local == VK_MAX_MEMORY_TYPES) throw EXCEPTION("GPU doesn't support device local memory");
@@ -65,30 +88,35 @@ namespace vk
 		{
 		case CELL_GCM_TEXTURE_B8: return VK_FORMAT_R8_UNORM;
 		case CELL_GCM_TEXTURE_A1R5G5B5: return VK_FORMAT_A1R5G5B5_UNORM_PACK16;
-		case CELL_GCM_TEXTURE_A4R4G4B4: return VK_FORMAT_B4G4R4A4_UNORM_PACK16;
+		case CELL_GCM_TEXTURE_A4R4G4B4: return VK_FORMAT_R4G4B4A4_UNORM_PACK16;
 		case CELL_GCM_TEXTURE_R5G6B5: return VK_FORMAT_R5G6B5_UNORM_PACK16;
 		case CELL_GCM_TEXTURE_A8R8G8B8: return VK_FORMAT_B8G8R8A8_UNORM;
 		case CELL_GCM_TEXTURE_COMPRESSED_DXT1: return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
 		case CELL_GCM_TEXTURE_COMPRESSED_DXT23: return VK_FORMAT_BC2_UNORM_BLOCK;
 		case CELL_GCM_TEXTURE_COMPRESSED_DXT45: return VK_FORMAT_BC3_UNORM_BLOCK;
 		case CELL_GCM_TEXTURE_G8B8: return VK_FORMAT_R8G8_UNORM;
-		case CELL_GCM_TEXTURE_R6G5B5: return VK_FORMAT_R5G6B5_UNORM_PACK16;					//Expand, discard high bit?
+		case CELL_GCM_TEXTURE_R6G5B5: return VK_FORMAT_R5G6B5_UNORM_PACK16; // Expand, discard high bit?
 		case CELL_GCM_TEXTURE_DEPTH24_D8: return VK_FORMAT_R32_UINT;
 		case CELL_GCM_TEXTURE_DEPTH24_D8_FLOAT:	return VK_FORMAT_R32_SFLOAT;
-		case CELL_GCM_TEXTURE_DEPTH16: return VK_FORMAT_R16_UNORM;
+		case CELL_GCM_TEXTURE_DEPTH16: return VK_FORMAT_R16_UINT;
 		case CELL_GCM_TEXTURE_DEPTH16_FLOAT: return VK_FORMAT_R16_SFLOAT;
 		case CELL_GCM_TEXTURE_X16: return VK_FORMAT_R16_UNORM;
 		case CELL_GCM_TEXTURE_Y16_X16: return VK_FORMAT_R16G16_UNORM;
+		case CELL_GCM_TEXTURE_Y16_X16_FLOAT: return VK_FORMAT_R16G16_UNORM;
 		case CELL_GCM_TEXTURE_R5G5B5A1: return VK_FORMAT_R5G5B5A1_UNORM_PACK16;
 		case CELL_GCM_TEXTURE_W16_Z16_Y16_X16_FLOAT: return VK_FORMAT_R16G16B16A16_SFLOAT;
 		case CELL_GCM_TEXTURE_W32_Z32_Y32_X32_FLOAT: return VK_FORMAT_R32G32B32A32_SFLOAT;
 		case CELL_GCM_TEXTURE_X32_FLOAT: return VK_FORMAT_R32_SFLOAT;
 		case CELL_GCM_TEXTURE_D1R5G5B5: return VK_FORMAT_A1R5G5B5_UNORM_PACK16;
 		case CELL_GCM_TEXTURE_D8R8G8B8: return VK_FORMAT_B8G8R8A8_UNORM;
-		case CELL_GCM_TEXTURE_COMPRESSED_B8R8_G8R8: return VK_FORMAT_A8B8G8R8_UNORM_PACK32;	//Expand
-		case CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8: return VK_FORMAT_R8G8B8A8_UNORM;		//Expand
+		case CELL_GCM_TEXTURE_COMPRESSED_B8R8_G8R8: return VK_FORMAT_A8B8G8R8_UNORM_PACK32;	// Expand
+		case CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8: return VK_FORMAT_R8G8B8A8_UNORM; // Expand
+		case CELL_GCM_TEXTURE_COMPRESSED_HILO8: return VK_FORMAT_R8G8_UNORM;
+		case CELL_GCM_TEXTURE_COMPRESSED_HILO_S8: return VK_FORMAT_R8G8_SNORM;
+		case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_B8R8_G8R8: return VK_FORMAT_R8G8_UNORM; // Not right
+		case ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN) & CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8: return VK_FORMAT_R8G8_UNORM; // Not right
 		}
-		throw EXCEPTION("Invalid or unsupported texture format (0x%x)", format);
+		throw EXCEPTION("Invalid or unsupported sampler format for texture format (0x%x)", format);
 	}
 
 	VkAllocationCallbacks default_callbacks()
