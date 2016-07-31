@@ -154,16 +154,20 @@ namespace
 		return std::make_tuple(vertex_draw_count, mapping.second);
 	}
 
-	std::tuple<u32, u32, u32> upload_index_buffer(void *ptr, rsx::index_array_type type, rsx::primitive_type draw_mode, const std::vector<std::pair<u32, u32>> first_count_commands, u32 initial_vertex_count)
+	std::tuple<u32, u32, u32> upload_index_buffer(gsl::span<const gsl::byte> raw_index_buffer, void *ptr, rsx::index_array_type type, rsx::primitive_type draw_mode, const std::vector<std::pair<u32, u32>> first_count_commands, u32 initial_vertex_count)
 	{
 		u32 min_index, max_index, vertex_draw_count = initial_vertex_count;
 
 		if (gl::is_primitive_native(draw_mode))
 		{
 			if (type == rsx::index_array_type::u16)
-				std::tie(min_index, max_index) = write_index_array_data_to_buffer_untouched(gsl::span<u16>{(u16*)ptr, vertex_draw_count}, first_count_commands);
+				std::tie(min_index, max_index) = write_index_array_data_to_buffer(gsl::span<gsl::byte>(static_cast<gsl::byte*>(ptr), vertex_draw_count * 2), raw_index_buffer,
+					type, draw_mode, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
+					[](auto prim) { return false; });
 			else
-				std::tie(min_index, max_index) = write_index_array_data_to_buffer_untouched(gsl::span<u32>{(u32*)ptr, vertex_draw_count}, first_count_commands);
+				std::tie(min_index, max_index) = write_index_array_data_to_buffer(gsl::span<gsl::byte>(static_cast<gsl::byte*>(ptr), vertex_draw_count * 4), raw_index_buffer,
+					type, draw_mode, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
+					[](auto prim) { return false; });
 
 		}
 		else
@@ -174,7 +178,9 @@ namespace
 			u32 block_sz = vertex_draw_count * type_size;
 			
 			gsl::span<gsl::byte> dst{ reinterpret_cast<gsl::byte*>(ptr), gsl::narrow<u32>(block_sz) };
-			std::tie(min_index, max_index) = write_index_array_data_to_buffer(dst, type, draw_mode, first_count_commands);
+			std::tie(min_index, max_index) = write_index_array_data_to_buffer(dst, raw_index_buffer,
+				type, draw_mode, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
+				[](auto prim) { return !is_primitive_native(prim); });
 		}
 
 		return std::make_tuple(min_index, max_index, vertex_draw_count);
@@ -223,7 +229,7 @@ u32 GLGSRender::set_vertex_buffer()
 		void *ptr = mapping.first;
 		offset_in_index_buffer = mapping.second;
 
-		std::tie(min_index, max_index, vertex_draw_count) = upload_index_buffer(ptr, type, draw_mode, first_count_commands, vertex_draw_count);
+		std::tie(min_index, max_index, vertex_draw_count) = upload_index_buffer(get_raw_index_array(first_count_commands), ptr, type, draw_mode, first_count_commands, vertex_draw_count);
 
 		m_index_ring_buffer.unmap();
 	}
