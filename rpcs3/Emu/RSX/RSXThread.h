@@ -1,96 +1,61 @@
 #pragma once
 
+#include <stack>
+#include <deque>
+#include <set>
+#include <mutex>
 #include "GCM.h"
+#include "rsx_cache.h"
 #include "RSXTexture.h"
 #include "RSXVertexProgram.h"
 #include "RSXFragmentProgram.h"
+#include "rsx_methods.h"
+#include "rsx_trace.h"
 
-#include <stack>
-#include "Utilities/Semaphore.h"
 #include "Utilities/Thread.h"
 #include "Utilities/Timer.h"
-#include "Utilities/convert.h"
+#include "Utilities/geometry.h"
+#include "rsx_trace.h"
 
 extern u64 get_system_time();
 
-struct frame_capture_data
-{
-	struct draw_state
-	{
-		std::string name;
-		std::pair<std::string, std::string> programs;
-		size_t width = 0, height = 0;
-		rsx::surface_color_format color_format;
-		std::array<std::vector<gsl::byte>, 4> color_buffer;
-		rsx::surface_depth_format depth_format;
-		std::array<std::vector<gsl::byte>, 2> depth_stencil;
-		rsx::index_array_type index_type;
-		std::vector<gsl::byte> index;
-		u32 vertex_count;
-	};
-	std::vector<std::pair<u32, u32> > command_queue;
-	std::vector<draw_state> draw_calls;
-
-	void reset()
-	{
-		command_queue.clear();
-		draw_calls.clear();
-	}
-};
-
 extern bool user_asked_for_frame_capture;
-extern frame_capture_data frame_debug;
+extern rsx::frame_capture_data frame_debug;
 
 namespace rsx
 {
-	enum class shader_language
+	namespace old_shaders_cache
 	{
-		glsl,
-		hlsl
-	};
+		enum class shader_language
+		{
+			glsl,
+			hlsl,
+		};
+	}
 }
 
-namespace convert
+template<>
+struct unveil<rsx::old_shaders_cache::shader_language>
 {
-	template<>
-	struct to_impl_t<rsx::shader_language, std::string>
+	static inline const char* get(rsx::old_shaders_cache::shader_language in)
 	{
-		static rsx::shader_language func(const std::string &from)
+		switch (in)
 		{
-			if (from == "glsl")
-				return rsx::shader_language::glsl;
-
-			if (from == "hlsl")
-				return rsx::shader_language::hlsl;
-
-			throw;
+		case rsx::old_shaders_cache::shader_language::glsl: return "glsl";
+		case rsx::old_shaders_cache::shader_language::hlsl: return "hlsl";
 		}
-	};
 
-	template<>
-	struct to_impl_t<std::string, rsx::shader_language>
-	{
-		static std::string func(rsx::shader_language from)
-		{
-			switch (from)
-			{
-			case rsx::shader_language::glsl:
-				return "glsl";
-			case rsx::shader_language::hlsl:
-				return "hlsl";
-			}
+		return "";
+	}
+};
 
-			throw;
-		}
-	};
-}
 namespace rsx
 {
 	namespace limits
 	{
 		enum
 		{
-			textures_count = 16,
+			fragment_textures_count = 16,
 			vertex_textures_count = 4,
 			vertex_count = 16,
 			fragment_count = 32,
@@ -100,52 +65,55 @@ namespace rsx
 		};
 	}
 
-	struct decompiled_shader
+	namespace old_shaders_cache
 	{
-		std::string code;
-	};
-
-	struct finalized_shader
-	{
-		u64 ucode_hash;
-		std::string code;
-	};
-
-	template<typename Type, typename KeyType = u64, typename Hasher = std::hash<KeyType>>
-	struct cache
-	{
-	private:
-		std::unordered_map<KeyType, Type, Hasher> m_entries;
-
-	public:
-		const Type* find(u64 key) const
+		struct decompiled_shader
 		{
-			auto found = m_entries.find(key);
+			std::string code;
+		};
 
-			if (found == m_entries.end())
-				return nullptr;
-
-			return &found->second;
-		}
-
-		void insert(KeyType key, const Type &shader)
+		struct finalized_shader
 		{
-			m_entries.insert({ key, shader });
-		}
-	};
+			u64 ucode_hash;
+			std::string code;
+		};
 
-	struct shaders_cache
-	{
-		cache<decompiled_shader> decompiled_fragment_shaders;
-		cache<decompiled_shader> decompiled_vertex_shaders;
-		cache<finalized_shader> finailized_fragment_shaders;
-		cache<finalized_shader> finailized_vertex_shaders;
+		template<typename Type, typename KeyType = u64, typename Hasher = std::hash<KeyType>>
+		struct cache
+		{
+		private:
+			std::unordered_map<KeyType, Type, Hasher> m_entries;
 
-		void load(const std::string &path, shader_language lang);
-		void load(shader_language lang);
+		public:
+			const Type* find(u64 key) const
+			{
+				auto found = m_entries.find(key);
 
-		static std::string path_to_root();
-	};
+				if (found == m_entries.end())
+					return nullptr;
+
+				return &found->second;
+			}
+
+			void insert(KeyType key, const Type &shader)
+			{
+				m_entries.insert({ key, shader });
+			}
+		};
+
+		struct shaders_cache
+		{
+			cache<decompiled_shader> decompiled_fragment_shaders;
+			cache<decompiled_shader> decompiled_vertex_shaders;
+			cache<finalized_shader> finailized_fragment_shaders;
+			cache<finalized_shader> finailized_vertex_shaders;
+
+			void load(const std::string &path, shader_language lang);
+			void load(shader_language lang);
+
+			static std::string path_to_root();
+		};
+	}
 
 	u32 get_vertex_type_size_on_host(vertex_base_type type, u32 size);
 
@@ -189,36 +157,24 @@ namespace rsx
 		}
 	};
 
-	struct data_array_format_info
-	{
-		u16 frequency = 0;
-		u8 stride = 0;
-		u8 size = 0;
-		vertex_base_type type = vertex_base_type::f;
-
-		void unpack_array(u32 data_array_format)
-		{
-			frequency = data_array_format >> 16;
-			stride = (data_array_format >> 8) & 0xff;
-			size = (data_array_format >> 4) & 0xf;
-			type = to_vertex_base_type(data_array_format & 0xf);
-		}
-	};
-
 	enum class draw_command
 	{
+		none,
 		array,
 		inlined_array,
 		indexed,
 	};
 
-	class thread : public named_thread_t
+	class thread : public named_thread
 	{
+		std::shared_ptr<thread_ctrl> m_vblank_thread;
+
 	protected:
 		std::stack<u32> m_call_stack;
 
 	public:
-		struct shaders_cache shaders_cache;
+		old_shaders_cache::shaders_cache shaders_cache;
+		rsx::programs_cache programs_cache;
 
 		CellGcmControl* ctrl = nullptr;
 
@@ -227,32 +183,7 @@ namespace rsx
 		GcmTileInfo tiles[limits::tiles_count];
 		GcmZcullInfo zculls[limits::zculls_count];
 
-		rsx::texture textures[limits::textures_count];
-		rsx::vertex_texture vertex_textures[limits::vertex_textures_count];
-
-
-		/**
-		 * RSX can sources vertex attributes from 2 places:
-		 * - Immediate values passed by NV4097_SET_VERTEX_DATA*_M + ARRAY_ID write.
-		 * For a given ARRAY_ID the last command of this type defines the actual type of the immediate value.
-		 * Since there can be only a single value per ARRAY_ID passed this way, all vertex in the draw call
-		 * shares it.
-		 * - Vertex array values passed by offset/stride/size/format description.
-		 *
-		 * A given ARRAY_ID can have both an immediate value and a vertex array enabled at the same time
-		 * (See After Burner Climax intro cutscene). In such case the vertex array has precedence over the
-		 * immediate value. As soon as the vertex array is disabled (size set to 0) the immediate value
-		 * must be used if the vertex attrib mask request it.
-		 *
-		 * Note that behavior when both vertex array and immediate value system are disabled but vertex attrib mask
-		 * request inputs is unknow.
-		 */
-		data_array_format_info register_vertex_info[limits::vertex_count];
-		std::vector<u8> register_vertex_data[limits::vertex_count];
-		data_array_format_info vertex_arrays_info[limits::vertex_count];
 		u32 vertex_draw_count = 0;
-
-		std::unordered_map<u32, color4_base<f32>> transform_constants;
 
 		/**
 		* Stores the first and count argument from draw/draw indexed parameters between begin/end clauses.
@@ -262,12 +193,12 @@ namespace rsx
 		// Constant stored for whole frame
 		std::unordered_map<u32, color4f> local_transform_constants;
 
-		u32 transform_program[512 * 4] = {};
-
 		bool capture_current_frame = false;
 		void capture_frame(const std::string &name);
 
 	public:
+		std::shared_ptr<class ppu_thread> intr_thread;
+
 		u32 ioAddress, ioSize;
 		int flip_status;
 		int flip_mode;
@@ -276,11 +207,10 @@ namespace rsx
 
 		u32 tiles_addr;
 		u32 zculls_addr;
-		vm::ps3::ptr<CellGcmDisplayInfo> gcm_buffers;
+		vm::ps3::ptr<CellGcmDisplayInfo> gcm_buffers = vm::null;
 		u32 gcm_buffers_count;
 		u32 gcm_current_buffer;
 		u32 ctxt_addr;
-		u32 report_main_addr;
 		u32 label_addr;
 		rsx::draw_command draw_command;
 		primitive_type draw_mode;
@@ -305,7 +235,6 @@ namespace rsx
 		double fps_limit = 59.94;
 
 	public:
-		semaphore_t sem_flip;
 		u64 last_flip_time;
 		vm::ps3::ptr<void(u32)> flip_handler = vm::null;
 		vm::ps3::ptr<void(u32)> user_handler = vm::null;
@@ -320,14 +249,18 @@ namespace rsx
 		virtual ~thread();
 
 		virtual void on_task() override;
+		virtual void on_exit() override;
 
 	public:
 		virtual std::string get_name() const override;
 
+		virtual void on_init(const std::shared_ptr<void>&) override {} // disable start() (TODO)
+		virtual void on_stop() override {} // disable join()
+
 		virtual void begin();
 		virtual void end();
 
-		virtual void on_init() = 0;
+		virtual void on_init_rsx() = 0;
 		virtual void on_init_thread() = 0;
 		virtual bool do_method(u32 cmd, u32 value) { return false; }
 		virtual void flip(int buffer) = 0;
@@ -340,7 +273,7 @@ namespace rsx
 		struct internal_task_entry
 		{
 			std::function<bool()> callback;
-			std::promise<void> promise;
+			//std::promise<void> promise;
 
 			internal_task_entry(std::function<bool()> callback) : callback(callback)
 			{
@@ -351,8 +284,8 @@ namespace rsx
 		void do_internal_task();
 
 	public:
-		std::future<void> add_internal_task(std::function<bool()> callback);
-		void invoke(std::function<bool()> callback);
+		//std::future<void> add_internal_task(std::function<bool()> callback);
+		//void invoke(std::function<bool()> callback);
 
 		/**
 		 * Fill buffer with 4x4 scale offset matrix.
@@ -392,6 +325,7 @@ namespace rsx
 
 		virtual std::pair<std::string, std::string> get_programs() const { return std::make_pair("", ""); };
 
+		struct raw_program get_raw_program() const;
 	public:
 		void reset();
 		void init(const u32 ioAddress, const u32 ioSize, const u32 ctrlAddress, const u32 localAddress);

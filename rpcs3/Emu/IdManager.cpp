@@ -1,156 +1,132 @@
 #include "stdafx.h"
 #include "IdManager.h"
 
-namespace idm
+DECLARE(idm::g_map);
+DECLARE(idm::g_id);
+DECLARE(idm::g_mutex);
+
+DECLARE(fxm::g_map);
+DECLARE(fxm::g_mutex);
+
+std::vector<id_manager::typeinfo>& id_manager::typeinfo::access()
 {
-	shared_mutex g_mutex;
-
-	idm::map_t g_map;
-
-	u32 g_last_raw_id = 0;
-
-	thread_local u32 g_tls_last_id = 0xdeadbeef;
+	static std::vector<typeinfo> list;
+	
+	return list;
 }
 
-namespace fxm
+u32 id_manager::typeinfo::add_type()
 {
-	shared_mutex g_mutex;
+	auto& list = access();
 
-	fxm::map_t g_map;
+	list.emplace_back();
+
+	return ::size32(list) - 1;
 }
 
-void idm::clear()
+id_manager::id_map::pointer idm::allocate_id(u32 tag, u32 type, u32 min, u32 max)
 {
-	std::lock_guard<shared_mutex> lock(g_mutex);
-
-	// Call recorded finalization functions for all IDs
-	for (auto& id : idm::map_t(std::move(g_map)))
+	// Check all IDs starting from "next id"
+	for (u32 i = 0; i <= max - min; i++)
 	{
-		(*id.second.type_index)(id.second.data.get());
-	}
+		// Fix current ID (wrap around)
+		if (g_id[tag] < min || g_id[tag] > max) g_id[tag] = min;
 
-	g_last_raw_id = 0;
-}
+		// Get ID
+		const auto r = g_map[tag].emplace(id_manager::id_key{g_id[tag]++, type}, nullptr);
 
-bool idm::check(u32 in_id, id_type_index_t type)
-{
-	reader_lock lock(g_mutex);
-
-	const auto found = g_map.find(in_id);
-
-	return found != g_map.end() && found->second.type_index == type;
-}
-
-const std::type_info* idm::get_type(u32 raw_id)
-{
-	reader_lock lock(g_mutex);
-
-	const auto found = g_map.find(raw_id);
-
-	return found == g_map.end() ? nullptr : found->second.info;
-}
-
-std::shared_ptr<void> idm::get(u32 in_id, id_type_index_t type)
-{
-	reader_lock lock(g_mutex);
-
-	const auto found = g_map.find(in_id);
-
-	if (found == g_map.end() || found->second.type_index != type)
-	{
-		return nullptr;
-	}
-
-	return found->second.data;
-}
-
-idm::map_t idm::get_all(id_type_index_t type)
-{
-	reader_lock lock(g_mutex);
-
-	idm::map_t result;
-
-	for (auto& id : g_map)
-	{
-		if (id.second.type_index == type)
+		if (r.second)
 		{
-			result.insert(id);
+			return &*r.first;
 		}
 	}
 
-	return result;
+	// Nothing found
+	return nullptr;
 }
 
-std::shared_ptr<void> idm::withdraw(u32 in_id, id_type_index_t type)
+std::shared_ptr<void> idm::deallocate_id(u32 tag, u32 id)
 {
-	std::lock_guard<shared_mutex> lock(g_mutex);
+	const auto found = g_map[tag].find(id);
 
-	const auto found = g_map.find(in_id);
+	if (found == g_map[tag].end()) return nullptr;
 
-	if (found == g_map.end() || found->second.type_index != type)
-	{
-		return nullptr;
-	}
+	auto ptr = std::move(found->second);
 
-	auto ptr = std::move(found->second.data);
-
-	g_map.erase(found);
+	g_map[tag].erase(found);
 
 	return ptr;
 }
 
-u32 idm::get_count(id_type_index_t type)
+id_manager::id_map::pointer idm::find_id(u32 type, u32 true_type, u32 id)
 {
-	reader_lock lock(g_mutex);
+	const auto found = g_map[type].find(id);
 
-	u32 result = 0;
+	if (found == g_map[type].end()) return nullptr;
 
-	for (auto& id : g_map)
-	{
-		if (id.second.type_index == type)
-		{
-			result++;
-		}
-	}
+	if (true_type != get_type<void>() && found->first.type() != true_type) return nullptr;
 
-	return result;
+	return &*found;
 }
 
+std::shared_ptr<void> idm::delete_id(u32 type, u32 true_type, u32 tag, u32 id)
+{
+	writer_lock lock(g_mutex);
+
+	if (!find_id(type, true_type, id)) return nullptr; // ???
+
+	auto&& ptr = deallocate_id(tag, id);
+
+	g_map[type].erase(id);
+
+	return ptr;
+}
+
+void idm::init()
+{
+	g_map.resize(id_manager::typeinfo::get().size(), {});
+	g_id.resize(id_manager::typeinfo::get().size(), 0);
+}
+
+void idm::clear()
+{
+	// Call recorded finalization functions for all IDs
+	for (std::size_t i = 0; i < g_map.size(); i++)
+	{
+		const auto on_stop = id_manager::typeinfo::get()[i].on_stop;
+
+		for (auto& id : g_map[i])
+		{
+			on_stop(id.second.get());
+		}
+
+		g_map[i].clear();
+		g_id[i] = 0;
+	}
+}
+
+std::shared_ptr<void> fxm::remove(u32 type)
+{
+	writer_lock lock(g_mutex);
+
+	return std::move(g_map[type]);
+}
+
+void fxm::init()
+{
+	g_map.resize(id_manager::typeinfo::get().size(), {});
+}
 
 void fxm::clear()
 {
-	std::lock_guard<shared_mutex> lock(g_mutex);
-
 	// Call recorded finalization functions for all IDs
-	for (auto& id : fxm::map_t(std::move(g_map)))
+	for (std::size_t i = 0; i < g_map.size(); i++)
 	{
-		if (id.second) (*id.first)(id.second.get());
+		if (g_map[i])
+		{
+			id_manager::typeinfo::get()[i].on_stop(g_map[i].get());
+		}
+
+		g_map[i].reset();
 	}
-}
-
-bool fxm::check(id_type_index_t type)
-{
-	reader_lock lock(g_mutex);
-
-	const auto found = g_map.find(type);
-
-	return found != g_map.end() && found->second;
-}
-
-std::shared_ptr<void> fxm::get(id_type_index_t type)
-{
-	reader_lock lock(g_mutex);
-
-	const auto found = g_map.find(type);
-
-	return found != g_map.end() ? found->second : nullptr;
-}
-
-std::shared_ptr<void> fxm::withdraw(id_type_index_t type)
-{
-	std::unique_lock<shared_mutex> lock(g_mutex);
-
-	const auto found = g_map.find(type);
-
-	return found != g_map.end() ? std::move(found->second) : nullptr;
 }

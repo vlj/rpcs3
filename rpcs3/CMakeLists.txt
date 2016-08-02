@@ -12,17 +12,12 @@ add_custom_command(OUTPUT something_that_never_exists
 	COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/git-version.cmake)
 
-if(CMAKE_COMPILER_IS_GNUCXX)
-	if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.9.0) # TODO: the same for (apple) clang
-		message(FATAL_ERROR "GCC ${CMAKE_CXX_COMPILER_VERSION} is too old.")
-	endif()
-	# Warnings
-	add_compile_options(-Wno-attributes -Wno-enum-compare -Wno-invalid-offsetof)
-elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-	add_compile_options(-ftemplate-depth=1024)
-	if(APPLE)
-		add_compile_options(-stdlib=libc++)
-	endif()
+# Check for a sufficient compiler and set build options
+include(ConfigureCompiler)
+
+if(WIN32)
+	add_definitions(-DUNICODE)
+	add_definitions(-D_WIN32_WINNT=0x0601)
 endif()
 
 if(NOT MSVC)
@@ -31,12 +26,9 @@ if(NOT MSVC)
 		set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O1") # fix for travis gcc OoM crash. Might be fixed with the move to containers.
 	endif()
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -fexceptions")
-	add_compile_options(-msse -msse2 -mcx16 -mssse3)
-	if(WIN32)
-		add_compile_options(-municode -static -mwindows)
-	endif()
+	add_compile_options(-msse -msse2 -mcx16 -mssse3 -march=native)
 else()
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHa /Zc:throwingNew /D _CRT_SECURE_NO_DEPRECATE=1 /D _CRT_NON_CONFORMING_SWPRINTFS=1 /D _SCL_SECURE_NO_WARNINGS=1")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:throwingNew /D _CRT_SECURE_NO_DEPRECATE=1 /D _CRT_NON_CONFORMING_SWPRINTFS=1 /D _SCL_SECURE_NO_WARNINGS=1")
 endif()
 
 if(APPLE)
@@ -88,7 +80,7 @@ if(NOT MSVC)
 endif()
 find_package(OpenGL REQUIRED)
 find_package(OpenAL REQUIRED)
-find_package(LLVM CONFIG)
+find_package(LLVM 3.8 CONFIG)
 
 include("${wxWidgets_USE_FILE}")
 
@@ -100,20 +92,39 @@ else()
 	set(PLATFORM_ARCH "linux/x86_64")
 endif()
 
+# Select the version of libpng to use, default is builtin
+if(USE_SYSTEM_LIBPNG)
+	message("-- RPCS3: using shared libpng")
+	find_package(PNG REQUIRED)
+	include_directories("${PNG_INCLUDE_DIRS}")
+else()
+	message("-- RPCS3: using builtin libpng")
+	include_directories("${RPCS3_SRC_DIR}/../3rdparty/libpng")
+endif()
+
+# Select the version of ffmpeg to use, default is builtin
+if(USE_SYSTEM_FFMPEG)
+	message("-- RPCS3: using shared ffmpeg")
+	find_package(FFMPEG REQUIRED)
+	include_directories("${FFMPEG_INCLUDE_DIR}")
+else()
+	message("-- RPCS3: using builtin ffmpeg")
+	include_directories("${RPCS3_SRC_DIR}/../3rdparty/ffmpeg/${PLATFORM_ARCH}/include")
+endif()
+
 include_directories(
 ${GLEW_INCLUDE_DIR}
 ${wxWidgets_INCLUDE_DIRS}
 ${ZLIB_INCLUDE_DIR}
 ${OPENAL_INCLUDE_DIR}
 ${LLVM_INCLUDE_DIRS}
-"${RPCS3_SRC_DIR}/../3rdparty/ffmpeg/${PLATFORM_ARCH}/include"
+"${RPCS3_SRC_DIR}/../3rdparty/pugixml/src"
 "${RPCS3_SRC_DIR}"
 "${RPCS3_SRC_DIR}/Loader"
 "${RPCS3_SRC_DIR}/Crypto"
 "${RPCS3_SRC_DIR}/.."
+"${RPCS3_SRC_DIR}/../Utilities/yaml-cpp/include"
 "${RPCS3_SRC_DIR}/../asmjit/src/asmjit"
-"${RPCS3_SRC_DIR}/../3rdparty/glm"
-"${RPCS3_SRC_DIR}/../3rdparty/libpng"
 "${RPCS3_SRC_DIR}/../3rdparty/GSL/include"
 "${RPCS3_SRC_DIR}/../rsx_program_decompiler/rsx_decompiler"
 "${RPCS3_SRC_DIR}/../rsx_program_decompiler/shader_code"
@@ -122,6 +133,9 @@ ${LLVM_INCLUDE_DIRS}
 # Includes 3rdparty stuff that isn't included yet
 "${RPCS3_SRC_DIR}/../3rdparty/GL"
 "${RPCS3_SRC_DIR}/../3rdparty/stblib"
+"${RPCS3_SRC_DIR}/../rsx_program_decompiler/rsx_decompiler"
+"${RPCS3_SRC_DIR}/../rsx_program_decompiler/shader_code"
+"${RPCS3_SRC_DIR}/../3rdparty/cereal/include"
 )
 if(WIN32)
 	include_directories(BEFORE "${RPCS3_SRC_DIR}/../3rdparty/XAudio2_7") # Slimmed down version of minidx9 for XAudio2_7 only
@@ -129,31 +143,29 @@ if(WIN32)
 endif()
 
 if(NOT LLVM_FOUND)
-	Message("LLVM not found! LLVM 3.6 is required. RPCS3 will be compiled without LLVM support.")
-elseif(${LLVM_PACKAGE_VERSION} VERSION_LESS "3.6" OR ${LLVM_PACKAGE_VERSION} VERSION_EQUAL "3.7" OR ${LLVM_PACKAGE_VERSION} VERSION_GREATER "3.7")
-	Message("LLVM ${LLVM_PACKAGE_VERSION} is not supported! LLVM 3.6 is required. RPCS3 will be compiled without LLVM support.")
+	Message("LLVM not found! LLVM 3.8 is required. RPCS3 will be compiled without LLVM support.")
 else()
 	add_definitions(${LLVM_DEFINITIONS})
 	add_definitions(-DLLVM_AVAILABLE)
 	if (CMAKE_BUILD_TYPE STREQUAL "Release")
-		llvm_map_components_to_libnames(LLVM_LIBS mcjit vectorize x86codegen x86disassembler)
+		llvm_map_components_to_libnames(LLVM_LIBS mcjit vectorize ipo x86codegen x86disassembler)
 	else()
-		llvm_map_components_to_libnames(LLVM_LIBS mcjit vectorize x86codegen x86disassembler mcdisassembler)
+		llvm_map_components_to_libnames(LLVM_LIBS mcjit vectorize ipo x86codegen x86disassembler mcdisassembler)
 	endif()
-	if(MSVC)
-		set_source_files_properties(${RPCS3_SRC_DIR}/Emu/Cell/PPULLVMRecompiler.cpp PROPERTIES COMPILE_FLAGS /GR-)
-	else()
-		set_source_files_properties(${RPCS3_SRC_DIR}/Emu/Cell/PPULLVMRecompiler.cpp PROPERTIES COMPILE_FLAGS -fno-rtti)
+	if (NOT MSVC)
+		set_source_files_properties(${RPCS3_SRC_DIR}/../Utilities/JIT.cpp PROPERTIES COMPILE_FLAGS -fno-rtti)
 	endif()
 endif()
 
 link_directories(
-"${RPCS3_SRC_DIR}/../asmjit/"
 "${RPCS3_SRC_DIR}/../3rdparty/minidx12/"
+"${RPCS3_SRC_DIR}/../Vulkan"
 )
 
-if(MSVC OR NOT WIN32)
-	link_directories("${RPCS3_SRC_DIR}/../3rdparty/ffmpeg/${PLATFORM_ARCH}/lib")
+if(NOT USE_SYSTEM_FFMPEG)
+	if(MSVC OR NOT WIN32)
+		link_directories("${RPCS3_SRC_DIR}/../3rdparty/ffmpeg/${PLATFORM_ARCH}/lib")
+	endif()
 endif()
 
 get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
@@ -164,20 +176,14 @@ endforeach()
 file(
 GLOB_RECURSE
 RPCS3_SRC
-"${RPCS3_SRC_DIR}/rpcs3.cpp"
-"${RPCS3_SRC_DIR}/config.cpp"
-"${RPCS3_SRC_DIR}/stb_image.cpp"
-"${RPCS3_SRC_DIR}/../Utilities/GNU.cpp"
-"${RPCS3_SRC_DIR}/Emu/*"
-"${RPCS3_SRC_DIR}/Gui/*"
-"${RPCS3_SRC_DIR}/Loader/*"
-"${RPCS3_SRC_DIR}/Crypto/*"
-"${RPCS3_SRC_DIR}/../Utilities/*"
-"${RPCS3_SRC_DIR}/../rsx_program_decompiler/rsx_decompiler/*"
-"${RPCS3_SRC_DIR}/../rsx_program_decompiler/shader_code/*"
+"${RPCS3_SRC_DIR}/*.cpp"
+"${RPCS3_SRC_DIR}/../Utilities/*.cpp"
+"${RPCS3_SRC_DIR}/../rsx_program_decompiler/rsx_decompiler/*.cpp"
+"${RPCS3_SRC_DIR}/../rsx_program_decompiler/shader_code/*.cpp"
+"${RPCS3_SRC_DIR}/../asmjit/src/asmjit/*.cpp"
 )
 
-if(APPLE)
+if(NOT WIN32)
 	set (EXCLUDE_DIR "/RSX/VK/")
 	foreach (TMP_PATH ${RPCS3_SRC})
 		string (FIND ${TMP_PATH} ${EXCLUDE_DIR} EXCLUDE_DIR_FOUND)
@@ -190,37 +196,38 @@ endif()
 add_executable(rpcs3 ${RPCS3_SRC})
 
 
-if(NOT MSVC)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -L${CMAKE_CURRENT_BINARY_DIR}/../asmjit/") #hack because the asmjit cmake file force fno exceptions upd: not sure if vs2015 build is affected
-else()
-	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /NODEFAULTLIB:libc.lib /NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcd.lib /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrtd.lib")
+if(MSVC)
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /NODEFAULTLIB:libc.lib /NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcd.lib /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrtd.lib")
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /DYNAMICBASE:NO /BASE:0x10000 /FIXED")
 endif()
-if(WIN32) # I'm not sure we need all of these libs, but we link them in vs
-	target_link_libraries(rpcs3  odbc32.lib odbccp32.lib comctl32.lib ws2_32.lib shlwapi.lib winmm.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib Iphlpapi.lib)
-	if(LLVM_FOUND)
-		target_link_libraries(rpcs3  ${LLVM_LIBS})
-	endif()
+if(WIN32)
+	target_link_libraries(rpcs3  ws2_32.lib Winmm.lib VKstatic.1 glslang OSDependent OGLCompiler SPIRV HLSL)
 	if(NOT MSVC)
-		target_link_libraries(rpcs3  ${OPENGL_LIBRARIES} ${GLEW_LIBRARY} opengl32.lib glu32.lib)
+		target_link_libraries(rpcs3  ${OPENGL_LIBRARIES} ${GLEW_LIBRARY} opengl32.lib glu32.lib libpthread)
 	else()
 		target_link_libraries(rpcs3  dxgi.lib d2d1.lib dwrite.lib)
 	endif()
-	target_link_libraries(rpcs3  asmjit.lib avformat.lib avcodec.lib avutil.lib swresample.lib swscale.lib png16_static ${wxWidgets_LIBRARIES} ${OPENAL_LIBRARY} ${ADDITIONAL_LIBS} VKstatic.1 glslang OSDependent OGLCompiler SPIRV)
+	target_link_libraries(rpcs3  avformat.lib avcodec.lib avutil.lib swresample.lib swscale.lib png16_static ${wxWidgets_LIBRARIES} ${OPENAL_LIBRARY} ${ADDITIONAL_LIBS})
 else()
-	if(LLVM_FOUND)
-		target_link_libraries(rpcs3  asmjit.a ${wxWidgets_LIBRARIES} ${OPENAL_LIBRARY} ${GLEW_LIBRARY} ${OPENGL_LIBRARIES})
-		target_link_libraries(rpcs3  libavformat.a libavcodec.a libavutil.a libswresample.a libswscale.a png16_static ${ZLIB_LIBRARIES} ${LLVM_LIBS} ${ADDITIONAL_LIBS})
-		if (NOT APPLE)
-			target_link_libraries(rpcs3  vulkan glslang OSDependent OGLCompiler SPIRV)
-		endif()
+	target_link_libraries(rpcs3  ${wxWidgets_LIBRARIES} ${OPENAL_LIBRARY} ${GLEW_LIBRARY} ${OPENGL_LIBRARIES})
+	target_link_libraries(rpcs3  ${ZLIB_LIBRARIES} ${ADDITIONAL_LIBS})
+	if (USE_SYSTEM_FFMPEG)
+		link_libraries(${FFMPEG_LIBRARY_DIR})
+		target_link_libraries(rpcs3  libavformat.so libavcodec.so libavutil.so libswresample.so libswscale.so)
 	else()
-		target_link_libraries(rpcs3  asmjit.a ${wxWidgets_LIBRARIES} ${OPENAL_LIBRARY} ${GLEW_LIBRARY} ${OPENGL_LIBRARIES})
-		target_link_libraries(rpcs3  libavformat.a libavcodec.a libavutil.a libswresample.a libswscale.a png16_static ${ZLIB_LIBRARIES} ${ADDITIONAL_LIBS})
-		if (NOT APPLE)
-			target_link_libraries(rpcs3  vulkan glslang OSDependent OGLCompiler SPIRV)
-		endif()
-    endif()
+		target_link_libraries(rpcs3  libavformat.a libavcodec.a libavutil.a libswresample.a libswscale.a -ldl)
+	endif()
+	if (USE_SYSTEM_LIBPNG)
+		target_link_libraries(rpcs3  ${PNG_LIBRARIES})
+	else()
+		target_link_libraries(rpcs3  png16_static)
+	endif()
 endif()
+if(LLVM_FOUND)
+	target_link_libraries(rpcs3  ${LLVM_LIBS})
+endif()
+
+target_link_libraries(rpcs3 rsx_decompiler shader_code)
 
 set_target_properties(rpcs3 PROPERTIES COTIRE_CXX_PREFIX_HEADER_INIT "${RPCS3_SRC_DIR}/stdafx.h")
 cotire(rpcs3)

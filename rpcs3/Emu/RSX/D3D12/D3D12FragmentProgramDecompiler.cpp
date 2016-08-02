@@ -1,10 +1,11 @@
+#ifdef _MSC_VER
 #include "stdafx.h"
 #include "stdafx_d3d12.h"
-#ifdef _MSC_VER
 #include "D3D12FragmentProgramDecompiler.h"
 #include "D3D12CommonDecompiler.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
+#include <set>
 
 D3D12FragmentDecompiler::D3D12FragmentDecompiler(const RSXFragmentProgram &prog, u32& size) :
 	FragmentProgramDecompiler(prog, size)
@@ -297,22 +298,22 @@ void D3D12FragmentDecompiler::insertMainEnd(std::stringstream & OS)
 	{
 		switch (m_prog.alpha_func)
 		{
-		case rsx::comparaison_function::equal:
+		case rsx::comparison_function::equal:
 			OS << "	if (isAlphaTested && Out." << first_output_name << ".a != alphaRef) discard;\n";
 			break;
-		case rsx::comparaison_function::not_equal:
+		case rsx::comparison_function::not_equal:
 			OS << "	if (isAlphaTested && Out." << first_output_name << ".a == alphaRef) discard;\n";
 			break;
-		case rsx::comparaison_function::less_or_equal:
+		case rsx::comparison_function::less_or_equal:
 			OS << "	if (isAlphaTested && Out." << first_output_name << ".a > alphaRef) discard;\n";
 			break;
-		case rsx::comparaison_function::less:
+		case rsx::comparison_function::less:
 			OS << "	if (isAlphaTested && Out." << first_output_name << ".a >= alphaRef) discard;\n";
 			break;
-		case rsx::comparaison_function::greater:
+		case rsx::comparison_function::greater:
 			OS << "	if (isAlphaTested && Out." << first_output_name << ".a <= alphaRef) discard;\n";
 			break;
-		case rsx::comparaison_function::greater_or_equal:
+		case rsx::comparison_function::greater_or_equal:
 			OS << "	if (isAlphaTested && Out." << first_output_name << ".a < alphaRef) discard;\n";
 			break;
 		}

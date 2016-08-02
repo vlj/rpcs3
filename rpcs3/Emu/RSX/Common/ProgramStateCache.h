@@ -4,6 +4,7 @@
 #include "Emu/RSX/RSXVertexProgram.h"
 #include "Emu/Memory/vm.h"
 
+#include "Utilities/GSL.h"
 
 enum class SHADER_TYPE
 {
@@ -15,6 +16,7 @@ namespace program_hash_util
 {
 	// Based on
 	// https://github.com/AlexAltea/nucleus/blob/master/nucleus/gpu/rsx_pgraph.cpp
+	// TODO: eliminate it and implement independent hash utility
 	union qword
 	{
 		u64 dword[2];
@@ -162,7 +164,7 @@ public:
 		auto I = m_vertex_shader_cache.find(rsx_vp);
 		if (I != m_vertex_shader_cache.end())
 			return I->second;
-		throw new EXCEPTION("Trying to get unknow transform program");
+		throw EXCEPTION("Trying to get unknown transform program");
 	}
 
 	const fragment_program_type& get_shader_program(const RSXFragmentProgram& rsx_fp) const
@@ -170,7 +172,7 @@ public:
 		auto I = m_fragment_shader_cache.find(rsx_fp);
 		if (I != m_fragment_shader_cache.end())
 			return I->second;
-		throw new EXCEPTION("Trying to get unknow shader program");
+		throw EXCEPTION("Trying to get unknown shader program");
 	}
 
 	template<typename... Args>
@@ -225,7 +227,7 @@ public:
 			0x6, 0x7, 0x4, 0x5,
 			0x2, 0x3, 0x0, 0x1);
 
-		Expects(dst_buffer.size_bytes() >= gsl::narrow<int>(I->second.FragmentConstantOffsetCache.size()) * 16);
+		EXPECTS(dst_buffer.size_bytes() >= gsl::narrow<int>(I->second.FragmentConstantOffsetCache.size()) * 16);
 
 		size_t offset = 0;
 		for (size_t offset_in_fragment_program : I->second.FragmentConstantOffsetCache)

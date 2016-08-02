@@ -1,11 +1,8 @@
 #include "stdafx.h"
-#include "Log.h"
+#include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
-#include "Emu/state.h"
-#include "Emu/CPU/CPUThreadManager.h"
-#include "Emu/CPU/CPUThread.h"
+#include "Emu/IdManager.h"
 #include "Emu/Cell/RawSPUThread.h"
-#include "Emu/SysCalls/SysCalls.h"
 #include "Thread.h"
 
 #ifdef _WIN32
@@ -15,16 +12,26 @@
 #define _XOPEN_SOURCE
 #define __USE_GNU
 #endif
+#include <errno.h>
 #include <signal.h>
 #include <ucontext.h>
 #endif
 
 static void report_fatal_error(const std::string& msg)
 {
+	std::string _msg = msg + "\n"
+		"HOW TO REPORT ERRORS:\n"
+		"1) Check the FAQ, readme, other sources. Please ensure that your hardware and software configuration is compliant.\n"
+		"2) You must provide FULL information: how to reproduce the error (your actions), RPCS3.log file, other *.log files whenever requested.\n"
+		"3) Please ensure that your software (game) is 'Playable' or close. Please note that 'Non-playable' games will be ignored.\n"
+		"4) If the software (game) is not 'Playable', please ensure that this error is unexpected, i.e. it didn't happen before or similar.\n"
+		"Please, don't send incorrect reports. Thanks for understanding.\n";
+
 #ifdef _WIN32
-	MessageBoxA(0, msg.c_str(), "Fatal error", MB_ICONERROR); // TODO: unicode message
+	_msg += "Press (Ctrl+C) to copy this message.";
+	MessageBoxA(0, _msg.c_str(), "Fatal error", MB_ICONERROR); // TODO: unicode message
 #else
-	std::printf("Fatal error: %s\nPlease report this error to the developers.\n", msg.c_str());
+	std::printf("Fatal error: \n%s", _msg.c_str());
 #endif
 }
 
@@ -34,9 +41,9 @@ static void report_fatal_error(const std::string& msg)
 	{
 		throw;
 	}
-	catch (const std::exception& ex)
+	catch (const std::exception& e)
 	{
-		report_fatal_error("Unhandled exception: "s + ex.what());
+		report_fatal_error("Unhandled exception of type '"s + typeid(e).name() + "': "s + e.what());
 	}
 	catch (...)
 	{
@@ -44,38 +51,6 @@ static void report_fatal_error(const std::string& msg)
 	}
 
 	std::abort();
-}
-
-void SetCurrentThreadDebugName(const char* threadName)
-{
-#if defined(_MSC_VER) // this is VS-specific way to set thread names for the debugger
-
-	#pragma pack(push,8)
-
-	struct THREADNAME_INFO
-	{
-		DWORD dwType;
-		LPCSTR szName;
-		DWORD dwThreadID;
-		DWORD dwFlags;
-	} info;
-
-	#pragma pack(pop)
-
-	info.dwType = 0x1000;
-	info.szName = threadName;
-	info.dwThreadID = -1;
-	info.dwFlags = 0;
-
-	__try
-	{
-		RaiseException(0x406D1388, 0, sizeof(info) / sizeof(ULONG_PTR), (ULONG_PTR*)&info);
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER)
-	{
-	}
-
-#endif
 }
 
 enum x64_reg_t : u32
@@ -128,6 +103,23 @@ enum x64_reg_t : u32
 	X64_IMM16,
 	X64_IMM32,
 
+	X64_BIT_O = 0x90,
+	X64_BIT_NO,
+	X64_BIT_C,
+	X64_BIT_NC,
+	X64_BIT_Z,
+	X64_BIT_NZ,
+	X64_BIT_BE,
+	X64_BIT_NBE,
+	X64_BIT_S,
+	X64_BIT_NS,
+	X64_BIT_P,
+	X64_BIT_NP,
+	X64_BIT_L,
+	X64_BIT_NL,
+	X64_BIT_LE,
+	X64_BIT_NLE,
+
 	X64R_ECX = X64R_CL,
 };
 
@@ -135,16 +127,24 @@ enum x64_op_t : u32
 {
 	X64OP_NONE,
 	X64OP_LOAD, // obtain and put the value into x64 register
+	X64OP_LOAD_BE,
+	X64OP_LOAD_CMP,
+	X64OP_LOAD_TEST,
 	X64OP_STORE, // take the value from x64 register or an immediate and use it
+	X64OP_STORE_BE,
 	X64OP_MOVS,
 	X64OP_STOS,
 	X64OP_XCHG,
 	X64OP_CMPXCHG,
-	X64OP_LOAD_AND_STORE, // lock and [mem], reg
-	X64OP_LOAD_OR_STORE,  // lock or  [mem], reg (TODO)
-	X64OP_LOAD_XOR_STORE, // lock xor [mem], reg (TODO)
-	X64OP_INC, // lock inc [mem] (TODO)
-	X64OP_DEC, // lock dec [mem] (TODO)
+	X64OP_AND, // lock and [mem], ...
+	X64OP_OR,  // lock or  [mem], ...
+	X64OP_XOR, // lock xor [mem], ...
+	X64OP_INC, // lock inc [mem]
+	X64OP_DEC, // lock dec [mem]
+	X64OP_ADD, // lock add [mem], ...
+	X64OP_ADC, // lock adc [mem], ...
+	X64OP_SUB, // lock sub [mem], ...
+	X64OP_SBB, // lock sbb [mem], ...
 };
 
 void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, size_t& out_size, size_t& out_length)
@@ -300,8 +300,9 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 		switch (op2)
 		{
 		case 0x11:
+		case 0x29:
 		{
-			if (!repe && !repne && !oso) // MOVUPS xmm/m, xmm
+			if (!repe && !repne) // MOVUPS/MOVAPS/MOVUPD/MOVAPD xmm/m, xmm
 			{
 				out_op = X64OP_STORE;
 				out_reg = get_modRM_reg_xmm(code, rex);
@@ -347,6 +348,56 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 			}
 			break;
 		}
+		case 0x90:
+		case 0x91:
+		case 0x92:
+		case 0x93:
+		case 0x94:
+		case 0x95:
+		case 0x96:
+		case 0x97:
+		case 0x98:
+		case 0x9a:
+		case 0x9b:
+		case 0x9c:
+		case 0x9d:
+		case 0x9e:
+		case 0x9f:
+		{
+			if (!lock) // SETcc
+			{
+				out_op = X64OP_STORE;
+				out_reg = x64_reg_t(X64_BIT_O + op2 - 0x90); // 0x90 .. 0x9f
+				out_size = 1;
+				out_length += get_modRM_size(code);
+				return;
+			}
+			break;
+		}
+		case 0x38:
+		{
+			out_length++, code++;
+
+			switch (op3)
+			{
+			case 0xf0:
+			case 0xf1:
+			{
+				if (!repne) // MOVBE
+				{
+					out_op = op3 == 0xf0 ? X64OP_LOAD_BE : X64OP_STORE_BE;
+					out_reg = get_modRM_reg(code, rex);
+					out_size = get_op_size(rex, oso);
+					out_length += get_modRM_size(code);
+					return;
+				}
+
+				break;
+			}
+			}
+
+			break;
+		}
 		}
 
 		break;
@@ -355,7 +406,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 	{
 		if (!oso)
 		{
-			out_op = X64OP_LOAD_AND_STORE;
+			out_op = X64OP_AND;
 			out_reg = rex & 8 ? get_modRM_reg(code, rex) : get_modRM_reg_lh(code);
 			out_size = 1;
 			out_length += get_modRM_size(code);
@@ -367,13 +418,70 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 	{
 		if (true)
 		{
-			out_op = X64OP_LOAD_AND_STORE;
+			out_op = X64OP_AND;
 			out_reg = get_modRM_reg(code, rex);
 			out_size = get_op_size(rex, oso);
 			out_length += get_modRM_size(code);
 			return;
 		}
 		break;
+	}
+	case 0x80:
+	{
+		switch (auto mod_code = get_modRM_reg(code, 0))
+		{
+		//case 0: out_op = X64OP_ADD; break; // TODO: strange info in instruction manual
+		case 1: out_op = X64OP_OR; break;
+		case 2: out_op = X64OP_ADC; break;
+		case 3: out_op = X64OP_SBB; break;
+		case 4: out_op = X64OP_AND; break;
+		case 5: out_op = X64OP_SUB; break;
+		case 6: out_op = X64OP_XOR; break;
+		default: out_op = X64OP_LOAD_CMP; break;
+		}
+
+		out_reg = X64_IMM8;
+		out_size = 1;
+		out_length += get_modRM_size(code) + 1;
+		return;
+	}
+	case 0x81:
+	{
+		switch (auto mod_code = get_modRM_reg(code, 0))
+		{
+		case 0: out_op = X64OP_ADD; break;
+		case 1: out_op = X64OP_OR; break;
+		case 2: out_op = X64OP_ADC; break;
+		case 3: out_op = X64OP_SBB; break;
+		case 4: out_op = X64OP_AND; break;
+		case 5: out_op = X64OP_SUB; break;
+		case 6: out_op = X64OP_XOR; break;
+		default: out_op = X64OP_LOAD_CMP; break;
+		}
+
+		out_reg = oso ? X64_IMM16 : X64_IMM32;
+		out_size = get_op_size(rex, oso);
+		out_length += get_modRM_size(code) + (oso ? 2 : 4);
+		return;
+	}
+	case 0x83:
+	{
+		switch (auto mod_code = get_modRM_reg(code, 0))
+		{
+		case 0: out_op = X64OP_ADD; break;
+		case 1: out_op = X64OP_OR; break;
+		case 2: out_op = X64OP_ADC; break;
+		case 3: out_op = X64OP_SBB; break;
+		case 4: out_op = X64OP_AND; break;
+		case 5: out_op = X64OP_SUB; break;
+		case 6: out_op = X64OP_XOR; break;
+		default: out_op = X64OP_LOAD_CMP; break;
+		}
+
+		out_reg = X64_IMM8;
+		out_size = get_op_size(rex, oso);
+		out_length += get_modRM_size(code) + 1;
+		return;
 	}
 	case 0x86:
 	{
@@ -483,9 +591,60 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 		}
 		break;
 	}
+	case 0xc4: // 3-byte VEX prefix
+	case 0xc5: // 2-byte VEX prefix
+	{
+		// Last prefix byte: op2 or op3
+		const u8 opx = op1 == 0xc5 ? op2 : op3;
+
+		// Implied prefixes
+		rex |= op2 & 0x80 ? 0 : 0x4; // REX.R
+		rex |= op1 == 0xc4 && op3 & 0x80 ? 0x8 : 0; // REX.W ???
+		oso = (opx & 0x3) == 0x1;
+		repe = (opx & 0x3) == 0x2;
+		repne = (opx & 0x3) == 0x3;
+
+		const u8 vopm = op1 == 0xc5 ? 1 : op2 & 0x1f;
+		const u8 vop1 = op1 == 0xc5 ? op3 : code[2];
+		const u8 vlen = (opx & 0x4) ? 32 : 16;
+		const u8 vreg = (~opx >> 3) & 0xf;
+		out_length += op1 == 0xc5 ? 2 : 3;
+		code += op1 == 0xc5 ? 2 : 3;
+
+		if (vopm == 0x1) switch (vop1) // Implied leading byte 0x0F
+		{
+		case 0x11:
+		case 0x29:
+		{
+			if (!repe && !repne) // VMOVAPS/VMOVAPD/VMOVUPS/VMOVUPD mem,reg
+			{
+				out_op = X64OP_STORE;
+				out_reg = get_modRM_reg_xmm(code, rex);
+				out_size = vlen;
+				out_length += get_modRM_size(code);
+				return;
+			}
+			break;
+		}
+		case 0x7f:
+		{
+			if (repe || oso) // VMOVDQU/VMOVDQA mem,reg
+			{
+				out_op = X64OP_STORE;
+				out_reg = get_modRM_reg_xmm(code, rex);
+				out_size = vlen;
+				out_length += get_modRM_size(code);
+				return;
+			}
+			break;
+		}
+		}
+
+		break;
+	}
 	case 0xc6:
 	{
-		if (!lock && !oso && get_modRM_reg(code, 0) == X64R_RAX) // MOV r8/m8, imm8
+		if (!lock && !oso && get_modRM_reg(code, 0) == 0) // MOV r8/m8, imm8
 		{
 			out_op = X64OP_STORE;
 			out_reg = X64_IMM8;
@@ -497,7 +656,7 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 	}
 	case 0xc7:
 	{
-		if (!lock && get_modRM_reg(code, 0) == X64R_RAX) // MOV r/m, imm16/imm32 (16, 32, 64)
+		if (!lock && get_modRM_reg(code, 0) == 0) // MOV r/m, imm16/imm32 (16, 32, 64)
 		{
 			out_op = X64OP_STORE;
 			out_reg = oso ? X64_IMM16 : X64_IMM32;
@@ -506,6 +665,32 @@ void decode_x64_reg_op(const u8* code, x64_op_t& out_op, x64_reg_t& out_reg, siz
 			return;
 		}
 		break;
+	}
+	case 0xf6:
+	{
+		switch (auto mod_code = get_modRM_reg(code, 0))
+		{
+		case 0: out_op = X64OP_LOAD_TEST; break;
+		default: out_op = X64OP_NONE; break; // TODO...
+		}
+
+		out_reg = X64_IMM8;
+		out_size = 1;
+		out_length += get_modRM_size(code) + 1;
+		return;
+	}
+	case 0xf7:
+	{
+		switch (auto mod_code = get_modRM_reg(code, 0))
+		{
+		case 0: out_op = X64OP_LOAD_TEST; break;
+		default: out_op = X64OP_NONE; break; // TODO...
+		}
+
+		out_reg = oso ? X64_IMM16 : X64_IMM32;
+		out_size = get_op_size(rex, oso);
+		out_length += get_modRM_size(code) + (oso ? 2 : 4);
+		return;
 	}
 	}
 
@@ -625,6 +810,9 @@ bool get_x64_reg_value(x64_context* context, x64_reg_t reg, size_t d_size, size_
 		switch (d_size)
 		{
 		case 1: out_value = (u8)imm_value; return true;
+		case 2: out_value = (u16)imm_value; return true; // sign-extended
+		case 4: out_value = (u32)imm_value; return true; // sign-extended
+		case 8: out_value = (u64)imm_value; return true; // sign-extended
 		}
 	}
 	else if (reg == X64_IMM16)
@@ -651,6 +839,29 @@ bool get_x64_reg_value(x64_context* context, x64_reg_t reg, size_t d_size, size_
 		out_value = (u32)RCX(context);
 		return true;
 	}
+	else if (reg >= X64_BIT_O && reg <= X64_BIT_NLE)
+	{
+		const u32 _cf = EFLAGS(context) & 0x1;
+		const u32 _zf = EFLAGS(context) & 0x40;
+		const u32 _sf = EFLAGS(context) & 0x80;
+		const u32 _of = EFLAGS(context) & 0x800;
+		const u32 _pf = EFLAGS(context) & 0x4;
+		const u32 _l = (_sf << 4) ^ _of; // SF != OF
+
+		switch (reg & ~1)
+		{
+		case X64_BIT_O: out_value = !!_of ^ (reg & 1); break;
+		case X64_BIT_C: out_value = !!_cf ^ (reg & 1); break;
+		case X64_BIT_Z: out_value = !!_zf ^ (reg & 1); break;
+		case X64_BIT_BE: out_value = !!(_cf | _zf) ^ (reg & 1); break;
+		case X64_BIT_S: out_value = !!_sf ^ (reg & 1); break;
+		case X64_BIT_P: out_value = !!_pf ^ (reg & 1); break;
+		case X64_BIT_L: out_value = !!_l ^ (reg & 1); break;
+		case X64_BIT_LE: out_value = !!(_l | _zf) ^ (reg & 1); break;
+		}
+
+		return true;
+	}
 
 	LOG_ERROR(MEMORY, "get_x64_reg_value(): invalid arguments (reg=%d, d_size=%lld, i_size=%lld)", reg, d_size, i_size);
 	return false;
@@ -675,7 +886,7 @@ bool put_x64_reg_value(x64_context* context, x64_reg_t reg, size_t d_size, u64 v
 	return false;
 }
 
-bool set_x64_cmp_flags(x64_context* context, size_t d_size, u64 x, u64 y)
+bool set_x64_cmp_flags(x64_context* context, size_t d_size, u64 x, u64 y, bool carry = true)
 {
 	switch (d_size)
 	{
@@ -690,11 +901,11 @@ bool set_x64_cmp_flags(x64_context* context, size_t d_size, u64 x, u64 y)
 	const u64 diff = x - y;
 	const u64 summ = x + y;
 
-	if (((x & y) | ((x ^ y) & ~summ)) & sign)
+	if (carry && ((x & y) | ((x ^ y) & ~summ)) & sign)
 	{
 		EFLAGS(context) |= 0x1; // set CF
 	}
-	else
+	else if (carry)
 	{
 		EFLAGS(context) &= ~0x1; // clear CF
 	}
@@ -775,8 +986,7 @@ size_t get_x64_access_size(x64_context* context, x64_op_t op, x64_reg_t reg, siz
 
 	if (op == X64OP_CMPXCHG)
 	{
-		// detect whether this instruction can't actually modify memory to avoid breaking reservation;
-		// this may theoretically cause endless loop, but it shouldn't be a problem if only load_sync() generates such instruction
+		// Detect whether the instruction can't actually modify memory to avoid breaking reservation
 		u64 cmp, exch;
 		if (!get_x64_reg_value(context, reg, d_size, i_size, cmp) || !get_x64_reg_value(context, X64R_RAX, d_size, i_size, exch))
 		{
@@ -843,7 +1053,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 	// check if address is RawSPU MMIO register
 	if (addr - RAW_SPU_BASE_ADDR < (6 * RAW_SPU_OFFSET) && (addr % RAW_SPU_OFFSET) >= RAW_SPU_PROB_OFFSET)
 	{
-		auto thread = Emu.GetCPU().GetRawSPUThread((addr - RAW_SPU_BASE_ADDR) / RAW_SPU_OFFSET);
+		auto thread = idm::get<RawSPUThread>((addr - RAW_SPU_BASE_ADDR) / RAW_SPU_OFFSET);
 
 		if (!thread)
 		{
@@ -860,9 +1070,44 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 		switch (op)
 		{
 		case X64OP_LOAD:
+		case X64OP_LOAD_BE:
+		case X64OP_LOAD_CMP:
+		case X64OP_LOAD_TEST:
 		{
 			u32 value;
-			if (is_writing || !thread->read_reg(addr, value) || !put_x64_reg_value(context, reg, d_size, se_storage<u32>::swap(value)))
+			if (is_writing || !thread->read_reg(addr, value))
+			{
+				return false;
+			}
+
+			if (op != X64OP_LOAD_BE)
+			{
+				value = se_storage<u32>::swap(value);
+			}
+
+			if (op == X64OP_LOAD_CMP)
+			{
+				u64 rvalue;
+				if (!get_x64_reg_value(context, reg, d_size, i_size, rvalue) || !set_x64_cmp_flags(context, d_size, value, rvalue))
+				{
+					return false;
+				}
+
+				break;
+			}
+
+			if (op == X64OP_LOAD_TEST)
+			{
+				u64 rvalue;
+				if (!get_x64_reg_value(context, reg, d_size, i_size, rvalue) || !set_x64_cmp_flags(context, d_size, value & rvalue, 0))
+				{
+					return false;
+				}
+
+				break;
+			}
+
+			if (!put_x64_reg_value(context, reg, d_size, value))
 			{
 				return false;
 			}
@@ -870,9 +1115,15 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 			break;
 		}
 		case X64OP_STORE:
+		case X64OP_STORE_BE:
 		{
 			u64 reg_value;
-			if (!is_writing || !get_x64_reg_value(context, reg, d_size, i_size, reg_value) || !thread->write_reg(addr, se_storage<u32>::swap((u32)reg_value)))
+			if (!is_writing || !get_x64_reg_value(context, reg, d_size, i_size, reg_value))
+			{
+				return false;
+			}
+
+			if (!thread->write_reg(addr, op == X64OP_STORE ? se_storage<u32>::swap((u32)reg_value) : (u32)reg_value))
 			{
 				return false;
 			}
@@ -908,8 +1159,9 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 		switch (op)
 		{
 		case X64OP_STORE:
+		case X64OP_STORE_BE:
 		{
-			if (d_size == 16)
+			if (d_size == 16 && op == X64OP_STORE)
 			{
 				if (reg - X64R_XMM0 >= 16)
 				{
@@ -927,7 +1179,44 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 				return false;
 			}
 
-			std::memcpy(vm::base_priv(addr), &reg_value, d_size);
+			if (op == X64OP_STORE_BE && d_size == 2)
+			{
+				reg_value = se_storage<u16>::swap((u16)reg_value);
+			}
+			else if (op == X64OP_STORE_BE && d_size == 4)
+			{
+				reg_value = se_storage<u32>::swap((u32)reg_value);
+			}
+			else if (op == X64OP_STORE_BE && d_size == 8)
+			{
+				reg_value = se_storage<u64>::swap(reg_value);
+			}
+			else if (op == X64OP_STORE_BE)
+			{
+				return false;	
+			}
+
+			if (d_size == 1)
+			{
+				*(volatile u8*)vm::base_priv(addr) = (u8)reg_value;
+			}
+			else if (d_size == 2 && addr % 2 == 0)
+			{
+				*(volatile u16*)vm::base_priv(addr) = (u16)reg_value; 
+			}
+			else if (d_size == 4 && addr % 4 == 0)
+			{
+				*(volatile u32*)vm::base_priv(addr) = (u32)reg_value;
+			}
+			else if (d_size == 8 && addr % 8 == 0)
+			{
+				*(volatile u64*)vm::base_priv(addr) = (u64)reg_value;
+			}
+			else
+			{
+				std::memcpy(vm::base_priv(addr), &reg_value, d_size);
+			}
+			
 			break;
 		}
 		case X64OP_MOVS:
@@ -1051,10 +1340,10 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 
 			switch (d_size)
 			{
-			case 1: reg_value = sync_lock_test_and_set((u8*)vm::base_priv(addr), (u8)reg_value); break;
-			case 2: reg_value = sync_lock_test_and_set((u16*)vm::base_priv(addr), (u16)reg_value); break;
-			case 4: reg_value = sync_lock_test_and_set((u32*)vm::base_priv(addr), (u32)reg_value); break;
-			case 8: reg_value = sync_lock_test_and_set((u64*)vm::base_priv(addr), (u64)reg_value); break;
+			case 1: reg_value = ((atomic_t<u8>*)vm::base_priv(addr))->exchange((u8)reg_value); break;
+			case 2: reg_value = ((atomic_t<u16>*)vm::base_priv(addr))->exchange((u16)reg_value); break;
+			case 4: reg_value = ((atomic_t<u32>*)vm::base_priv(addr))->exchange((u32)reg_value); break;
+			case 8: reg_value = ((atomic_t<u64>*)vm::base_priv(addr))->exchange((u64)reg_value); break;
 			default: return false;
 			}
 
@@ -1074,10 +1363,10 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 
 			switch (d_size)
 			{
-			case 1: old_value = sync_val_compare_and_swap((u8*)vm::base_priv(addr), (u8)cmp_value, (u8)reg_value); break;
-			case 2: old_value = sync_val_compare_and_swap((u16*)vm::base_priv(addr), (u16)cmp_value, (u16)reg_value); break;
-			case 4: old_value = sync_val_compare_and_swap((u32*)vm::base_priv(addr), (u32)cmp_value, (u32)reg_value); break;
-			case 8: old_value = sync_val_compare_and_swap((u64*)vm::base_priv(addr), (u64)cmp_value, (u64)reg_value); break;
+			case 1: old_value = ((atomic_t<u8>*)vm::base_priv(addr))->compare_and_swap((u8)cmp_value, (u8)reg_value); break;
+			case 2: old_value = ((atomic_t<u16>*)vm::base_priv(addr))->compare_and_swap((u16)cmp_value, (u16)reg_value); break;
+			case 4: old_value = ((atomic_t<u32>*)vm::base_priv(addr))->compare_and_swap((u32)cmp_value, (u32)reg_value); break;
+			case 8: old_value = ((atomic_t<u64>*)vm::base_priv(addr))->compare_and_swap((u64)cmp_value, (u64)reg_value); break;
 			default: return false;
 			}
 
@@ -1087,7 +1376,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 			}
 			break;
 		}
-		case X64OP_LOAD_AND_STORE:
+		case X64OP_AND:
 		{
 			u64 value;
 			if (!get_x64_reg_value(context, reg, d_size, i_size, value))
@@ -1097,14 +1386,190 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 
 			switch (d_size)
 			{
-			case 1: value &= sync_fetch_and_and((u8*)vm::base_priv(addr), (u8)value); break;
-			case 2: value &= sync_fetch_and_and((u16*)vm::base_priv(addr), (u16)value); break;
-			case 4: value &= sync_fetch_and_and((u32*)vm::base_priv(addr), (u32)value); break;
-			case 8: value &= sync_fetch_and_and((u64*)vm::base_priv(addr), (u64)value); break;
+			case 1: value = *(atomic_t<u8>*)vm::base_priv(addr) &= (u8)value; break;
+			case 2: value = *(atomic_t<u16>*)vm::base_priv(addr) &= (u16)value; break;
+			case 4: value = *(atomic_t<u32>*)vm::base_priv(addr) &= (u32)value; break;
+			case 8: value = *(atomic_t<u64>*)vm::base_priv(addr) &= (u64)value; break;
 			default: return false;
 			}
 
 			if (!set_x64_cmp_flags(context, d_size, value, 0))
+			{
+				return false;
+			}
+			break;
+		}
+		case X64OP_OR:
+		{
+			u64 value;
+			if (!get_x64_reg_value(context, reg, d_size, i_size, value))
+			{
+				return false;
+			}
+
+			switch (d_size)
+			{
+			case 1: value = *(atomic_t<u8>*)vm::base_priv(addr) |= (u8)value; break;
+			case 2: value = *(atomic_t<u16>*)vm::base_priv(addr) |= (u16)value; break;
+			case 4: value = *(atomic_t<u32>*)vm::base_priv(addr) |= (u32)value; break;
+			case 8: value = *(atomic_t<u64>*)vm::base_priv(addr) |= (u64)value; break;
+			default: return false;
+			}
+
+			if (!set_x64_cmp_flags(context, d_size, value, 0))
+			{
+				return false;
+			}
+			break;
+		}
+		case X64OP_XOR:
+		{
+			u64 value;
+			if (!get_x64_reg_value(context, reg, d_size, i_size, value))
+			{
+				return false;
+			}
+
+			switch (d_size)
+			{
+			case 1: value = *(atomic_t<u8>*)vm::base_priv(addr) ^= (u8)value; break;
+			case 2: value = *(atomic_t<u16>*)vm::base_priv(addr) ^= (u16)value; break;
+			case 4: value = *(atomic_t<u32>*)vm::base_priv(addr) ^= (u32)value; break;
+			case 8: value = *(atomic_t<u64>*)vm::base_priv(addr) ^= (u64)value; break;
+			default: return false;
+			}
+
+			if (!set_x64_cmp_flags(context, d_size, value, 0))
+			{
+				return false;
+			}
+			break;
+		}
+		case X64OP_INC:
+		{
+			u64 value;
+
+			switch (d_size)
+			{
+			case 1: value = ++*(atomic_t<u8>*)vm::base_priv(addr); break;
+			case 2: value = ++*(atomic_t<u16>*)vm::base_priv(addr); break;
+			case 4: value = ++*(atomic_t<u32>*)vm::base_priv(addr); break;
+			case 8: value = ++*(atomic_t<u64>*)vm::base_priv(addr); break;
+			default: return false;
+			}
+
+			if (!set_x64_cmp_flags(context, d_size, value, 1, false)) // ???
+			{
+				return false;
+			}
+			break;
+		}
+		case X64OP_DEC:
+		{
+			u64 value;
+
+			switch (d_size)
+			{
+			case 1: value = --*(atomic_t<u8>*)vm::base_priv(addr); break;
+			case 2: value = --*(atomic_t<u16>*)vm::base_priv(addr); break;
+			case 4: value = --*(atomic_t<u32>*)vm::base_priv(addr); break;
+			case 8: value = --*(atomic_t<u64>*)vm::base_priv(addr); break;
+			default: return false;
+			}
+
+			if (!set_x64_cmp_flags(context, d_size, value, -1, false)) // ???
+			{
+				return false;
+			}
+			break;
+		}
+		case X64OP_ADD:
+		{
+			u64 value, new_value;
+			if (!get_x64_reg_value(context, reg, d_size, i_size, value))
+			{
+				return false;
+			}
+
+			switch (d_size)
+			{
+			case 1: new_value = *(atomic_t<u8>*)vm::base_priv(addr) += (u8)value; break;
+			case 2: new_value = *(atomic_t<u16>*)vm::base_priv(addr) += (u16)value; break;
+			case 4: new_value = *(atomic_t<u32>*)vm::base_priv(addr) += (u32)value; break;
+			case 8: new_value = *(atomic_t<u64>*)vm::base_priv(addr) += (u64)value; break;
+			default: return false;
+			}
+
+			if (!set_x64_cmp_flags(context, d_size, new_value, value)) // ???
+			{
+				return false;
+			}
+			break;
+		}
+		case X64OP_ADC:
+		{
+			u64 value, new_value;
+			if (!get_x64_reg_value(context, reg, d_size, i_size, value))
+			{
+				return false;
+			}
+
+			switch (d_size)
+			{
+			case 1: new_value = *(atomic_t<u8>*)vm::base_priv(addr) += (u8)(value + (EFLAGS(context) & 1)); break;
+			case 2: new_value = *(atomic_t<u16>*)vm::base_priv(addr) += (u16)(value + (EFLAGS(context) & 1)); break;
+			case 4: new_value = *(atomic_t<u32>*)vm::base_priv(addr) += (u32)(value + (EFLAGS(context) & 1)); break;
+			case 8: new_value = *(atomic_t<u64>*)vm::base_priv(addr) += (u64)(value + (EFLAGS(context) & 1)); break;
+			default: return false;
+			}
+
+			if (!set_x64_cmp_flags(context, d_size, new_value, value + (EFLAGS(context) & 1))) // ???
+			{
+				return false;
+			}
+			break;
+		}
+		case X64OP_SUB:
+		{
+			u64 value, new_value;
+			if (!get_x64_reg_value(context, reg, d_size, i_size, value))
+			{
+				return false;
+			}
+
+			switch (d_size)
+			{
+			case 1: new_value = *(atomic_t<u8>*)vm::base_priv(addr) -= (u8)value; break;
+			case 2: new_value = *(atomic_t<u16>*)vm::base_priv(addr) -= (u16)value; break;
+			case 4: new_value = *(atomic_t<u32>*)vm::base_priv(addr) -= (u32)value; break;
+			case 8: new_value = *(atomic_t<u64>*)vm::base_priv(addr) -= (u64)value; break;
+			default: return false;
+			}
+
+			if (!set_x64_cmp_flags(context, d_size, new_value, 0 - value)) // ???
+			{
+				return false;
+			}
+			break;
+		}
+		case X64OP_SBB:
+		{
+			u64 value, new_value;
+			if (!get_x64_reg_value(context, reg, d_size, i_size, value))
+			{
+				return false;
+			}
+
+			switch (d_size)
+			{
+			case 1: new_value = *(atomic_t<u8>*)vm::base_priv(addr) -= (u8)(value + (EFLAGS(context) & 1)); break;
+			case 2: new_value = *(atomic_t<u16>*)vm::base_priv(addr) -= (u16)(value + (EFLAGS(context) & 1)); break;
+			case 4: new_value = *(atomic_t<u32>*)vm::base_priv(addr) -= (u32)(value + (EFLAGS(context) & 1)); break;
+			case 8: new_value = *(atomic_t<u64>*)vm::base_priv(addr) -= (u64)(value + (EFLAGS(context) & 1)); break;
+			default: return false;
+			}
+
+			if (!set_x64_cmp_flags(context, d_size, new_value, 0 - (value + (EFLAGS(context) & 1)))) // ???
 			{
 				return false;
 			}
@@ -1126,23 +1591,52 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 	// TODO: allow recovering from a page fault as a feature of PS3 virtual memory
 }
 
-// Throw virtual memory access violation exception
-[[noreturn]] void throw_access_violation(const char* cause, u32 address) // Don't change function definition
+// Detect leaf function
+static bool is_leaf_function(u64 rip)
 {
-	throw EXCEPTION("Access violation %s location 0x%08x", cause, address);
+#ifdef _WIN32
+	DWORD64 base = 0;
+	if (const auto rtf = RtlLookupFunctionEntry(rip, &base, nullptr))
+	{
+		// Access UNWIND_INFO structure
+		const auto uw = (u8*)(base + rtf->UnwindData);
+
+		// Leaf function has zero epilog size and no unwind codes
+		return uw[0] == 1 && uw[1] == 0 && uw[2] == 0 && uw[3] == 0;
+	}
+
+	// No unwind info implies leaf function
+	return true;
+#else
+	// TODO
+	return false;
+#endif
+}
+
+static thread_local u64 s_tls_ret_pos = 0;
+static thread_local u64 s_tls_ret_addr = 0;
+
+[[noreturn]] static void throw_access_violation(const char* cause, u64 addr)
+{
+	if (s_tls_ret_pos) *(u64*)s_tls_ret_pos = s_tls_ret_addr; // Fix stack
+	vm::throw_access_violation(addr, cause);
+	std::abort();
 }
 
 // Modify context in order to convert hardware exception to C++ exception
-void prepare_throw_access_violation(x64_context* context, const char* cause, u32 address)
+static void prepare_throw_access_violation(x64_context* context, const char* cause, u32 address)
 {
 	// Set throw_access_violation() call args (old register values are lost)
 	ARG1(context) = (u64)cause;
 	ARG2(context) = address;
 
 	// Push the exception address as a "return" address (throw_access_violation() shall not return)
-	*--(u64*&)(RSP(context)) = RIP(context);
+	s_tls_ret_addr = RIP(context);
+	s_tls_ret_pos = is_leaf_function(s_tls_ret_addr) ? 0 : RSP(context) -= sizeof(u64);
 	RIP(context) = (u64)std::addressof(throw_access_violation);
 }
+
+static void _handle_interrupt(x64_context* ctx);
 
 #ifdef _WIN32
 
@@ -1151,14 +1645,17 @@ static LONG exception_handler(PEXCEPTION_POINTERS pExp)
 	const u64 addr64 = pExp->ExceptionRecord->ExceptionInformation[1] - (u64)vm::base(0);
 	const bool is_writing = pExp->ExceptionRecord->ExceptionInformation[0] != 0;
 
-	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && addr64 < 0x100000000ull && thread_ctrl::get_current() && handle_access_violation((u32)addr64, is_writing, pExp->ContextRecord))
+	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && addr64 < 0x100000000ull)
 	{
-		return EXCEPTION_CONTINUE_EXECUTION;
+		vm::g_tls_fault_count++;
+
+		if (thread_ctrl::get_current() && handle_access_violation((u32)addr64, is_writing, pExp->ContextRecord))
+		{
+			return EXCEPTION_CONTINUE_EXECUTION;
+		}
 	}
-	else
-	{
-		return EXCEPTION_CONTINUE_SEARCH;
-	}
+
+	return EXCEPTION_CONTINUE_SEARCH;
 }
 
 static LONG exception_filter(PEXCEPTION_POINTERS pExp)
@@ -1170,8 +1667,9 @@ static LONG exception_filter(PEXCEPTION_POINTERS pExp)
 		const u64 addr64 = pExp->ExceptionRecord->ExceptionInformation[1] - (u64)vm::base(0);
 		const auto cause = pExp->ExceptionRecord->ExceptionInformation[0] != 0 ? "writing" : "reading";
 
-		if (addr64 < 0x100000000ull)
+		if (!(vm::g_tls_fault_count & (1ull << 63)) && addr64 < 0x100000000ull)
 		{
+			vm::g_tls_fault_count |= (1ull << 63);
 			// Setup throw_access_violation() call on the context
 			prepare_throw_access_violation(pExp->ContextRecord, cause, (u32)addr64);
 			return EXCEPTION_CONTINUE_EXECUTION;
@@ -1190,33 +1688,23 @@ static LONG exception_filter(PEXCEPTION_POINTERS pExp)
 	}
 
 	msg += fmt::format("Instruction address: %p.\n", pExp->ContextRecord->Rip);
-	msg += fmt::format("Image base: %p.", GetModuleHandle(NULL));
+	msg += fmt::format("Image base: %p.\n", GetModuleHandle(NULL));
+
+	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION)
+	{
+		msg += "\n"
+			"Illegal instruction exception occured.\n"
+			"Note that your CPU must support SSSE3 extension.\n";
+	}
 
 	// TODO: print registers and the callstack
-
-	// Exception specific messages
-	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
-	{
-		msg += "\n\nAn internal access violation has occured."
-		       "\nPlease only report this error to the developers, if you're an advanced user and have obtained a stack trace.";
-	}
-	else if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION)
-	{
-		msg += "\n\nAn internal illegal instruction exception has occured."
-		       "\nRPCS3 requires a modern x86-64 CPU that supports SSSE3 (and SSE4.1 for PPU LLVM recompiler)."
-		       "\nPlease make sure that your CPU supports these extensions.";
-	}
-	else
-	{
-		msg += "\n\nAn unknown internal exception has occured. Please report this to the developers.\nYou can press (Ctrl+C) to copy this message.";
-	}
 
 	// Report fatal error
 	report_fatal_error(msg);
 	return EXCEPTION_CONTINUE_SEARCH;
 }
 
-const bool g_exception_handler_set = []() -> bool
+const bool s_exception_handler_set = []() -> bool
 {
 	if (!AddVectoredExceptionHandler(1, (PVECTORED_EXCEPTION_HANDLER)exception_handler))
 	{
@@ -1239,6 +1727,11 @@ static void signal_handler(int sig, siginfo_t* info, void* uct)
 {
 	x64_context* context = (ucontext_t*)uct;
 
+	if (sig == SIGUSR1)
+	{
+		return _handle_interrupt(context);
+	}
+
 #ifdef __APPLE__
 	const bool is_writing = context->uc_mcontext->__es.__err & 0x2;
 #else
@@ -1248,12 +1741,12 @@ static void signal_handler(int sig, siginfo_t* info, void* uct)
 	const u64 addr64 = (u64)info->si_addr - (u64)vm::base(0);
 	const auto cause = is_writing ? "writing" : "reading";
 
-	// TODO: Exception specific informative messages
-
-	if (addr64 < 0x100000000ull && thread_ctrl::get_current())
+	if (addr64 < 0x100000000ull)
 	{
+		vm::g_tls_fault_count++;
+
 		// Try to process access violation
-		if (!handle_access_violation((u32)addr64, is_writing, context))
+		if (!thread_ctrl::get_current() || !handle_access_violation((u32)addr64, is_writing, context))
 		{
 			// Setup throw_access_violation() call on the context
 			prepare_throw_access_violation(context, cause, (u32)addr64);
@@ -1267,7 +1760,7 @@ static void signal_handler(int sig, siginfo_t* info, void* uct)
 	}
 }
 
-const bool g_exception_handler_set = []() -> bool
+const bool s_exception_handler_set = []() -> bool
 {
 	struct ::sigaction sa;
 	sa.sa_flags = SA_SIGINFO;
@@ -1276,7 +1769,15 @@ const bool g_exception_handler_set = []() -> bool
 
 	if (::sigaction(SIGSEGV, &sa, NULL) == -1)
 	{
-		std::printf("sigaction() failed (0x%x).", errno);
+		std::printf("sigaction(SIGSEGV) failed (0x%x).", errno);
+		std::abort();
+	}
+
+	sa.sa_sigaction = signal_handler;
+
+	if (::sigaction(SIGUSR1, &sa, NULL) == -1)
+	{
+		std::printf("sigaction(SIGUSR1) failed (0x%x).", errno);
 		std::abort();
 	}
 
@@ -1285,98 +1786,470 @@ const bool g_exception_handler_set = []() -> bool
 
 #endif
 
-thread_local thread_ctrl* thread_ctrl::g_tls_this_thread = nullptr;
+const bool s_self_test = []() -> bool
+{
+	// Find ret instruction
+	if ((*(u8*)throw_access_violation & 0xF6) == 0xC2)
+	{
+		std::abort();
+	}
+
+	return true;
+}();
+
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <exception>
+#include <chrono>
+
+thread_local DECLARE(thread_ctrl::g_tls_this_thread) = nullptr;
+
+struct thread_ctrl::internal
+{
+	std::mutex mutex;
+	std::condition_variable cond;
+	std::condition_variable jcv; // Allows simultaneous joining
+	std::condition_variable icv;
+
+	task_stack atexit;
+
+	std::exception_ptr exception; // Stored exception
+
+	std::chrono::high_resolution_clock::time_point time_limit;
+
+#ifdef _WIN32
+	DWORD thread_id = 0;
+#endif
+
+	x64_context _context{};
+	x64_context* const thread_ctx = &this->_context;
+
+	atomic_t<void(*)()> interrupt{}; // Interrupt function
+};
+
+thread_local thread_ctrl::internal* g_tls_internal = nullptr;
+
+extern std::condition_variable& get_current_thread_cv()
+{
+	return g_tls_internal->cond;
+}
 
 // TODO
-std::atomic<u32> g_thread_count{ 0 };
+extern atomic_t<u32> g_thread_count(0);
+
+extern thread_local std::string(*g_tls_log_prefix)();
+
+void thread_ctrl::start(const std::shared_ptr<thread_ctrl>& ctrl, task_stack task)
+{
+	reinterpret_cast<std::thread&>(ctrl->m_thread) = std::thread([ctrl, task = std::move(task)]
+	{
+		try
+		{
+			ctrl->initialize();
+			task.exec();
+		}
+		catch (...)
+		{
+			ctrl->m_data->exception = std::current_exception();
+		}
+
+		ctrl->finalize();
+	});
+}
+
+void thread_ctrl::wait_start(u64 timeout)
+{
+	m_data->time_limit = std::chrono::high_resolution_clock::now() + std::chrono::microseconds(timeout);
+}
+
+bool thread_ctrl::wait_wait(u64 timeout)
+{
+	std::unique_lock<std::mutex> lock(m_data->mutex, std::adopt_lock);
+
+	if (timeout && m_data->cond.wait_until(lock, m_data->time_limit) == std::cv_status::timeout)
+	{
+		lock.release();
+		return false;
+	}
+
+	m_data->cond.wait(lock);
+	lock.release();
+	return true;
+}
+
+void thread_ctrl::test()
+{
+	if (m_data && m_data->exception)
+	{
+		std::rethrow_exception(m_data->exception);
+	}
+}
 
 void thread_ctrl::initialize()
 {
-	SetCurrentThreadDebugName(g_tls_this_thread->m_name().c_str());
+	// Initialize TLS variable
+	g_tls_this_thread = this;
+	g_tls_internal = this->m_data;
+#ifdef _WIN32
+	m_data->thread_id = GetCurrentThreadId();
+#endif
 
-	// TODO
-	g_thread_count++;
+	g_tls_log_prefix = []
+	{
+		return g_tls_this_thread->m_name;
+	};
+
+	++g_thread_count;
+
+#if defined(_MSC_VER)
+
+	struct THREADNAME_INFO
+	{
+		DWORD dwType;
+		LPCSTR szName;
+		DWORD dwThreadID;
+		DWORD dwFlags;
+	};
+
+	// Set thread name for VS debugger
+	if (IsDebuggerPresent())
+	{
+		THREADNAME_INFO info;
+		info.dwType = 0x1000;
+		info.szName = m_name.c_str();
+		info.dwThreadID = -1;
+		info.dwFlags = 0;
+
+		__try
+		{
+			RaiseException(0x406D1388, 0, sizeof(info) / sizeof(ULONG_PTR), (ULONG_PTR*)&info);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+	}
+
+#endif
 }
 
 void thread_ctrl::finalize() noexcept
 {
+	// Disable and discard possible interrupts
+	interrupt_disable();
+	test_interrupt();
+
 	// TODO
 	vm::reservation_free();
 
-	// TODO
-	g_thread_count--;
-
 	// Call atexit functions
-	for (const auto& func : decltype(m_atexit)(std::move(g_tls_this_thread->m_atexit)))
-	{
-		func();
-	}
+	if (m_data) m_data->atexit.exec();
+
+	--g_thread_count;
+
+#ifdef _WIN32
+	ULONG64 time;
+	QueryThreadCycleTime(GetCurrentThread(), &time);
+	LOG_NOTICE(GENERAL, "Thread time: %f Gc", time / 1000000000.);
+#endif
+}
+
+void thread_ctrl::push_atexit(task_stack task)
+{
+	m_data->atexit.push(std::move(task));
+}
+
+thread_ctrl::thread_ctrl(std::string&& name)
+	: m_name(std::move(name))
+{
+	CHECK_STORAGE(std::thread, m_thread);
+
+#pragma push_macro("new")
+#undef new
+	new (&m_thread) std::thread;
+#pragma pop_macro("new")
+
+	initialize_once();
 }
 
 thread_ctrl::~thread_ctrl()
 {
-	m_thread.detach();
-
-	if (m_future.valid())
+	if (reinterpret_cast<std::thread&>(m_thread).joinable())
 	{
-		try
+		reinterpret_cast<std::thread&>(m_thread).detach();
+	}
+
+	delete m_data;
+
+	reinterpret_cast<std::thread&>(m_thread).~thread();
+}
+
+void thread_ctrl::initialize_once()
+{
+	if (UNLIKELY(!m_data))
+	{
+		auto ptr = new thread_ctrl::internal;
+
+		if (!m_data.compare_and_swap_test(nullptr, ptr))
 		{
-			m_future.get();
-		}
-		catch (...)
-		{
-			catch_all_exceptions();
+			delete ptr;
 		}
 	}
 }
 
-std::string thread_ctrl::get_name() const
+void thread_ctrl::join()
 {
-	CHECK_ASSERTION(m_name);
+	// Increase contention counter
+	const u32 _j = m_joining++;
 
-	return m_name();
+	if (LIKELY(_j >= 0x80000000))
+	{
+		// Already joined (signal condition)
+		m_joining = 0x80000000;
+	}
+	else if (LIKELY(_j == 0))
+	{
+		// Winner joins the thread
+		reinterpret_cast<std::thread&>(m_thread).join();
+
+		// Notify others if necessary
+		if (UNLIKELY(m_joining.exchange(0x80000000) != 1))
+		{
+			// Serialize for reliable notification
+			m_data->mutex.lock();
+			m_data->mutex.unlock();
+			m_data->jcv.notify_all();
+		}
+	}
+	else
+	{
+		// Hard way
+		std::unique_lock<std::mutex> lock(m_data->mutex);
+		m_data->jcv.wait(lock, WRAP_EXPR(m_joining >= 0x80000000));
+	}
+
+	if (UNLIKELY(m_data && m_data->exception && !std::uncaught_exception()))
+	{
+		std::rethrow_exception(m_data->exception);
+	}
 }
 
-std::string named_thread_t::get_name() const
+void thread_ctrl::lock()
+{
+	m_data->mutex.lock();
+}
+
+void thread_ctrl::unlock()
+{
+	m_data->mutex.unlock();
+}
+
+void thread_ctrl::lock_notify()
+{
+	if (UNLIKELY(g_tls_this_thread == this))
+	{
+		return;
+	}
+
+	// Serialize for reliable notification, condition is assumed to be changed externally
+	m_data->mutex.lock();
+	m_data->mutex.unlock();
+	m_data->cond.notify_one();
+}
+
+void thread_ctrl::notify()
+{
+	m_data->cond.notify_one();
+}
+
+void thread_ctrl::set_exception(std::exception_ptr e)
+{
+	m_data->exception = e;
+}
+
+static void _handle_interrupt(x64_context* ctx)
+{
+	// Copy context for further use (TODO: is it safe on all platforms?)
+	g_tls_internal->_context = *ctx;
+	thread_ctrl::handle_interrupt();
+}
+
+static thread_local void(*s_tls_handler)() = nullptr;
+
+[[noreturn]] static void execute_interrupt_handler()
+{
+	// Fix stack for throwing
+	if (s_tls_ret_pos) s_tls_ret_addr = std::exchange(*(u64*)s_tls_ret_pos, s_tls_ret_addr);
+
+	// Run either throwing or returning interrupt handler
+	s_tls_handler();
+
+	// Restore context in the case of return
+	const auto ctx = g_tls_internal->thread_ctx;
+
+	if (s_tls_ret_pos)
+	{
+		RIP(ctx) = std::exchange(*(u64*)s_tls_ret_pos, s_tls_ret_addr);
+		RSP(ctx) += sizeof(u64);
+	}
+	else
+	{
+		RIP(ctx) = s_tls_ret_addr;
+	}
+
+#ifdef _WIN32
+	RtlRestoreContext(ctx, nullptr);
+#else
+	::setcontext(ctx);
+#endif
+}
+
+void thread_ctrl::handle_interrupt()
+{
+	const auto _this = g_tls_this_thread;
+	const auto ctx = g_tls_internal->thread_ctx;
+
+	if (_this->m_guard & 0x80000000)
+	{
+		// Discard interrupt if interrupts are disabled
+		if (g_tls_internal->interrupt.exchange(nullptr))
+		{
+			_this->lock();
+			_this->unlock();
+			g_tls_internal->icv.notify_one();
+		}
+	}
+	else if (_this->m_guard == 0)
+	{
+		// Set interrupt immediately if no guard set
+		if (const auto handler = g_tls_internal->interrupt.exchange(nullptr))
+		{
+			_this->lock();
+			_this->unlock();
+			g_tls_internal->icv.notify_one();
+
+#ifdef _WIN32
+			// Install function call
+			s_tls_ret_addr = RIP(ctx);
+			s_tls_ret_pos = is_leaf_function(s_tls_ret_addr) ? 0 : RSP(ctx) -= sizeof(u64);
+			s_tls_handler = handler;
+			RIP(ctx) = (u64)execute_interrupt_handler;
+#else
+			// Call handler directly (TODO: install function call preserving red zone)
+			return handler();
+#endif
+		}
+	}
+	else
+	{
+		// Set delayed interrupt otherwise
+		_this->m_guard |= 0x40000000;
+	}
+	
+#ifdef _WIN32
+	RtlRestoreContext(ctx, nullptr);
+#endif
+}
+
+void thread_ctrl::interrupt(void(*handler)())
+{
+	VERIFY(this != g_tls_this_thread); // TODO: self-interrupt
+	VERIFY(m_data->interrupt.compare_and_swap_test(nullptr, handler)); // TODO: multiple interrupts
+
+#ifdef _WIN32
+	const auto ctx = m_data->thread_ctx;
+
+	const HANDLE nt = OpenThread(THREAD_ALL_ACCESS, FALSE, m_data->thread_id);
+	VERIFY(nt);
+	VERIFY(SuspendThread(nt) != -1);
+
+	ctx->ContextFlags = CONTEXT_FULL;
+	VERIFY(GetThreadContext(nt, ctx));
+
+	ctx->ContextFlags = CONTEXT_FULL;
+	const u64 _rip = RIP(ctx);
+	RIP(ctx) = (u64)std::addressof(thread_ctrl::handle_interrupt);
+	VERIFY(SetThreadContext(nt, ctx));
+
+	RIP(ctx) = _rip;
+	VERIFY(ResumeThread(nt) != -1);
+	CloseHandle(nt);
+#else
+	pthread_kill(reinterpret_cast<std::thread&>(m_thread).native_handle(), SIGUSR1);
+#endif
+
+	std::unique_lock<std::mutex> lock(m_data->mutex, std::adopt_lock);
+
+	while (m_data->interrupt)
+	{
+		m_data->icv.wait(lock);
+	}
+
+	lock.release();
+}
+
+void thread_ctrl::test_interrupt()
+{
+	if (m_guard & 0x80000000)
+	{
+		if (m_data->interrupt.exchange(nullptr))
+		{
+			lock(), unlock(), m_data->icv.notify_one();
+		}
+		
+		return;
+	}
+
+	if (m_guard == 0x40000000 && !std::uncaught_exception())
+	{
+		m_guard = 0;
+
+		// Execute delayed interrupt handler
+		if (const auto handler = m_data->interrupt.exchange(nullptr))
+		{
+			lock(), unlock(), m_data->icv.notify_one();
+
+			return handler();
+		}
+	}
+}
+
+void thread_ctrl::sleep(u64 useconds)
+{
+	std::this_thread::sleep_for(std::chrono::microseconds(useconds));
+}
+
+
+named_thread::named_thread()
+{
+}
+
+named_thread::~named_thread()
+{
+}
+
+std::string named_thread::get_name() const
 {
 	return fmt::format("('%s') Unnamed Thread", typeid(*this).name());
 }
 
-void named_thread_t::start()
+void named_thread::start_thread(const std::shared_ptr<void>& _this)
 {
-	CHECK_ASSERTION(!m_thread);
-
-	// Get shared_ptr instance (will throw if called from the constructor or the object has been created incorrectly)
-	auto ptr = shared_from_this();
-
-	// Make name getter
-	auto name = [wptr = std::weak_ptr<named_thread_t>(ptr), type = &typeid(*this)]()
-	{
-		// Return actual name if available
-		if (const auto ptr = wptr.lock())
-		{
-			return ptr->get_name();
-		}
-		else
-		{
-			return fmt::format("('%s') Deleted Thread", type->name());
-		}
-	};
+	// Ensure it's not called from the constructor and the correct object is passed
+	ENSURES(_this.get() == this);
 
 	// Run thread
-	m_thread = thread_ctrl::spawn(std::move(name), [thread = std::move(ptr)]()
+	thread_ctrl::spawn(m_thread, get_name(), [this, _this]()
 	{
 		try
 		{
 			LOG_TRACE(GENERAL, "Thread started");
-
-			thread->on_task();
-
+			on_task();
 			LOG_TRACE(GENERAL, "Thread ended");
 		}
 		catch (const std::exception& e)
 		{
-			LOG_FATAL(GENERAL, "Exception: %s", e.what());
+			LOG_FATAL(GENERAL, "%s thrown: %s", typeid(e).name(), e.what());
 			Emu.Pause();
 		}
 		catch (EmulationStopped)
@@ -1384,30 +2257,6 @@ void named_thread_t::start()
 			LOG_NOTICE(GENERAL, "Thread aborted");
 		}
 
-		thread->on_exit();
+		on_exit();
 	});
-}
-
-void named_thread_t::join()
-{
-	CHECK_ASSERTION(m_thread != nullptr);
-
-	try
-	{
-		m_thread->join();
-		m_thread.reset();
-	}
-	catch (...)
-	{
-		m_thread.reset();
-		throw;
-	}
-}
-
-const std::function<bool()> SQUEUE_ALWAYS_EXIT = [](){ return true; };
-const std::function<bool()> SQUEUE_NEVER_EXIT = [](){ return false; };
-
-bool squeue_test_exit()
-{
-	return Emu.IsStopped();
 }

@@ -1,26 +1,56 @@
-﻿#include "stdafx.h"
-#include "Thread.h"
+﻿#include "Log.h"
 #include "File.h"
-#include "Log.h"
+#include "StrFmt.h"
 
-#ifdef _WIN32
-#include <Windows.h>
+#include "rpcs3_version.h"
+#include <cstdarg>
+#include <string>
+
+// Thread-specific log prefix provider
+thread_local std::string(*g_tls_log_prefix)() = nullptr;
+
+#ifndef _MSC_VER
+constexpr DECLARE(bijective<logs::level, const char*>::map);
 #endif
 
-namespace _log
+namespace logs
 {
-	logger& get_logger()
+	class file_writer
 	{
-		// Use magic static for global logger instance
-		static logger instance;
-		return instance;
+		// Could be memory-mapped file
+		fs::file m_file;
+
+	public:
+		file_writer(const std::string& name);
+
+		virtual ~file_writer() = default;
+
+		// Append raw data
+		void log(const char* text, std::size_t size);
+	};
+
+	struct file_listener : public file_writer, public listener
+	{
+		file_listener(const std::string& name)
+			: file_writer(name)
+			, listener()
+		{
+			const std::string& start = fmt::format("\xEF\xBB\xBF" "RPCS3 v%s\n", rpcs3::version.to_string());
+			file_writer::log(start.data(), start.size());
+		}
+
+		// Encode level, current thread name, channel name and write log message
+		virtual void log(const message& msg) override;
+	};
+
+	static file_listener* get_logger()
+	{
+		// Use magic static
+		static file_listener logger("RPCS3.log");
+		return &logger;
 	}
 
-	file_listener g_log_file(_PRGNAME_ ".log");
-
-	file_writer g_tty_file("TTY.log");
-
-	channel GENERAL("", level::notice);
+	channel GENERAL(nullptr, level::notice);
 	channel LOADER("LDR", level::notice);
 	channel MEMORY("MEM", level::notice);
 	channel RSX("RSX", level::notice);
@@ -30,121 +60,104 @@ namespace _log
 	channel ARMv7("ARMv7");
 }
 
-_log::listener::listener()
+void logs::listener::add(logs::listener* _new)
 {
-	// Register self
-	get_logger().add_listener(this);
-}
+	// Get first (main) listener
+	listener* lis = get_logger();
 
-_log::listener::~listener()
-{
-	// Unregister self
-	get_logger().remove_listener(this);
-}
-
-_log::channel::channel(const std::string& name, _log::level init_level)
-	: name{ name }
-	, enabled{ init_level }
-{
-	// TODO: register config property "name" associated with "enabled" member
-}
-
-void _log::logger::add_listener(_log::listener* listener)
-{
-	std::lock_guard<shared_mutex> lock(m_mutex);
-
-	m_listeners.emplace(listener);
-}
-
-void _log::logger::remove_listener(_log::listener* listener)
-{
-	std::lock_guard<shared_mutex> lock(m_mutex);
-
-	m_listeners.erase(listener);
-}
-
-void _log::logger::broadcast(const _log::channel& ch, _log::level sev, const std::string& text) const
-{
-	reader_lock lock(m_mutex);
-
-	for (auto listener : m_listeners)
+	// Install new listener at the end of linked list
+	while (lis->m_next || !lis->m_next.compare_and_swap_test(nullptr, _new))
 	{
-		listener->log(ch, sev, text);
+		lis = lis->m_next;
 	}
 }
 
-void _log::broadcast(const _log::channel& ch, _log::level sev, const std::string& text)
+void logs::channel::broadcast(const logs::channel& ch, logs::level sev, const char* fmt...)
 {
-	get_logger().broadcast(ch, sev, text);
+	va_list args;
+	va_start(args, fmt);
+	std::string&& text = fmt::unsafe_vformat(fmt, args);
+	std::string&& prefix = g_tls_log_prefix ? g_tls_log_prefix() : "";
+	va_end(args);
+
+	// Prepare message information
+	message msg;
+	msg.ch = &ch;
+	msg.sev = sev;
+	msg.text = text.data();
+	msg.text_size = text.size();
+	msg.prefix = prefix.data();
+	msg.prefix_size = prefix.size();
+
+	// Get first (main) listener
+	listener* lis = get_logger();
+	
+	// Send message to all listeners
+	while (lis)
+	{
+		lis->log(msg);
+		lis = lis->m_next;
+	}
 }
 
-_log::file_writer::file_writer(const std::string& name)
+[[noreturn]] extern void catch_all_exceptions();
+
+logs::file_writer::file_writer(const std::string& name)
 {
 	try
 	{
-		if (!m_file.open(fs::get_config_dir() + name, fom::rewrite | fom::append))
+		if (!m_file.open(fs::get_config_dir() + name, fs::rewrite + fs::append))
 		{
-			throw EXCEPTION("Can't create log file %s (error %d)", name, errno);
+			throw fmt::exception("Can't create log file %s (error %s)", name, fs::g_tls_error);
 		}
 	}
-	catch (const fmt::exception& e)
+	catch (...)
 	{
-#ifdef _WIN32
-		MessageBoxA(0, e.what(), "_log::file_writer() failed", MB_ICONERROR);
-#else
-		std::printf("_log::file_writer() failed: %s\n", e.what());
-#endif
+		catch_all_exceptions();
 	}
 }
 
-void _log::file_writer::log(const std::string& text)
+void logs::file_writer::log(const char* text, std::size_t size)
 {
-	m_file.write(text);
+	m_file.write(text, size);
 }
 
-std::size_t _log::file_writer::size() const
+void logs::file_listener::log(const logs::message& msg)
 {
-	return m_file.seek(0, fs::seek_cur);
-}
-
-void _log::file_listener::log(const _log::channel& ch, _log::level sev, const std::string& text)
-{
-	std::string msg; msg.reserve(text.size() + 200);
+	std::string text; text.reserve(msg.text_size + msg.prefix_size + 200);
 
 	// Used character: U+00B7 (Middle Dot)
-	switch (sev)
+	switch (msg.sev)
 	{
-	case level::always:  msg = u8"·A "; break;
-	case level::fatal:   msg = u8"·F "; break;
-	case level::error:   msg = u8"·E "; break;
-	case level::todo:    msg = u8"·U "; break;
-	case level::success: msg = u8"·S "; break;
-	case level::warning: msg = u8"·W "; break;
-	case level::notice:  msg = u8"·! "; break;
-	case level::trace:   msg = u8"·T "; break;
+	case level::always:  text = u8"·A "; break;
+	case level::fatal:   text = u8"·F "; break;
+	case level::error:   text = u8"·E "; break;
+	case level::todo:    text = u8"·U "; break;
+	case level::success: text = u8"·S "; break;
+	case level::warning: text = u8"·W "; break;
+	case level::notice:  text = u8"·! "; break;
+	case level::trace:   text = u8"·T "; break;
 	}
 
 	// TODO: print time?
 
-	if (auto t = thread_ctrl::get_current())
+	if (msg.prefix_size > 0)
 	{
-		msg += '{';
-		msg += t->get_name();
-		msg += "} ";
-	}
-
-	if (ch.name.size())
-	{
-		msg += ch.name;
-		msg += sev == level::todo ? " TODO: " : ": ";
-	}
-	else if (sev == level::todo)
-	{
-		msg += "TODO: ";
+		text += fmt::format("{%s} ", msg.prefix);
 	}
 	
-	msg += text;
-	msg += '\n';
+	if (msg.ch->name)
+	{
+		text += msg.ch->name;
+		text += msg.sev == level::todo ? " TODO: " : ": ";
+	}
+	else if (msg.sev == level::todo)
+	{
+		text += "TODO: ";
+	}
+	
+	text += msg.text;
+	text += '\n';
 
-	file_writer::log(msg);
+	file_writer::log(text.data(), text.size());
 }

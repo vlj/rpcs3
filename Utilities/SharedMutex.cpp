@@ -1,103 +1,187 @@
-#include "stdafx.h"
 #include "SharedMutex.h"
 
-void shared_mutex::impl_lock_shared(u32 old_value)
-{
-	// Throw if reader count breaks the "second" limit (it should be impossible)
-	CHECK_ASSERTION((old_value & SM_READER_COUNT) != SM_READER_COUNT);
+#include <mutex>
+#include <condition_variable>
 
-	std::unique_lock<std::mutex> lock(m_mutex);
+struct shared_mutex::internal
+{
+	std::mutex mutex;
+
+	std::size_t rq_size{}; // Reader queue size (threads waiting on m_rcv)
+	std::size_t wq_size{}; // Writer queue size (threads waiting on m_wcv and m_ocv)
+
+	std::condition_variable rcv; // Reader queue
+	std::condition_variable wcv; // Writer queue
+	std::condition_variable ocv; // For current exclusive owner
+};
+
+void shared_mutex::lock_shared_hard()
+{
+	initialize_once();
+
+	std::unique_lock<std::mutex> lock(m_data->mutex);
+
+	// Validate
+	if ((m_ctrl & SM_INVALID_BIT) != 0) throw std::runtime_error("shared_mutex::lock_shared(): Invalid bit");
+	if ((m_ctrl & SM_READER_MASK) == 0) throw std::runtime_error("shared_mutex::lock_shared(): No readers");
 
 	// Notify non-zero reader queue size
-	m_ctrl |= SM_READER_QUEUE;
+	m_ctrl |= SM_WAITERS_BIT, m_data->rq_size++;
 
-	// Compensate incorrectly increased reader count
-	if ((--m_ctrl & SM_READER_COUNT) == 0 && m_wq_size)
+	// Fix excess reader count
+	if ((--m_ctrl & SM_READER_MASK) == 0 && m_data->wq_size)
 	{
-		// Notify current exclusive owner (condition passed)
-		m_ocv.notify_one();
+		// Notify exclusive owner
+		m_data->ocv.notify_one();
 	}
-
-	CHECK_ASSERTION(++m_rq_size);
 
 	// Obtain the reader lock
-	while (!atomic_op(m_ctrl, op_lock_shared))
+	while (true)
 	{
-		m_rcv.wait(lock);
+		const auto ctrl = m_ctrl.load();
+
+		// Check writers and reader limit
+		if (m_data->wq_size || (ctrl & ~SM_WAITERS_BIT) >= SM_READER_MAX)
+		{
+			m_data->rcv.wait(lock);
+			continue;
+		}
+
+		if (m_ctrl.compare_and_swap_test(ctrl, ctrl + 1))
+		{
+			break;
+		}
 	}
 
-	CHECK_ASSERTION(m_rq_size--);
-
-	if (m_rq_size == 0)
+	if (!--m_data->rq_size && !m_data->wq_size)
 	{
-		m_ctrl &= ~SM_READER_QUEUE;
-	}
-}
-
-void shared_mutex::impl_unlock_shared(u32 new_value)
-{
-	// Throw if reader count was zero
-	CHECK_ASSERTION((new_value & SM_READER_COUNT) != SM_READER_COUNT);
-
-	// Mutex cannot be unlocked before notification because m_ctrl has been changed outside
-	std::lock_guard<std::mutex> lock(m_mutex);
-
-	if (m_wq_size && (new_value & SM_READER_COUNT) == 0)
-	{
-		// Notify current exclusive owner that the latest reader is gone
-		m_ocv.notify_one();
-	}
-	else if (m_rq_size)
-	{
-		m_rcv.notify_one();
+		m_ctrl &= ~SM_WAITERS_BIT;
 	}
 }
 
-void shared_mutex::impl_lock_excl(u32 value)
+void shared_mutex::unlock_shared_notify()
 {
-	std::unique_lock<std::mutex> lock(m_mutex);
+	initialize_once();
+
+	std::unique_lock<std::mutex> lock(m_data->mutex);
+
+	if ((m_ctrl & SM_READER_MASK) == 0 && m_data->wq_size)
+	{
+		// Notify exclusive owner
+		lock.unlock();
+		m_data->ocv.notify_one();
+	}
+	else if (m_data->rq_size)
+	{
+		// Notify other readers
+		lock.unlock();
+		m_data->rcv.notify_one();
+	}
+}
+
+void shared_mutex::lock_hard()
+{
+	initialize_once();
+
+	std::unique_lock<std::mutex> lock(m_data->mutex);
+
+	// Validate
+	if ((m_ctrl & SM_INVALID_BIT) != 0) throw std::runtime_error("shared_mutex::lock(): Invalid bit");
 
 	// Notify non-zero writer queue size
-	m_ctrl |= SM_WRITER_QUEUE;
-
-	CHECK_ASSERTION(++m_wq_size);
+	m_ctrl |= SM_WAITERS_BIT, m_data->wq_size++;
 
 	// Obtain the writer lock
-	while (!atomic_op(m_ctrl, op_lock_excl))
+	while (true)
 	{
-		m_wcv.wait(lock);
+		const auto ctrl = m_ctrl.load();
+
+		if (ctrl & SM_WRITER_LOCK)
+		{
+			m_data->wcv.wait(lock);
+			continue;
+		}
+
+		if (m_ctrl.compare_and_swap_test(ctrl, ctrl | SM_WRITER_LOCK))
+		{
+			break;
+		}
 	}
 
 	// Wait for remaining readers
-	while ((m_ctrl & SM_READER_COUNT) != 0)
+	while ((m_ctrl & SM_READER_MASK) != 0)
 	{
-		m_ocv.wait(lock);
+		m_data->ocv.wait(lock);
 	}
 
-	CHECK_ASSERTION(m_wq_size--);
-
-	if (m_wq_size == 0)
+	if (!--m_data->wq_size && !m_data->rq_size)
 	{
-		m_ctrl &= ~SM_WRITER_QUEUE;
+		m_ctrl &= ~SM_WAITERS_BIT;
 	}
 }
 
-void shared_mutex::impl_unlock_excl(u32 value)
+void shared_mutex::unlock_notify()
 {
-	// Throw if was not locked exclusively
-	CHECK_ASSERTION(value & SM_WRITER_LOCK);
+	initialize_once();
 
-	// Mutex cannot be unlocked before notification because m_ctrl has been changed outside
-	std::lock_guard<std::mutex> lock(m_mutex);
-	
-	if (m_wq_size)
+	std::unique_lock<std::mutex> lock(m_data->mutex);
+
+	if (m_data->wq_size)
 	{
 		// Notify next exclusive owner
-		m_wcv.notify_one();
+		lock.unlock();
+		m_data->wcv.notify_one();
 	}
-	else if (m_rq_size)
+	else if (m_data->rq_size)
 	{
 		// Notify all readers
-		m_rcv.notify_all();
+		lock.unlock();
+		m_data->rcv.notify_all();
 	}
+}
+
+void shared_mutex::lock_upgrade_hard()
+{
+	unlock_shared();
+	lock();
+}
+
+void shared_mutex::lock_degrade_hard()
+{
+	initialize_once();
+
+	std::unique_lock<std::mutex> lock(m_data->mutex);
+
+	m_ctrl -= SM_WRITER_LOCK - 1;
+
+	if (m_data->rq_size)
+	{
+		// Notify all readers
+		lock.unlock();
+		m_data->rcv.notify_all();
+	}
+	else if (m_data->wq_size)
+	{
+		// Notify next exclusive owner
+		lock.unlock();
+		m_data->wcv.notify_one();
+	}
+}
+
+void shared_mutex::initialize_once()
+{
+	if (UNLIKELY(!m_data))
+	{
+		auto ptr = new shared_mutex::internal;
+
+		if (!m_data.compare_and_swap_test(nullptr, ptr))
+		{
+			delete ptr;
+		}
+	}
+}
+
+shared_mutex::~shared_mutex()
+{
+	delete m_data;
 }

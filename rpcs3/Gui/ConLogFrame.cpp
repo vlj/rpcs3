@@ -1,13 +1,107 @@
 ﻿#include "stdafx.h"
 #include "stdafx_gui.h"
-
-#include "Emu/state.h"
 #include "Gui/ConLogFrame.h"
+
+#include "rpcs3_version.h"
+#include <chrono>
+
+struct gui_listener : logs::listener
+{
+	atomic_t<logs::level> enabled{};
+
+	struct packet
+	{
+		atomic_t<packet*> next{};
+
+		logs::level sev{};
+		std::string msg;
+
+		~packet()
+		{
+			for (auto ptr = next.raw(); UNLIKELY(ptr);)
+			{
+				delete std::exchange(ptr, std::exchange(ptr->next.raw(), nullptr));
+			}
+		}
+	};
+
+	atomic_t<packet*> last; // Packet for writing another packet
+	atomic_t<packet*> read; // Packet for reading
+
+	gui_listener()
+		: logs::listener()
+	{
+		// Initialize packets
+		read = new packet;
+		last = new packet;
+		read->next = last.load();
+		last->msg = fmt::format("RPCS3 v%s\n", rpcs3::version.to_string());
+
+		// Self-registration
+		logs::listener::add(this);
+	}
+
+	~gui_listener()
+	{
+		delete read;
+	}
+
+	void log(const logs::message& msg)
+	{
+		if (msg.sev <= enabled)
+		{
+			const auto _new = new packet;
+			_new->sev = msg.sev;
+
+			if (msg.prefix_size > 0)
+			{
+				_new->msg = fmt::format("{%s} ", msg.prefix);
+			}
+
+			if (msg.ch->name)
+			{
+				_new->msg += msg.ch->name;
+				_new->msg += msg.sev == logs::level::todo ? " TODO: " : ": ";
+			}
+			else if (msg.sev == logs::level::todo)
+			{
+				_new->msg += "TODO: ";
+			}
+
+			_new->msg += msg.text;
+			_new->msg += '\n';
+
+			last = last->next = _new;
+		}
+	}
+
+	void pop()
+	{
+		if (const auto head = read->next.exchange(nullptr))
+		{
+			delete read.exchange(head);
+		}
+	}
+
+	void clear()
+	{
+		while (read->next)
+		{
+			pop();
+		}
+	}
+};
+
+// GUI Listener instance
+static gui_listener s_gui_listener;
 
 enum
 {
 	id_log_copy,  // Copy log to ClipBoard
 	id_log_clear, // Clear log
+	id_log_level,
+	id_log_level7 = id_log_level + 7,
+	id_log_tty,
 	id_timer,
 };
 
@@ -22,10 +116,11 @@ LogFrame::LogFrame(wxWindow* parent)
 	, m_log(new wxTextCtrl(&m_tabs, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE | wxTE_READONLY | wxTE_RICH2))
 	, m_tty(new wxTextCtrl(&m_tabs, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE | wxTE_READONLY | wxTE_RICH2))
 	, m_timer(this, id_timer)
+	, m_cfg_level(g_gui_cfg["Log Level"])
+	, m_cfg_tty(g_gui_cfg["Log TTY"])
 {
-	// Open or create RPCS3.log; TTY.log
-	m_log_file.open(fs::get_config_dir() + "RPCS3.log", fom::read | fom::create);
-	m_tty_file.open(fs::get_config_dir() + "TTY.log",   fom::read | fom::create);
+	// Open or create TTY.log
+	m_tty_file.open(fs::get_config_dir() + "TTY.log", fs::read + fs::create);
 
 	m_tty->SetBackgroundColour(wxColour("Black"));
 	m_log->SetBackgroundColour(wxColour("Black"));
@@ -42,8 +137,13 @@ LogFrame::LogFrame(wxWindow* parent)
 	m_log->Bind(wxEVT_RIGHT_DOWN, &LogFrame::OnRightClick, this);
 	Bind(wxEVT_MENU, &LogFrame::OnContextMenu, this, id_log_clear);
 	Bind(wxEVT_MENU, &LogFrame::OnContextMenu, this, id_log_copy);
+	Bind(wxEVT_MENU, &LogFrame::OnContextMenu, this, id_log_level, id_log_level + 7);
+	Bind(wxEVT_MENU, &LogFrame::OnContextMenu, this, id_log_tty);
 
 	Show();
+
+	// Update listener info
+	s_gui_listener.enabled = get_cfg_level();
 
 	// Check for updates every ~10 ms
 	m_timer.Start(10);
@@ -69,8 +169,21 @@ void LogFrame::OnRightClick(wxMouseEvent& event)
 	wxMenu* menu = new wxMenu();
 
 	menu->Append(id_log_copy, "&Copy");
-	menu->AppendSeparator();
 	menu->Append(id_log_clear, "C&lear");
+	menu->AppendSeparator();
+	menu->AppendRadioItem(id_log_level + 0, "Nothing");
+	menu->AppendRadioItem(id_log_level + 1, "Fatal");
+	menu->AppendRadioItem(id_log_level + 2, "Error");
+	menu->AppendRadioItem(id_log_level + 3, "Todo");
+	menu->AppendRadioItem(id_log_level + 4, "Success");
+	menu->AppendRadioItem(id_log_level + 5, "Warning");
+	menu->AppendRadioItem(id_log_level + 6, "Notice");
+	menu->AppendRadioItem(id_log_level + 7, "Trace");
+	menu->AppendSeparator();
+	menu->AppendCheckItem(id_log_tty, "TTY");
+
+	menu->Check(id_log_level + static_cast<uint>(get_cfg_level()), true);
+	menu->Check(id_log_tty, get_cfg_tty());
 
 	PopupMenu(menu);
 }
@@ -78,13 +191,17 @@ void LogFrame::OnRightClick(wxMouseEvent& event)
 // Well you can bind more than one control to a single handler.
 void LogFrame::OnContextMenu(wxCommandEvent& event)
 {
-	int id = event.GetId();
-	switch (id)
+	switch (auto id = event.GetId())
 	{
 	case id_log_clear:
+	{
 		m_log->Clear();
+		s_gui_listener.clear();
 		break;
+	}
+
 	case id_log_copy:
+	{
 		if (wxTheClipboard->Open())
 		{
 			m_tdo = new wxTextDataObject(m_log->GetStringSelection());
@@ -95,19 +212,37 @@ void LogFrame::OnContextMenu(wxCommandEvent& event)
 			wxTheClipboard->Close();
 		}
 		break;
-	default:
-		event.Skip();
 	}
+
+	case id_log_tty:
+	{
+		m_cfg_tty = !get_cfg_tty();
+		break;
+	}
+
+	default:
+	{
+		if (id >= id_log_level && id < id_log_level + 8)
+		{
+			m_cfg_level = id - id_log_level;
+			s_gui_listener.enabled = static_cast<logs::level>(id - id_log_level);
+			break;
+		}
+	}
+	}
+
+	save_gui_cfg();
+	event.Skip();
 }
 
 void LogFrame::OnTimer(wxTimerEvent& event)
 {
-	char buf[4096];
+	std::vector<char> buf(4096);
 
 	// Get UTF-8 string from file
 	auto get_utf8 = [&](const fs::file& file, u64 size) -> wxString
 	{
-		size = file.read(buf, size);
+		size = file.read(buf.data(), size);
 
 		for (u64 i = 0; i < size; i++)
 		{
@@ -120,91 +255,58 @@ void LogFrame::OnTimer(wxTimerEvent& event)
 			if (i + tail >= size)
 			{
 				file.seek(i - size, fs::seek_cur);
-				return wxString::FromUTF8(buf, i);
+				return wxString::FromUTF8(buf.data(), i);
 			}
 		}
 
-		return wxString::FromUTF8(buf, size);
+		return wxString::FromUTF8(buf.data(), size);
 	};
 
-	const auto stamp0 = std::chrono::high_resolution_clock::now();
+	const auto start = std::chrono::high_resolution_clock::now();
 
 	// Check TTY logs
-	while (const u64 size = std::min<u64>(sizeof(buf), _log::g_tty_file.size() - m_tty_file.seek(0, fs::seek_cur)))
+	while (const u64 size = std::min<u64>(sizeof(buf), m_tty_file.size() - m_tty_file.pos()))
 	{
 		const wxString& text = get_utf8(m_tty_file, size);
 
-		m_tty->AppendText(text);
+		if (get_cfg_tty()) m_tty->AppendText(text);
 
 		// Limit processing time
-		if (std::chrono::high_resolution_clock::now() >= stamp0 + 4ms || text.empty()) break;
+		if (std::chrono::high_resolution_clock::now() >= start + 4ms || text.empty()) break;
 	}
 
-	const auto stamp1 = std::chrono::high_resolution_clock::now();
-
 	// Check main logs
-	while (const u64 size = std::min<u64>(sizeof(buf), _log::g_log_file.size() - m_log_file.seek(0, fs::seek_cur)))
+	while (const auto packet = s_gui_listener.read->next.load())
 	{
-		const wxString& text = get_utf8(m_log_file, size);
-
-		// Append text if necessary
-		auto flush_logs = [&](u64 start, u64 pos)
+		// Confirm log level
+		if (packet->sev <= s_gui_listener.enabled)
 		{
-			if (pos != start && m_level <= rpcs3::config.misc.log.level.value())
+			// Get text color
+			wxColour color;
+			wxString text;
+			switch (packet->sev)
 			{
-				m_log->SetDefaultStyle(m_color);
-				m_log->AppendText(text.substr(start, pos - start));
-			}
-		};
-
-		// Parse log level formatting
-		for (std::size_t start = 0, pos = 0;; pos++)
-		{
-			if (pos < text.size() && text[pos] == L'·')
-			{
-				if (text.size() - pos <= 3)
-				{
-					// Cannot get log formatting: abort
-					m_log_file.seek(0 - text.substr(pos).ToUTF8().length(), fs::seek_cur);
-
-					flush_logs(start, pos);
-					break;
-				}
-
-				if (text[pos + 2] == ' ')
-				{
-					_log::level level;
-					wxColour color;
-
-					switch (text[pos + 1].GetValue())
-					{
-					case 'A': level = _log::level::always; color.Set(0x00, 0xFF, 0xFF); break; // Cyan
-					case 'F': level = _log::level::fatal; color.Set(0xFF, 0x00, 0xFF); break; // Fuchsia
-					case 'E': level = _log::level::error; color.Set(0xFF, 0x00, 0x00); break; // Red
-					case 'U': level = _log::level::todo; color.Set(0xFF, 0x60, 0x00); break; // Orange
-					case 'S': level = _log::level::success; color.Set(0x00, 0xFF, 0x00); break; // Green
-					case 'W': level = _log::level::warning; color.Set(0xFF, 0xFF, 0x00); break; // Yellow
-					case '!': level = _log::level::notice; color.Set(0xFF, 0xFF, 0xFF); break; // White
-					case 'T': level = _log::level::trace; color.Set(0x80, 0x80, 0x80); break; // Gray
-					default: continue;
-					}
-
-					flush_logs(start, pos);
-
-					start = pos + 3;
-					m_level = level;
-					m_color = color;
-				}
+			case logs::level::always: color.Set(0x00, 0xFF, 0xFF); break; // Cyan
+			case logs::level::fatal: text = "F "; color.Set(0xFF, 0x00, 0xFF); break; // Fuchsia
+			case logs::level::error: text = "E "; color.Set(0xFF, 0x00, 0x00); break; // Red
+			case logs::level::todo: text = "U "; color.Set(0xFF, 0x60, 0x00); break; // Orange
+			case logs::level::success: text = "S "; color.Set(0x00, 0xFF, 0x00); break; // Green
+			case logs::level::warning: text = "W "; color.Set(0xFF, 0xFF, 0x00); break; // Yellow
+			case logs::level::notice: text = "! "; color.Set(0xFF, 0xFF, 0xFF); break; // White
+			case logs::level::trace: text = "T "; color.Set(0x80, 0x80, 0x80); break; // Gray
+			default: continue;
 			}
 
-			if (pos >= text.size())
-			{
-				flush_logs(start, pos);
-				break;
-			}
+			// Print UTF-8 text
+			text += wxString::FromUTF8(packet->msg.data(), packet->msg.size());
+			m_log->SetDefaultStyle(color);
+			m_log->AppendText(text);
 		}
 
+		// Drop packet
+		s_gui_listener.pop();
+
 		// Limit processing time
-		if (std::chrono::high_resolution_clock::now() >= stamp1 + 3ms || text.empty()) break;
+		if (std::chrono::high_resolution_clock::now() >= start + 7ms) break;
 	}
 }

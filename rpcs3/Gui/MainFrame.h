@@ -38,13 +38,13 @@ private:
 	void ConfigVHDD(wxCommandEvent& event);
 	void ConfigAutoPause(wxCommandEvent& event);
 	void ConfigSaveData(wxCommandEvent& event);
-	void ConfigLLEModules(wxCommandEvent& event);
 	void OpenELFCompiler(wxCommandEvent& evt);
 	void OpenKernelExplorer(wxCommandEvent& evt);
 	void OpenMemoryViewer(wxCommandEvent& evt);
 	void OpenRSXDebugger(wxCommandEvent& evt);
 	void OpenStringSearch(wxCommandEvent& evt);
 	void OpenCgDisasm(wxCommandEvent& evt);
+	void DecryptSPRXLibraries(wxCommandEvent& event);
 	void AboutDialogHandler(wxCommandEvent& event);
 	void UpdateUI(wxCommandEvent& event);
 	void OnKeyDown(wxKeyEvent& event);

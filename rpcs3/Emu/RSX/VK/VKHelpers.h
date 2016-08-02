@@ -8,13 +8,14 @@
 #include <memory>
 #include <unordered_map>
 
-#include <glm/glm.hpp>
-#include <glm/gtc/type_ptr.hpp>
-
-#include "Emu/state.h"
+#include "Utilities/Config.h"
 #include "VulkanAPI.h"
 #include "../GCM.h"
 #include "../Common/TextureUtils.h"
+#include "../Common/ring_buffer_helper.h"
+
+#define DESCRIPTOR_MAX_DRAW_CALLS 1024
+extern cfg::bool_entry g_cfg_rsx_debug_output;
 
 namespace rsx
 {
@@ -63,10 +64,10 @@ namespace vk
 
 	void change_image_layout(VkCommandBuffer cmd, VkImage image, VkImageLayout current_layout, VkImageLayout new_layout, VkImageSubresourceRange range);
 	void copy_image(VkCommandBuffer cmd, VkImage &src, VkImage &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 width, u32 height, u32 mipmaps, VkImageAspectFlagBits aspect);
-	void copy_scaled_image(VkCommandBuffer cmd, VkImage &src, VkImage &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 src_width, u32 src_height, u32 dst_width, u32 dst_height, u32 mipmaps, VkImageAspectFlagBits aspect);
+	void copy_scaled_image(VkCommandBuffer cmd, VkImage &src, VkImage &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 src_x_offset, u32 src_y_offset, u32 src_width, u32 src_height, u32 dst_x_offset, u32 dst_y_offset, u32 dst_width, u32 dst_height, u32 mipmaps, VkImageAspectFlagBits aspect);
 
 	VkFormat get_compatible_sampler_format(u32 format);
-	VkFormat get_compatible_surface_format(rsx::surface_color_format color_format);
+	std::pair<VkFormat, VkComponentMapping> get_compatible_surface_format(rsx::surface_color_format color_format);
 	size_t get_render_pass_location(VkFormat color_surface_format, VkFormat depth_stencil_format, u8 color_surface_count);
 
 	struct memory_type_mapping
@@ -123,7 +124,7 @@ namespace vk
 				vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, queue_props.data());
 			}
 
-			if (queue >= queue_props.size()) throw EXCEPTION("Undefined trap");
+			if (queue >= queue_props.size()) throw EXCEPTION("Bad queue index passed to get_queue_properties (%u)", queue);
 			return queue_props[queue];
 		}
 
@@ -153,8 +154,6 @@ namespace vk
 
 		render_device(vk::physical_device &pdev, uint32_t graphics_queue_idx)
 		{
-			VkResult err;
-
 			float queue_priorities[1] = { 0.f };
 			pgpu = &pdev;
 
@@ -173,7 +172,7 @@ namespace vk
 
 			std::vector<const char *> layers;
 
-			if (rpcs3::config.rsx.d3d12.debug_output.value())
+			if (g_cfg_rsx_debug_output)
 				layers.push_back("VK_LAYER_LUNARG_standard_validation");
 
 			VkDeviceCreateInfo device;
@@ -187,8 +186,7 @@ namespace vk
 			device.ppEnabledExtensionNames = requested_extensions;
 			device.pEnabledFeatures = nullptr;
 
-			err = vkCreateDevice(*pgpu, &device, nullptr, &dev);
-			if (err != VK_SUCCESS) throw EXCEPTION("Undefined trap");
+			CHECK_RESULT(vkCreateDevice(*pgpu, &device, nullptr, &dev));
 		}
 
 		~render_device()
@@ -336,10 +334,13 @@ namespace vk
 	struct image
 	{
 		VkImage value;
+		VkComponentMapping native_layout = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
 		VkImageCreateInfo info = {};
 		std::shared_ptr<vk::memory_block> memory;
 
-		image(VkDevice dev, uint32_t memory_type_index,
+		image(vk::render_device &dev,
+			uint32_t memory_type_index,
+			uint32_t access_flags,
 			VkImageType image_type,
 			VkFormat format,
 			uint32_t width, uint32_t height, uint32_t depth,
@@ -368,8 +369,16 @@ namespace vk
 
 			VkMemoryRequirements memory_req;
 			vkGetImageMemoryRequirements(m_device, value, &memory_req);
-			memory = std::make_shared<vk::memory_block>(m_device, memory_req.size, memory_type_index);
+			
+			if (!(memory_req.memoryTypeBits & (1 << memory_type_index)))
+			{
+				//Suggested memory type is incompatible with this memory type.
+				//Go through the bitset and test for requested props.
+				if (!dev.get_compatible_memory_type(memory_req.memoryTypeBits, access_flags, &memory_type_index))
+					throw EXCEPTION("No compatible memory type was found!");
+			}
 
+			memory = std::make_shared<vk::memory_block>(m_device, memory_req.size, memory_type_index);
 			CHECK_RESULT(vkBindImageMemory(m_device, value, memory->memory, 0));
 		}
 
@@ -473,7 +482,7 @@ namespace vk
 		VkBufferCreateInfo info = {};
 		std::unique_ptr<vk::memory_block> memory;
 
-		buffer(VkDevice dev, u64 size, uint32_t memory_type_index, VkBufferUsageFlagBits usage, VkBufferCreateFlags flags)
+		buffer(vk::render_device& dev, u64 size, uint32_t memory_type_index, uint32_t access_flags, VkBufferUsageFlagBits usage, VkBufferCreateFlags flags)
 			: m_device(dev)
 		{
 			info.size = size;
@@ -484,9 +493,18 @@ namespace vk
 
 			CHECK_RESULT(vkCreateBuffer(m_device, &info, nullptr, &value));
 
-			VkMemoryRequirements memory_reqs;
 			//Allocate vram for this buffer
+			VkMemoryRequirements memory_reqs;
 			vkGetBufferMemoryRequirements(m_device, value, &memory_reqs);
+
+			if (!(memory_reqs.memoryTypeBits & (1 << memory_type_index)))
+			{
+				//Suggested memory type is incompatible with this memory type.
+				//Go through the bitset and test for requested props.
+				if (!dev.get_compatible_memory_type(memory_reqs.memoryTypeBits, access_flags, &memory_type_index))
+					throw EXCEPTION("No compatible memory type was found!");
+			}
+
 			memory.reset(new memory_block(m_device, memory_reqs.size, memory_type_index));
 			vkBindBufferMemory(dev, value, memory->memory, 0);
 		}
@@ -499,7 +517,7 @@ namespace vk
 		void *map(u64 offset, u64 size)
 		{
 			void *data = nullptr;
-			CHECK_RESULT(vkMapMemory(m_device, memory->memory, offset, size, 0, &data));
+			CHECK_RESULT(vkMapMemory(m_device, memory->memory, offset, std::max<u64>(size, 1u), 0, &data));
 			return data;
 		}
 
@@ -550,7 +568,7 @@ namespace vk
 
 		sampler(VkDevice dev, VkSamplerAddressMode clamp_u, VkSamplerAddressMode clamp_v, VkSamplerAddressMode clamp_w,
 			bool unnormalized_coordinates, float mipLodBias, float max_anisotropy, float min_lod, float max_lod,
-			VkFilter min_filter, VkFilter mag_filter, VkSamplerMipmapMode mipmap_mode)
+			VkFilter min_filter, VkFilter mag_filter, VkSamplerMipmapMode mipmap_mode, VkBorderColor border_color)
 			: m_device(dev)
 		{
 			VkSamplerCreateInfo info = {};
@@ -569,7 +587,7 @@ namespace vk
 			info.minFilter = min_filter;
 			info.mipmapMode = mipmap_mode;
 			info.compareOp = VK_COMPARE_OP_NEVER;
-			info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+			info.borderColor = border_color;
 
 			CHECK_RESULT(vkCreateSampler(m_device, &info, nullptr, &value));
 		}
@@ -590,6 +608,9 @@ namespace vk
 		VkFramebuffer value;
 		VkFramebufferCreateInfo info = {};
 		std::vector<std::unique_ptr<vk::image_view>> attachements;
+		u32 m_width = 0;
+		u32 m_height = 0;
+
 	public:
 		framebuffer(VkDevice dev, VkRenderPass pass, u32 width, u32 height, std::vector<std::unique_ptr<vk::image_view>> &&atts)
 			: m_device(dev), attachements(std::move(atts))
@@ -609,12 +630,25 @@ namespace vk
 			info.renderPass = pass;
 			info.layers = 1;
 
+			m_width = width;
+			m_height = height;
+
 			CHECK_RESULT(vkCreateFramebuffer(dev, &info, nullptr, &value));
 		}
 
 		~framebuffer()
 		{
 			vkDestroyFramebuffer(m_device, value, nullptr);
+		}
+
+		u32 width()
+		{
+			return m_width;
+		}
+
+		u32 height()
+		{
+			return m_height;
 		}
 
 		framebuffer(const framebuffer&) = delete;
@@ -842,7 +876,7 @@ namespace vk
 			nb_swap_images = 0;
 			getSwapchainImagesKHR(dev, m_vk_swapchain, &nb_swap_images, nullptr);
 			
-			if (!nb_swap_images) throw EXCEPTION("Undefined trap");
+			if (!nb_swap_images) throw EXCEPTION("Driver returned 0 images for swapchain");
 
 			std::vector<VkImage> swap_images;
 			swap_images.resize(nb_swap_images);
@@ -1038,7 +1072,7 @@ namespace vk
 
 			std::vector<const char *> layers;
 
-			if (rpcs3::config.rsx.d3d12.debug_output.value())
+			if (g_cfg_rsx_debug_output)
 				layers.push_back("VK_LAYER_LUNARG_standard_validation");
 
 			VkInstanceCreateInfo instance_info = {};
@@ -1050,9 +1084,7 @@ namespace vk
 			instance_info.ppEnabledExtensionNames = requested_extensions;
 
 			VkInstance instance;
-			VkResult error = vkCreateInstance(&instance_info, nullptr, &instance);
-
-			if (error != VK_SUCCESS) throw EXCEPTION("Undefined trap");
+			CHECK_RESULT(vkCreateInstance(&instance_info, nullptr, &instance));
 
 			m_vk_instances.push_back(instance);
 			return (u32)m_vk_instances.size();
@@ -1061,7 +1093,7 @@ namespace vk
 		void makeCurrentInstance(uint32_t instance_id)
 		{
 			if (!instance_id || instance_id > m_vk_instances.size())
-				throw EXCEPTION("Undefined trap");
+				throw EXCEPTION("Invalid instance passed to makeCurrentInstance (%u)", instance_id);
 
 			if (m_debugger)
 			{
@@ -1081,7 +1113,7 @@ namespace vk
 		VkInstance getInstanceById(uint32_t instance_id)
 		{
 			if (!instance_id || instance_id > m_vk_instances.size())
-				throw EXCEPTION("Undefined trap");
+				throw EXCEPTION("Invalid instance passed to getInstanceById (%u)", instance_id);
 
 			instance_id--;
 			return m_vk_instances[instance_id];
@@ -1115,7 +1147,7 @@ namespace vk
 			createInfo.hwnd = hWnd;
 
 			VkSurfaceKHR surface;
-			VkResult err = vkCreateWin32SurfaceKHR(m_instance, &createInfo, NULL, &surface);
+			CHECK_RESULT(vkCreateWin32SurfaceKHR(m_instance, &createInfo, NULL, &surface));
 
 			uint32_t device_queues = dev.get_queue_count();
 			std::vector<VkBool32> supportsPresent(device_queues);
@@ -1163,19 +1195,17 @@ namespace vk
 
 			// Generate error if could not find both a graphics and a present queue
 			if (graphicsQueueNodeIndex == UINT32_MAX || presentQueueNodeIndex == UINT32_MAX)
-				throw EXCEPTION("Undefined trap");
+				throw EXCEPTION("Failed to find a suitable graphics/compute queue");
 
 			if (graphicsQueueNodeIndex != presentQueueNodeIndex)
-				throw EXCEPTION("Undefined trap");
+				throw EXCEPTION("Separate graphics and present queues not supported");
 
 			// Get the list of VkFormat's that are supported:
 			uint32_t formatCount;
-			err = vkGetPhysicalDeviceSurfaceFormatsKHR(dev, surface, &formatCount, nullptr);
-			if (err != VK_SUCCESS) throw EXCEPTION("Undefined trap");
+			CHECK_RESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(dev, surface, &formatCount, nullptr));
 
 			std::vector<VkSurfaceFormatKHR> surfFormats(formatCount);
-			err = vkGetPhysicalDeviceSurfaceFormatsKHR(dev, surface, &formatCount, surfFormats.data());
-			if (err != VK_SUCCESS) throw EXCEPTION("Undefined trap");
+			CHECK_RESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(dev, surface, &formatCount, surfFormats.data()));
 
 			VkFormat format;
 			VkColorSpaceKHR color_space;
@@ -1186,7 +1216,7 @@ namespace vk
 			}
 			else
 			{
-				if (!formatCount) throw EXCEPTION("Undefined trap");
+				if (!formatCount) throw EXCEPTION("Format count is zero!");
 				format = surfFormats[0].format;
 			}
 
@@ -1211,7 +1241,7 @@ namespace vk
 		{
 			VkDescriptorPoolCreateInfo infos = {};
 			infos.flags = 0;
-			infos.maxSets = 1000;
+			infos.maxSets = DESCRIPTOR_MAX_DRAW_CALLS;
 			infos.poolSizeCount = size_descriptors_count;
 			infos.pPoolSizes = sizes;
 			infos.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1308,86 +1338,20 @@ namespace vk
 		};
 	}
 
-
-
-	// TODO: factorize between backends
-	class data_heap
+	struct vk_data_heap : public data_heap
 	{
-		/**
-		* Does alloc cross get position ?
-		*/
-		template<int Alignement>
-		bool can_alloc(size_t size) const
+		std::unique_ptr<vk::buffer> heap;
+
+		void* map(size_t offset, size_t size)
 		{
-			size_t alloc_size = align(size, Alignement);
-			size_t aligned_put_pos = align(m_put_pos, Alignement);
-			if (aligned_put_pos + alloc_size < m_size)
-			{
-				// range before get
-				if (aligned_put_pos + alloc_size < m_get_pos)
-					return true;
-				// range after get
-				if (aligned_put_pos > m_get_pos)
-					return true;
-				return false;
-			}
-			else
-			{
-				// ..]....[..get..
-				if (aligned_put_pos < m_get_pos)
-					return false;
-				// ..get..]...[...
-				// Actually all resources extending beyond heap space starts at 0
-				if (alloc_size > m_get_pos)
-					return false;
-				return true;
-			}
+			return heap->map(offset, size);
 		}
 
-		size_t m_size;
-		size_t m_put_pos; // Start of free space
-	public:
-		data_heap() = default;
-		~data_heap() = default;
-		data_heap(const data_heap&) = delete;
-		data_heap(data_heap&&) = delete;
-
-		size_t m_get_pos; // End of free space
-
-		void init(size_t heap_size)
+		void unmap()
 		{
-			m_size = heap_size;
-			m_put_pos = 0;
-			m_get_pos = heap_size - 1;
-		}
-
-		template<int Alignement>
-		size_t alloc(size_t size)
-		{
-			if (!can_alloc<Alignement>(size)) throw EXCEPTION("Working buffer not big enough");
-			size_t alloc_size = align(size, Alignement);
-			size_t aligned_put_pos = align(m_put_pos, Alignement);
-			if (aligned_put_pos + alloc_size < m_size)
-			{
-				m_put_pos = aligned_put_pos + alloc_size;
-				return aligned_put_pos;
-			}
-			else
-			{
-				m_put_pos = alloc_size;
-				return 0;
-			}
-		}
-
-		/**
-		* return current putpos - 1
-		*/
-		size_t get_current_put_pos_minus_one() const
-		{
-			return (m_put_pos - 1 > 0) ? m_put_pos - 1 : m_size - 1;
+			heap->unmap();
 		}
 	};
-
 
 	/**
 	* Allocate enough space in upload_buffer and write all mipmap/layer data into the subbuffer.
@@ -1395,6 +1359,6 @@ namespace vk
 	* dst_image must be in TRANSFER_DST_OPTIMAL layout and upload_buffer have TRANSFER_SRC_BIT usage flag.
 	*/
 	void copy_mipmaped_image_using_buffer(VkCommandBuffer cmd, VkImage dst_image,
-		const std::vector<rsx_subresource_layout> subresource_layout, int format, bool is_swizzled,
-		vk::data_heap &upload_heap, vk::buffer* upload_buffer);
+		const std::vector<rsx_subresource_layout> subresource_layout, int format, bool is_swizzled, u16 mipmap_count,
+		vk::vk_data_heap &upload_heap, vk::buffer* upload_buffer);
 }

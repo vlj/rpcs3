@@ -1,17 +1,38 @@
 #include "stdafx.h"
+#include "Utilities/Config.h"
 #include "rsx_methods.h"
 #include "RSXThread.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
-#include "Emu/state.h"
 #include "rsx_utils.h"
-#include "Emu/SysCalls/Callback.h"
-#include "Emu/SysCalls/CB_FUNC.h"
+#include "rsx_decode.h"
+#include "Emu/Cell/PPUCallback.h"
+
+#include <sstream>
+#include <cereal/archives/binary.hpp>
+
+#include <thread>
+
+cfg::map_entry<double> g_cfg_rsx_frame_limit(cfg::root.video, "Frame limit",
+{
+	{ "Off", 0. },
+	{ "59.94", 59.94 },
+	{ "50", 50. },
+	{ "60", 60. },
+	{ "30", 30. },
+	{ "Auto", -1. },
+});
 
 namespace rsx
 {
-	u32 method_registers[0x10000 >> 2];
-	rsx_method_t methods[0x10000 >> 2]{};
+	rsx_state method_registers;
+	
+	std::array<rsx_method_t, 0x10000 / 4> methods{};
+
+	[[noreturn]] void invalid_method(thread*, u32 _reg, u32 arg)
+	{
+		throw fmt::exception("Invalid RSX method 0x%x (arg=0x%x)" HERE, _reg << 2, arg);
+	}
 
 	template<typename Type> struct vertex_data_type_from_element_type;
 	template<> struct vertex_data_type_from_element_type<float> { static const vertex_base_type type = vertex_base_type::f; };
@@ -21,74 +42,90 @@ namespace rsx
 
 	namespace nv406e
 	{
-		force_inline void set_reference(thread* rsx, u32 arg)
+		void set_reference(thread* rsx, u32 _reg, u32 arg)
 		{
 			rsx->ctrl->ref.exchange(arg);
 		}
 
-		force_inline void semaphore_acquire(thread* rsx, u32 arg)
+		void semaphore_acquire(thread* rsx, u32 _reg, u32 arg)
 		{
 			//TODO: dma
-			while (vm::ps3::read32(rsx->label_addr + method_registers[NV406E_SEMAPHORE_OFFSET]) != arg)
+			while (vm::ps3::read32(rsx->label_addr + method_registers.semaphore_offset_406e()) != arg)
 			{
 				if (Emu.IsStopped())
 					break;
 
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				std::this_thread::sleep_for(1ms);
 			}
 		}
 
-		force_inline void semaphore_release(thread* rsx, u32 arg)
+		void semaphore_release(thread* rsx, u32 _reg, u32 arg)
 		{
 			//TODO: dma
-			vm::ps3::write32(rsx->label_addr + method_registers[NV406E_SEMAPHORE_OFFSET], arg);
+			vm::ps3::write32(rsx->label_addr + method_registers.semaphore_offset_406e(), arg);
 		}
 	}
 
 	namespace nv4097
 	{
-		force_inline void texture_read_semaphore_release(thread* rsx, u32 arg)
+		void clear(thread* rsx, u32 _reg, u32 arg)
 		{
-			//TODO: dma
-			vm::ps3::write32(rsx->label_addr + method_registers[NV4097_SET_SEMAPHORE_OFFSET], arg);
+			// TODO: every backend must override method table to insert its own handlers
+			if (!rsx->do_method(NV4097_CLEAR_SURFACE, arg))
+			{
+				//
+			}
+
+			if (rsx->capture_current_frame)
+			{
+				rsx->capture_frame("clear");
+			}
 		}
 
-		force_inline void back_end_write_semaphore_release(thread* rsx, u32 arg)
+		void texture_read_semaphore_release(thread* rsx, u32 _reg, u32 arg)
 		{
+			if (!rsx->do_method(NV4097_TEXTURE_READ_SEMAPHORE_RELEASE, arg))
+			{
+				//
+			}
+
 			//TODO: dma
-			vm::ps3::write32(rsx->label_addr + method_registers[NV4097_SET_SEMAPHORE_OFFSET],
+			vm::ps3::write32(rsx->label_addr + method_registers.semaphore_offset_4097(), arg);
+		}
+
+		void back_end_write_semaphore_release(thread* rsx, u32 _reg, u32 arg)
+		{
+			if (!rsx->do_method(NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE, arg))
+			{
+				//
+			}
+
+			//TODO: dma
+			vm::ps3::write32(rsx->label_addr + method_registers.semaphore_offset_4097(),
 				(arg & 0xff00ff00) | ((arg & 0xff) << 16) | ((arg >> 16) & 0xff));
 		}
 
-		//fire only when all data passed to rsx cmd buffer
 		template<u32 id, u32 index, int count, typename type>
-		force_inline void set_vertex_data_impl(thread* rsx, u32 arg)
+		void set_vertex_data_impl(thread* rsx, u32 arg)
 		{
-			static const size_t element_size = (count * sizeof(type));
-			static const size_t element_size_in_words = element_size / sizeof(u32);
+			static const size_t increment_per_array_index = (count * sizeof(type)) / sizeof(u32);
 
-			auto& info = rsx->register_vertex_info[index];
+			static const size_t attribute_index = index / increment_per_array_index;
+			static const size_t vertex_subreg = index % increment_per_array_index;
+
+			auto& info = rsx::method_registers.register_vertex_info[attribute_index];
 
 			info.type = vertex_data_type_from_element_type<type>::type;
 			info.size = count;
 			info.frequency = 0;
 			info.stride = 0;
-
-			auto& entry = rsx->register_vertex_data[index];
-
-			//find begin of data
-			size_t begin = id + index * element_size_in_words;
-
-			size_t position = 0;//entry.size();
-			entry.resize(position + element_size);
-
-			memcpy(entry.data() + position, method_registers + begin, element_size);
+			rsx::method_registers.register_vertex_info[attribute_index].data[vertex_subreg] = arg;
 		}
 
 		template<u32 index>
 		struct set_vertex_data4ub_m
 		{
-			force_inline static void impl(thread* rsx, u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
 				set_vertex_data_impl<NV4097_SET_VERTEX_DATA4UB_M, index, 4, u8>(rsx, arg);
 			}
@@ -97,7 +134,7 @@ namespace rsx
 		template<u32 index>
 		struct set_vertex_data1f_m
 		{
-			force_inline static void impl(thread* rsx, u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
 				set_vertex_data_impl<NV4097_SET_VERTEX_DATA1F_M, index, 1, f32>(rsx, arg);
 			}
@@ -106,7 +143,7 @@ namespace rsx
 		template<u32 index>
 		struct set_vertex_data2f_m
 		{
-			force_inline static void impl(thread* rsx, u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
 				set_vertex_data_impl<NV4097_SET_VERTEX_DATA2F_M, index, 2, f32>(rsx, arg);
 			}
@@ -115,7 +152,7 @@ namespace rsx
 		template<u32 index>
 		struct set_vertex_data3f_m
 		{
-			force_inline static void impl(thread* rsx, u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
 				set_vertex_data_impl<NV4097_SET_VERTEX_DATA3F_M, index, 3, f32>(rsx, arg);
 			}
@@ -124,7 +161,7 @@ namespace rsx
 		template<u32 index>
 		struct set_vertex_data4f_m
 		{
-			force_inline static void impl(thread* rsx, u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
 				set_vertex_data_impl<NV4097_SET_VERTEX_DATA4F_M, index, 4, f32>(rsx, arg);
 			}
@@ -133,7 +170,7 @@ namespace rsx
 		template<u32 index>
 		struct set_vertex_data2s_m
 		{
-			force_inline static void impl(thread* rsx, u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
 				set_vertex_data_impl<NV4097_SET_VERTEX_DATA2S_M, index, 2, u16>(rsx, arg);
 			}
@@ -142,7 +179,7 @@ namespace rsx
 		template<u32 index>
 		struct set_vertex_data4s_m
 		{
-			force_inline static void impl(thread* rsx, u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
 				set_vertex_data_impl<NV4097_SET_VERTEX_DATA4S_M, index, 4, u16>(rsx, arg);
 			}
@@ -151,14 +188,17 @@ namespace rsx
 		template<u32 index>
 		struct set_vertex_data_array_format
 		{
-			force_inline static void impl(thread* rsx, u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
-				auto& info = rsx->vertex_arrays_info[index];
-				info.unpack_array(arg);
+				const typename rsx::registers_decoder<NV4097_SET_VERTEX_DATA_ARRAY_FORMAT + index>::decoded_type decoded_value(arg);
+				rsx::method_registers.vertex_arrays_info[index].frequency = decoded_value.frequency();
+				rsx::method_registers.vertex_arrays_info[index].stride = decoded_value.stride();
+				rsx::method_registers.vertex_arrays_info[index].size = decoded_value.size();
+				rsx::method_registers.vertex_arrays_info[index].type = decoded_value.type();
 			}
 		};
 
-		force_inline void draw_arrays(thread* rsx, u32 arg)
+		void draw_arrays(thread* rsx, u32 _reg, u32 arg)
 		{
 			rsx->draw_command = rsx::draw_command::array;
 			u32 first = arg & 0xffffff;
@@ -167,7 +207,7 @@ namespace rsx
 			rsx->first_count_commands.emplace_back(std::make_pair(first, count));
 		}
 
-		force_inline void draw_index_array(thread* rsx, u32 arg)
+		void draw_index_array(thread* rsx, u32 _reg, u32 arg)
 		{
 			rsx->draw_command = rsx::draw_command::indexed;
 			u32 first = arg & 0xffffff;
@@ -176,7 +216,7 @@ namespace rsx
 			rsx->first_count_commands.emplace_back(std::make_pair(first, count));
 		}
 
-		force_inline void draw_inline_array(thread* rsx, u32 arg)
+		void draw_inline_array(thread* rsx, u32 _reg, u32 arg)
 		{
 			rsx->draw_command = rsx::draw_command::inlined_array;
 			rsx->draw_inline_vertex_array = true;
@@ -186,17 +226,13 @@ namespace rsx
 		template<u32 index>
 		struct set_transform_constant
 		{
-			force_inline static void impl(thread* rsxthr, u32 arg)
+			static void impl(thread* rsxthr, u32 _reg, u32 arg)
 			{
-				u32 load = method_registers[NV4097_SET_TRANSFORM_CONSTANT_LOAD];
+				static constexpr u32 reg = index / 4;
+				static constexpr u8 subreg = index % 4;
 
-				static const size_t count = 4;
-				static const size_t size = count * sizeof(f32);
-
-				size_t reg = index / 4;
-				size_t subreg = index % 4;
-
-				memcpy(rsxthr->transform_constants[load + reg].rgba + subreg, method_registers + NV4097_SET_TRANSFORM_CONSTANT + reg * count + subreg, sizeof(f32));
+				u32 load = rsx::method_registers.transform_constant_load();
+				rsx::method_registers.transform_constants[load + reg].rgba[subreg] = (f32&)arg;
 				rsxthr->m_transform_constants_dirty = true;
 			}
 		};
@@ -204,47 +240,69 @@ namespace rsx
 		template<u32 index>
 		struct set_transform_program
 		{
-			force_inline static void impl(thread* rsx, u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
-				u32& load = method_registers[NV4097_SET_TRANSFORM_PROGRAM_LOAD];
-
-				static const size_t count = 4;
-				static const size_t size = count * sizeof(u32);
-
-				memcpy(rsx->transform_program + load++ * count, method_registers + NV4097_SET_TRANSFORM_PROGRAM + index * count, size);
+				method_registers.commit_4_transform_program_instructions(index);
 			}
 		};
 
-		force_inline void set_begin_end(thread* rsx, u32 arg)
+		void set_begin_end(thread* rsxthr, u32 _reg, u32 arg)
 		{
 			if (arg)
 			{
-				rsx->draw_inline_vertex_array = false;
-				rsx->inline_vertex_array.clear();
-				rsx->begin();
+				rsxthr->begin();
 				return;
 			}
 
-			rsx->end();
+			u32 max_vertex_count = 0;
+
+			for (u8 index = 0; index < rsx::limits::vertex_count; ++index)
+			{
+				auto &vertex_info = rsx::method_registers.register_vertex_info[index];
+
+				if (vertex_info.size > 0)
+				{
+					u32 element_size = rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
+					u32 element_count = vertex_info.size;
+
+					vertex_info.frequency = element_count;
+
+					if (rsxthr->draw_command == rsx::draw_command::none)
+					{
+						max_vertex_count = std::max<u32>(max_vertex_count, element_count);
+					}
+				}
+			}
+
+			if (rsxthr->draw_command == rsx::draw_command::none && max_vertex_count)
+			{
+				rsxthr->draw_command = rsx::draw_command::array;
+				rsxthr->first_count_commands.push_back(std::make_pair(0, max_vertex_count));
+			}
+
+			if (!(rsxthr->first_count_commands.empty() && rsxthr->inline_vertex_array.empty()))
+			{
+				rsxthr->end();
+			}
 		}
 
-		force_inline void get_report(thread* rsx, u32 arg)
+		void get_report(thread* rsx, u32 _reg, u32 arg)
 		{
 			u8 type = arg >> 24;
 			u32 offset = arg & 0xffffff;
-			u32 report_dma = method_registers[NV4097_SET_CONTEXT_DMA_REPORT];
+			blit_engine::context_dma report_dma = method_registers.context_dma_report();
 			u32 location;
 
 			switch (report_dma)
 			{
-			case CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_REPORT: location = CELL_GCM_LOCATION_LOCAL; break;
-			case CELL_GCM_CONTEXT_DMA_REPORT_LOCATION_MAIN: location = CELL_GCM_LOCATION_MAIN; break;
+			case blit_engine::context_dma::to_memory_get_report: location = CELL_GCM_LOCATION_LOCAL; break;
+			case blit_engine::context_dma::report_location_main: location = CELL_GCM_LOCATION_MAIN; break;
 			default:
 				LOG_WARNING(RSX, "nv4097::get_report: bad report dma: 0x%x", report_dma);
 				return;
 			}
 
-			vm::ps3::ptr<CellGcmReportData> result = { get_address(offset, location), vm::addr };
+			vm::ps3::ptr<CellGcmReportData> result = vm::cast(get_address(offset, location));
 
 			result->timer = rsx->timestamp();
 
@@ -268,7 +326,7 @@ namespace rsx
 			//result->padding = 0;
 		}
 
-		force_inline void clear_report_value(thread* rsx, u32 arg)
+		void clear_report_value(thread* rsx, u32 _reg, u32 arg)
 		{
 			switch (arg)
 			{
@@ -284,7 +342,7 @@ namespace rsx
 			}
 		}
 
-		force_inline void set_surface_dirty_bit(thread* rsx, u32)
+		void set_surface_dirty_bit(thread* rsx, u32 _reg, u32)
 		{
 			rsx->m_rtts_dirty = true;
 		}
@@ -292,7 +350,7 @@ namespace rsx
 		template<u32 index>
 		struct set_texture_dirty_bit
 		{
-			force_inline static void impl(thread* rsx, u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
 				rsx->m_textures_dirty[index] = true;
 			}
@@ -304,18 +362,17 @@ namespace rsx
 		template<u32 index>
 		struct color
 		{
-			force_inline static void impl(u32 arg)
+			static void impl(thread* rsx, u32 _reg, u32 arg)
 			{
-				u32 point = method_registers[NV308A_POINT];
-				u16 x = point;
-				u16 y = point >> 16;
+				u16 x = method_registers.nv308a_x();
+				u16 y = method_registers.nv308a_y();
 
 				if (y)
 				{
 					LOG_ERROR(RSX, "%s: y is not null (0x%x)", __FUNCTION__, y);
 				}
 
-				u32 address = get_address(method_registers[NV3062_SET_OFFSET_DESTIN] + (x << 2) + index * 4, method_registers[NV3062_SET_CONTEXT_DMA_IMAGE_DESTIN]);
+				u32 address = get_address(method_registers.blit_engine_output_offset_nv3062() + (x << 2) + index * 4, method_registers.blit_engine_output_location_nv3062());
 				vm::ps3::write32(address, arg);
 			}
 		};
@@ -323,77 +380,103 @@ namespace rsx
 
 	namespace nv3089
 	{
-		never_inline void image_in(thread *rsx, u32 arg)
+		void image_in(thread *rsx, u32 _reg, u32 arg)
 		{
-			u32 operation = method_registers[NV3089_SET_OPERATION];
+			rsx::blit_engine::transfer_operation operation = method_registers.blit_engine_operation();
 
-			u32 clip_x = method_registers[NV3089_CLIP_POINT] & 0xffff;
-			u32 clip_y = method_registers[NV3089_CLIP_POINT] >> 16;
-			u32 clip_w = method_registers[NV3089_CLIP_SIZE] & 0xffff;
-			u32 clip_h = method_registers[NV3089_CLIP_SIZE] >> 16;
+			u32 clip_x = method_registers.blit_engine_clip_x();
+			u32 clip_y = method_registers.blit_engine_clip_y();
+			u32 clip_w = method_registers.blit_engine_clip_width();
+			u32 clip_h = method_registers.blit_engine_clip_height();
 
-			u32 out_x = method_registers[NV3089_IMAGE_OUT_POINT] & 0xffff;
-			u32 out_y = method_registers[NV3089_IMAGE_OUT_POINT] >> 16;
-			u32 out_w = method_registers[NV3089_IMAGE_OUT_SIZE] & 0xffff;
-			u32 out_h = method_registers[NV3089_IMAGE_OUT_SIZE] >> 16;
+			u32 out_x = method_registers.blit_engine_output_x();
+			u32 out_y = method_registers.blit_engine_output_y();
+			u32 out_w = method_registers.blit_engine_output_width();
+			u32 out_h = method_registers.blit_engine_output_height();
 
-			u16 in_w = method_registers[NV3089_IMAGE_IN_SIZE];
-			u16 in_h = method_registers[NV3089_IMAGE_IN_SIZE] >> 16;
-			u16 in_pitch = method_registers[NV3089_IMAGE_IN_FORMAT];
-			u8 in_origin = method_registers[NV3089_IMAGE_IN_FORMAT] >> 16;
-			u8 in_inter = method_registers[NV3089_IMAGE_IN_FORMAT] >> 24;
-			u32 src_color_format = method_registers[NV3089_SET_COLOR_FORMAT];
+			u16 in_w = method_registers.blit_engine_input_width();
+			u16 in_h = method_registers.blit_engine_input_height();
+			u16 in_pitch = method_registers.blit_engine_input_pitch();
+			blit_engine::transfer_origin in_origin = method_registers.blit_engine_input_origin();
+			blit_engine::transfer_interpolator in_inter = method_registers.blit_engine_input_inter();
+			rsx::blit_engine::transfer_source_format src_color_format = method_registers.blit_engine_src_color_format();
 
-			f32 in_x = (method_registers[NV3089_IMAGE_IN] & 0xffff) / 16.f;
-			f32 in_y = (method_registers[NV3089_IMAGE_IN] >> 16) / 16.f;
+			f32 in_x = method_registers.blit_engine_in_x();
+			f32 in_y = method_registers.blit_engine_in_y();
 
-			if (in_origin != CELL_GCM_TRANSFER_ORIGIN_CORNER)
+			if (in_origin != blit_engine::transfer_origin::corner)
 			{
 				LOG_ERROR(RSX, "NV3089_IMAGE_IN_SIZE: unknown origin (%d)", in_origin);
 			}
 
-			if (in_inter != CELL_GCM_TRANSFER_INTERPOLATOR_ZOH && in_inter != CELL_GCM_TRANSFER_INTERPOLATOR_FOH)
-			{
-				LOG_ERROR(RSX, "NV3089_IMAGE_IN_SIZE: unknown inter (%d)", in_inter);
-			}
-
-			if (operation != CELL_GCM_TRANSFER_OPERATION_SRCCOPY)
+			if (operation != rsx::blit_engine::transfer_operation::srccopy)
 			{
 				LOG_ERROR(RSX, "NV3089_IMAGE_IN_SIZE: unknown operation (%d)", operation);
 			}
 
-			const u32 src_offset = method_registers[NV3089_IMAGE_IN_OFFSET];
-			const u32 src_dma = method_registers[NV3089_SET_CONTEXT_DMA_IMAGE];
+			const u32 src_offset = method_registers.blit_engine_input_offset();
+			const u32 src_dma = method_registers.blit_engine_input_location();
 
 			u32 dst_offset;
 			u32 dst_dma = 0;
-			u16 dst_color_format;
+			rsx::blit_engine::transfer_destination_format dst_color_format;
 			u32 out_pitch = 0;
 			u32 out_aligment = 64;
 
-			switch (method_registers[NV3089_SET_CONTEXT_SURFACE])
+			switch (method_registers.blit_engine_context_surface())
 			{
-			case CELL_GCM_CONTEXT_SURFACE2D:
-				dst_dma = method_registers[NV3062_SET_CONTEXT_DMA_IMAGE_DESTIN];
-				dst_offset = method_registers[NV3062_SET_OFFSET_DESTIN];
-				dst_color_format = method_registers[NV3062_SET_COLOR_FORMAT];
-				out_pitch = method_registers[NV3062_SET_PITCH] >> 16;
-				out_aligment = method_registers[NV3062_SET_PITCH] & 0xffff;
+			case blit_engine::context_surface::surface2d:
+				dst_dma = method_registers.blit_engine_output_location_nv3062();
+				dst_offset = method_registers.blit_engine_output_offset_nv3062();
+				dst_color_format = method_registers.blit_engine_nv3062_color_format();
+				out_pitch = method_registers.blit_engine_output_pitch_nv3062();
+				out_aligment = method_registers.blit_engine_output_alignment_nv3062();
 				break;
 
-			case CELL_GCM_CONTEXT_SWIZZLE2D:
-				dst_dma = method_registers[NV309E_SET_CONTEXT_DMA_IMAGE];
-				dst_offset = method_registers[NV309E_SET_OFFSET];
-				dst_color_format = method_registers[NV309E_SET_FORMAT];
+			case blit_engine::context_surface::swizzle2d:
+				dst_dma = method_registers.blit_engine_nv309E_location();
+				dst_offset = method_registers.blit_engine_nv309E_offset();
+				dst_color_format = method_registers.blit_engine_output_format_nv309E();
 				break;
 
 			default:
-				LOG_ERROR(RSX, "NV3089_IMAGE_IN_SIZE: unknown m_context_surface (0x%x)", method_registers[NV3089_SET_CONTEXT_SURFACE]);
+				LOG_ERROR(RSX, "NV3089_IMAGE_IN_SIZE: unknown m_context_surface (0x%x)", method_registers.blit_engine_context_surface());
 				return;
 			}
 
-			u32 in_bpp = src_color_format == CELL_GCM_TRANSFER_SCALE_FORMAT_R5G6B5 ? 2 : 4; // bytes per pixel
-			u32 out_bpp = dst_color_format == CELL_GCM_TRANSFER_SURFACE_FORMAT_R5G6B5 ? 2 : 4;
+			if (dst_dma == CELL_GCM_CONTEXT_DMA_MEMORY_FRAME_BUFFER)
+			{
+				//HACK: it's extension of the flip-hack. remove this when textures cache would be properly implemented
+				for (int i = 0; i < rsx::limits::color_buffers_count; ++i)
+				{
+					u32 begin = rsx->gcm_buffers[i].offset;
+
+					if (dst_offset < begin || !begin)
+					{
+						continue;
+					}
+
+					if (rsx->gcm_buffers[i].width < 720 || rsx->gcm_buffers[i].height < 480)
+					{
+						continue;
+					}
+
+					if (begin == dst_offset)
+					{
+						return;
+					}
+
+					u32 end = begin + rsx->gcm_buffers[i].height * rsx->gcm_buffers[i].pitch;
+
+					if (dst_offset < end)
+					{
+						return;
+					}
+				}
+			}
+
+			u32 in_bpp = (src_color_format == rsx::blit_engine::transfer_source_format::r5g6b5) ? 2 : 4; // bytes per pixel
+			u32 out_bpp = (dst_color_format == rsx::blit_engine::transfer_destination_format::r5g6b5) ? 2 : 4;
 
 			u32 in_offset = u32(in_x * in_bpp + in_pitch * in_y);
 			u32 out_offset = out_x * out_bpp + out_pitch * out_y;
@@ -426,14 +509,14 @@ namespace rsx
 			u8* pixels_src = src_region.tile ? src_region.ptr + src_region.base : src_region.ptr;
 			u8* pixels_dst = vm::ps3::_ptr<u8>(dst_address + out_offset);
 
-			if (dst_color_format != CELL_GCM_TRANSFER_SURFACE_FORMAT_R5G6B5 &&
-				dst_color_format != CELL_GCM_TRANSFER_SURFACE_FORMAT_A8R8G8B8)
+			if (dst_color_format != rsx::blit_engine::transfer_destination_format::r5g6b5 &&
+				dst_color_format != rsx::blit_engine::transfer_destination_format::a8r8g8b8)
 			{
 				LOG_ERROR(RSX, "NV3089_IMAGE_IN_SIZE: unknown dst_color_format (%d)", dst_color_format);
 			}
 
-			if (src_color_format != CELL_GCM_TRANSFER_SCALE_FORMAT_R5G6B5 &&
-				src_color_format != CELL_GCM_TRANSFER_SCALE_FORMAT_A8R8G8B8)
+			if (src_color_format != rsx::blit_engine::transfer_source_format::r5g6b5 &&
+				src_color_format != rsx::blit_engine::transfer_source_format::a8r8g8b8)
 			{
 				LOG_ERROR(RSX, "NV3089_IMAGE_IN_SIZE: unknown src_color_format (%d)", src_color_format);
 			}
@@ -442,20 +525,23 @@ namespace rsx
 			//	method_registers[NV3089_IMAGE_IN_SIZE], in_pitch, src_offset, double(1 << 20) / (method_registers[NV3089_DS_DX]), double(1 << 20) / (method_registers[NV3089_DT_DY]),
 			//	method_registers[NV3089_CLIP_SIZE], method_registers[NV3089_IMAGE_OUT_SIZE]);
 
-			std::unique_ptr<u8[]> temp1, temp2;
+			std::unique_ptr<u8[]> temp1, temp2, sw_temp;
 
-			AVPixelFormat in_format = src_color_format == CELL_GCM_TRANSFER_SCALE_FORMAT_R5G6B5 ? AV_PIX_FMT_RGB565BE : AV_PIX_FMT_ARGB;
-			AVPixelFormat out_format = dst_color_format == CELL_GCM_TRANSFER_SURFACE_FORMAT_R5G6B5 ? AV_PIX_FMT_RGB565BE : AV_PIX_FMT_ARGB;
+			AVPixelFormat in_format = (src_color_format == rsx::blit_engine::transfer_source_format::r5g6b5) ? AV_PIX_FMT_RGB565BE : AV_PIX_FMT_ARGB;
+			AVPixelFormat out_format = (dst_color_format == rsx::blit_engine::transfer_destination_format::r5g6b5) ? AV_PIX_FMT_RGB565BE : AV_PIX_FMT_ARGB;
 
-			f32 scale_x = 1048576.f / method_registers[NV3089_DS_DX];
-			f32 scale_y = 1048576.f / method_registers[NV3089_DT_DY];
+			f32 scale_x = 1048576.f / method_registers.blit_engine_ds_dx();
+			f32 scale_y = 1048576.f / method_registers.blit_engine_dt_dy();
 
 			u32 convert_w = (u32)(scale_x * in_w);
 			u32 convert_h = (u32)(scale_y * in_h);
 
 			bool need_clip =
-				method_registers[NV3089_CLIP_SIZE] != method_registers[NV3089_IMAGE_IN_SIZE] ||
-				method_registers[NV3089_CLIP_POINT] || convert_w != out_w || convert_h != out_h;
+				method_registers.blit_engine_clip_width() != method_registers.blit_engine_input_width() ||
+				method_registers.blit_engine_clip_height() != method_registers.blit_engine_input_height() ||
+				method_registers.blit_engine_clip_x() > 0 ||
+				method_registers.blit_engine_clip_y() > 0 ||
+				convert_w != out_w || convert_h != out_h;
 
 			bool need_convert = out_format != in_format || scale_x != 1.0 || scale_y != 1.0;
 
@@ -477,7 +563,7 @@ namespace rsx
 				}
 			}
 
-			if (method_registers[NV3089_SET_CONTEXT_SURFACE] != CELL_GCM_CONTEXT_SWIZZLE2D)
+			if (method_registers.blit_engine_context_surface() != blit_engine::context_surface::swizzle2d)
 			{
 				if (need_convert || need_clip)
 				{
@@ -486,7 +572,7 @@ namespace rsx
 						if (need_convert)
 						{
 							convert_scale_image(temp1, out_format, convert_w, convert_h, out_pitch,
-								pixels_src, in_format, in_w, in_h, in_pitch, slice_h, in_inter ? true : false);
+								pixels_src, in_format, in_w, in_h, in_pitch, slice_h, in_inter == blit_engine::transfer_interpolator::foh);
 
 							clip_image(pixels_dst + out_offset, temp1.get(), clip_x, clip_y, clip_w, clip_h, out_bpp, out_pitch, out_pitch);
 						}
@@ -498,7 +584,7 @@ namespace rsx
 					else
 					{
 						convert_scale_image(pixels_dst + out_offset, out_format, out_w, out_h, out_pitch,
-							pixels_src, in_format, in_w, in_h, in_pitch, slice_h, in_inter ? true : false);
+							pixels_src, in_format, in_w, in_h, in_pitch, slice_h, in_inter == blit_engine::transfer_interpolator::foh);
 					}
 				}
 				else
@@ -528,7 +614,7 @@ namespace rsx
 						if (need_convert)
 						{
 							convert_scale_image(temp1, out_format, convert_w, convert_h, out_pitch,
-								pixels_src, in_format, in_w, in_h, in_pitch, slice_h, in_inter ? true : false);
+								pixels_src, in_format, in_w, in_h, in_pitch, slice_h, in_inter == blit_engine::transfer_interpolator::foh);
 
 							clip_image(temp2, temp1.get(), clip_x, clip_y, clip_w, clip_h, out_bpp, out_pitch, out_pitch);
 						}
@@ -540,14 +626,14 @@ namespace rsx
 					else
 					{
 						convert_scale_image(temp2, out_format, out_w, out_h, out_pitch,
-							pixels_src, in_format, in_w, in_h, in_pitch, clip_h, in_inter ? true : false);
+							pixels_src, in_format, in_w, in_h, in_pitch, clip_h, in_inter == blit_engine::transfer_interpolator::foh);
 					}
 
 					pixels_src = temp2.get();
 				}
 
-				u8 sw_width_log2 = method_registers[NV309E_SET_FORMAT] >> 16;
-				u8 sw_height_log2 = method_registers[NV309E_SET_FORMAT] >> 24;
+				u8 sw_width_log2 = method_registers.nv309e_sw_width_log2();
+				u8 sw_height_log2 = method_registers.nv309e_sw_height_log2();
 
 				// 0 indicates height of 1 pixel
 				sw_height_log2 = sw_height_log2 == 0 ? 1 : sw_height_log2;
@@ -564,7 +650,7 @@ namespace rsx
 				// Check and pad texture out if we are given non square texture for swizzle to be correct
 				if (sw_width != out_w || sw_height != out_h)
 				{
-					std::unique_ptr<u8[]> sw_temp(new u8[out_bpp * sw_width * sw_height]);
+					sw_temp.reset(new u8[out_bpp * sw_width * sw_height]);
 
 					switch (out_bpp)
 					{
@@ -602,38 +688,61 @@ namespace rsx
 
 	namespace nv0039
 	{
-		force_inline void buffer_notify(u32 arg)
+		void buffer_notify(thread*, u32, u32 arg)
 		{
-			const u32 inPitch = method_registers[NV0039_PITCH_IN];
-			const u32 outPitch = method_registers[NV0039_PITCH_OUT];
-			const u32 lineLength = method_registers[NV0039_LINE_LENGTH_IN];
-			const u32 lineCount = method_registers[NV0039_LINE_COUNT];
-			const u8 outFormat = method_registers[NV0039_FORMAT] >> 8;
-			const u8 inFormat = method_registers[NV0039_FORMAT];
+			s32 in_pitch = method_registers.nv0039_input_pitch();
+			s32 out_pitch = method_registers.nv0039_output_pitch();
+			const u32 line_length = method_registers.nv0039_line_length();
+			const u32 line_count = method_registers.nv0039_line_count();
+			const u8 out_format = method_registers.nv0039_output_format();
+			const u8 in_format = method_registers.nv0039_input_format();
 			const u32 notify = arg;
 
 			// The existing GCM commands use only the value 0x1 for inFormat and outFormat
-			if (inFormat != 0x01 || outFormat != 0x01)
+			if (in_format != 0x01 || out_format != 0x01)
 			{
-				LOG_ERROR(RSX, "NV0039_OFFSET_IN: Unsupported format: inFormat=%d, outFormat=%d", inFormat, outFormat);
+				LOG_ERROR(RSX, "NV0039_OFFSET_IN: Unsupported format: inFormat=%d, outFormat=%d", in_format, out_format);
 			}
 
-			if (lineCount == 1 && !inPitch && !outPitch && !notify)
+			LOG_NOTICE(RSX, "NV0039_OFFSET_IN: pitch(in=0x%x, out=0x%x), line(len=0x%x, cnt=0x%x), fmt(in=0x%x, out=0x%x), notify=0x%x",
+				in_pitch, out_pitch, line_length, line_count, in_format, out_format, notify);
+
+			if (!in_pitch)
 			{
-				std::memcpy(
-					vm::base(get_address(method_registers[NV0039_OFFSET_OUT], method_registers[NV0039_SET_CONTEXT_DMA_BUFFER_OUT])),
-					vm::base(get_address(method_registers[NV0039_OFFSET_IN], method_registers[NV0039_SET_CONTEXT_DMA_BUFFER_IN])),
-					lineLength);
+				in_pitch = line_length;
+			}
+
+			if (!out_pitch)
+			{
+				out_pitch = line_length;
+			}
+
+			u32 src_offset = method_registers.nv0039_input_offset();
+			u32 src_dma = method_registers.nv0039_input_location();
+
+			u32 dst_offset = method_registers.nv0039_output_offset();
+			u32 dst_dma = method_registers.nv0039_output_location();
+
+			u8 *dst = (u8*)vm::base(get_address(dst_offset, dst_dma));
+			const u8 *src = (u8*)vm::base(get_address(src_offset, src_dma));
+
+			if (in_pitch == out_pitch && out_pitch == line_length)
+			{
+				std::memcpy(dst, src, line_length * line_count);
 			}
 			else
 			{
-				LOG_ERROR(RSX, "NV0039_OFFSET_IN: bad offset(in=0x%x, out=0x%x), pitch(in=0x%x, out=0x%x), line(len=0x%x, cnt=0x%x), fmt(in=0x%x, out=0x%x), notify=0x%x",
-					method_registers[NV0039_OFFSET_IN], method_registers[NV0039_OFFSET_OUT], inPitch, outPitch, lineLength, lineCount, inFormat, outFormat, notify);
+				for (u32 i = 0; i < line_count; ++i)
+				{
+					std::memcpy(dst, src, line_length);
+					dst += out_pitch;
+					src += in_pitch;
+				}
 			}
 		}
 	}
 
-	void flip_command(thread* rsx, u32 arg)
+	void flip_command(thread* rsx, u32, u32 arg)
 	{
 		if (user_asked_for_frame_capture)
 		{
@@ -644,9 +753,24 @@ namespace rsx
 		else if (rsx->capture_current_frame)
 		{
 			rsx->capture_current_frame = false;
+			std::stringstream os;
+			cereal::BinaryOutputArchive archive(os);
+			archive(frame_debug);
+			{
+				fs::file f(fs::get_config_dir() + "capture.txt", fs::rewrite);
+				f.write(os.str());
+			}
 			Emu.Pause();
 		}
 
+		if (double limit = g_cfg_rsx_frame_limit.get())
+		{
+			if (limit < 0) limit = rsx->fps_limit; // TODO
+
+			std::this_thread::sleep_for(std::chrono::milliseconds((s64)(1000.0 / limit - rsx->timer_sync.GetElapsedTimeInMilliSec())));
+			rsx->timer_sync.Start();
+		}
+		
 		rsx->gcm_current_buffer = arg;
 		rsx->flip(arg);
 		// After each flip PS3 system is executing a routine that changes registers value to some default.
@@ -659,215 +783,546 @@ namespace rsx
 
 		if (rsx->flip_handler)
 		{
-			Emu.GetCallbackManager().Async([func = rsx->flip_handler](PPUThread& ppu)
-			{
-				func(ppu, 1);
+			rsx->intr_thread->cmd_list
+			({
+				{ ppu_cmd::set_args, 1 }, u64{1},
+				{ ppu_cmd::lle_call, rsx->flip_handler },
 			});
+
+			rsx->intr_thread->lock_notify();
 		}
-
-		rsx->sem_flip.post_and_wait();
-
-		//sync
-		double limit;
-		switch (rpcs3::state.config.rsx.frame_limit.value())
-		{
-		case rsx_frame_limit::_50: limit = 50.; break;
-		case rsx_frame_limit::_59_94: limit = 59.94; break;
-		case rsx_frame_limit::_30: limit = 30.; break;
-		case rsx_frame_limit::_60: limit = 60.; break;
-		case rsx_frame_limit::Auto: limit = rsx->fps_limit; break; //TODO
-
-		case rsx_frame_limit::Off:
-		default:
-			return;
-		}
-
-		std::this_thread::sleep_for(std::chrono::milliseconds((s64)(1000.0 / limit - rsx->timer_sync.GetElapsedTimeInMilliSec())));
-		rsx->timer_sync.Start();
-		rsx->local_transform_constants.clear();
 	}
 
-	void user_command(thread* rsx, u32 arg)
+	void user_command(thread* rsx, u32, u32 arg)
 	{
 		if (rsx->user_handler)
 		{
-			Emu.GetCallbackManager().Async([func = rsx->user_handler, arg](PPUThread& ppu)
-			{
-				func(ppu, arg);
+			rsx->intr_thread->cmd_list
+			({
+				{ ppu_cmd::set_args, 1 }, u64{arg},
+				{ ppu_cmd::lle_call, rsx->user_handler },
 			});
-		}
-		else
-		{
-			throw EXCEPTION("User handler not set");
+
+			rsx->intr_thread->lock_notify();
 		}
 	}
 
-	struct __rsx_methods_t
+	void rsx_state::reset()
 	{
-		using rsx_impl_method_t = void(*)(u32);
+		//setup method registers
+		std::memset(registers.data(), 0, registers.size() * sizeof(u32));
 
-		template<rsx_method_t impl_func>
-		force_inline static void call_impl_func(thread *rsx, u32 arg)
-		{
-			impl_func(rsx, arg);
-		}
+		registers[NV4097_SET_COLOR_MASK] = CELL_GCM_COLOR_MASK_R | CELL_GCM_COLOR_MASK_G | CELL_GCM_COLOR_MASK_B | CELL_GCM_COLOR_MASK_A;
+		registers[NV4097_SET_SCISSOR_HORIZONTAL] = (4096 << 16) | 0;
+		registers[NV4097_SET_SCISSOR_VERTICAL] = (4096 << 16) | 0;
 
-		template<rsx_impl_method_t impl_func>
-		force_inline static void call_impl_func(thread *rsx, u32 arg)
-		{
-			impl_func(arg);
-		}
+		registers[NV4097_SET_ALPHA_FUNC] = CELL_GCM_ALWAYS;
+		registers[NV4097_SET_ALPHA_REF] = 0;
 
-		template<int id, typename T, T impl_func>
-		static void wrapper(thread *rsx, u32 arg)
-		{
-			// try process using gpu
-			if (rsx->do_method(id, arg))
-			{
-				if (rsx->capture_current_frame && id == NV4097_CLEAR_SURFACE)
-					rsx->capture_frame("clear");
-				return;
-			}
+		registers[NV4097_SET_BLEND_FUNC_SFACTOR] = (CELL_GCM_ONE << 16) | CELL_GCM_ONE;
+		registers[NV4097_SET_BLEND_FUNC_DFACTOR] = (CELL_GCM_ZERO << 16) | CELL_GCM_ZERO;
+		registers[NV4097_SET_BLEND_COLOR] = 0;
+		registers[NV4097_SET_BLEND_COLOR2] = 0;
+		registers[NV4097_SET_BLEND_EQUATION] = (0x8006 << 16) | 0x8006; // (add)
 
-			// not handled by renderer
-			// try process using cpu
-			if (impl_func != nullptr)
-				call_impl_func<impl_func>(rsx, arg);
-		}
+		registers[NV4097_SET_STENCIL_MASK] = 0xff;
+		registers[NV4097_SET_STENCIL_FUNC] = CELL_GCM_ALWAYS;
+		registers[NV4097_SET_STENCIL_FUNC_REF] = 0x00;
+		registers[NV4097_SET_STENCIL_FUNC_MASK] = 0xff;
+		//registers[NV4097_SET_STENCIL_OP_FAIL] = CELL_GCM_KEEP;
+		//registers[NV4097_SET_STENCIL_OP_ZFAIL] = CELL_GCM_KEEP;
+		//registers[NV4097_SET_STENCIL_OP_ZPASS] = CELL_GCM_KEEP;
 
-		template<int id, int step, int count, template<u32> class T, int index = 0>
+		registers[NV4097_SET_BACK_STENCIL_MASK] = 0xff;
+		registers[NV4097_SET_BACK_STENCIL_FUNC] = CELL_GCM_ALWAYS;
+		registers[NV4097_SET_BACK_STENCIL_FUNC_REF] = 0x00;
+		registers[NV4097_SET_BACK_STENCIL_FUNC_MASK] = 0xff;
+		//registers[NV4097_SET_BACK_STENCIL_OP_FAIL] = CELL_GCM_KEEP;
+		//registers[NV4097_SET_BACK_STENCIL_OP_ZFAIL] = CELL_GCM_KEEP;
+		//registers[NV4097_SET_BACK_STENCIL_OP_ZPASS] = CELL_GCM_KEEP;
+
+		//registers[NV4097_SET_SHADE_MODE] = CELL_GCM_SMOOTH;
+
+		//registers[NV4097_SET_LOGIC_OP] = CELL_GCM_COPY;
+
+		(f32&)registers[NV4097_SET_DEPTH_BOUNDS_MIN] = 0.f;
+		(f32&)registers[NV4097_SET_DEPTH_BOUNDS_MAX] = 1.f;
+
+		(f32&)registers[NV4097_SET_CLIP_MIN] = 0.f;
+		(f32&)registers[NV4097_SET_CLIP_MAX] = 1.f;
+
+		registers[NV4097_SET_LINE_WIDTH] = 1 << 3;
+
+		// These defaults were found using After Burner Climax (which never set fog mode despite using fog input)
+		registers[NV4097_SET_FOG_MODE] = 0x2601; // rsx::fog_mode::linear;
+		(f32&)registers[NV4097_SET_FOG_PARAMS] = 1.;
+		(f32&)registers[NV4097_SET_FOG_PARAMS + 1] = 1.;
+
+		registers[NV4097_SET_DEPTH_FUNC] = CELL_GCM_LESS;
+		registers[NV4097_SET_DEPTH_MASK] = CELL_GCM_TRUE;
+		(f32&)registers[NV4097_SET_POLYGON_OFFSET_SCALE_FACTOR] = 0.f;
+		(f32&)registers[NV4097_SET_POLYGON_OFFSET_BIAS] = 0.f;
+		//registers[NV4097_SET_FRONT_POLYGON_MODE] = CELL_GCM_POLYGON_MODE_FILL;
+		//registers[NV4097_SET_BACK_POLYGON_MODE] = CELL_GCM_POLYGON_MODE_FILL;
+		registers[NV4097_SET_CULL_FACE] = CELL_GCM_BACK;
+		registers[NV4097_SET_FRONT_FACE] = CELL_GCM_CCW;
+		registers[NV4097_SET_RESTART_INDEX] = -1;
+		registers[NV4097_SET_CONTEXT_DMA_REPORT] = CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_REPORT;
+
+
+		registers[NV4097_SET_CLEAR_RECT_HORIZONTAL] = (4096 << 16) | 0;
+		registers[NV4097_SET_CLEAR_RECT_VERTICAL] = (4096 << 16) | 0;
+
+		registers[NV4097_SET_ZSTENCIL_CLEAR_VALUE] = 0xffffffff;
+
+		for (auto& info : vertex_arrays_info) info.size = 0;
+		for (auto& tex : fragment_textures) tex.init();
+		for (auto& tex : vertex_textures) tex.init();
+	}
+
+	void rsx_state::decode(u32 reg, u32 value)
+	{
+		registers[reg] = value;
+	}
+
+	namespace method_detail
+	{
+		template<int Id, int Step, int Count, template<u32> class T, int Index = 0>
 		struct bind_range_impl_t
 		{
-			force_inline static void impl()
+			static inline void impl()
 			{
-				bind_range_impl_t<id + step, step, count, T, index + 1>::impl();
-				bind<id, T<index>::impl>();
+				methods[Id] = &T<Index>::impl;
+				bind_range_impl_t<Id + Step, Step, Count, T, Index + 1>::impl();
 			}
 		};
 
-		template<int id, int step, int count, template<u32> class T>
-		struct bind_range_impl_t<id, step, count, T, count>
+		template<int Id, int Step, int Count, template<u32> class T>
+		struct bind_range_impl_t<Id, Step, Count, T, Count>
 		{
-			force_inline static void impl()
+			static inline void impl()
 			{
 			}
 		};
 
-		template<int id, int step, int count, template<u32> class T, int index = 0>
-		force_inline static void bind_range()
+		template<int Id, int Step, int Count, template<u32> class T, int Index = 0>
+		static inline void bind_range()
 		{
-			bind_range_impl_t<id, step, count, T, index>::impl();
+			bind_range_impl_t<Id, Step, Count, T, Index>::impl();
 		}
 
-		[[noreturn]] never_inline static void bind_redefinition_error(int id)
+		template<int Id, rsx_method_t Func>
+		static void bind()
 		{
-			throw EXCEPTION("RSX method implementation redefinition (0x%04x)", id);
+			methods[Id] = Func;
 		}
 
-		template<int id, typename T, T impl_func>
-		static void bind_impl()
+		template<int Id, int Step, int Count, rsx_method_t Func>
+		static void bind_array()
 		{
-			if (methods[id])
+			for (int i = Id; i < Id + Count * Step; i += Step)
 			{
-				bind_redefinition_error(id);
+				methods[i] = Func;
 			}
-
-			methods[id] = wrapper<id, T, impl_func>;
 		}
+	}
 
-		template<int id, typename T, T impl_func>
-		static void bind_cpu_only_impl()
-		{
-			if (methods[id])
-			{
-				bind_redefinition_error(id);
-			}
+	// TODO: implement this as virtual function: rsx::thread::init_methods() or something
+	static const bool s_methods_init = []() -> bool
+	{
+		using namespace method_detail;
 
-			methods[id] = call_impl_func<impl_func>;
-		}
+		methods.fill(&invalid_method);
 
-		template<int id, rsx_impl_method_t impl_func>       static void bind() { bind_impl<id, rsx_impl_method_t, impl_func>(); }
-		template<int id, rsx_method_t impl_func = nullptr>  static void bind() { bind_impl<id, rsx_method_t, impl_func>(); }
+		// NV40_CHANNEL_DMA (NV406E)
+		methods[NV406E_SET_REFERENCE]                     = nullptr;
+		methods[NV406E_SET_CONTEXT_DMA_SEMAPHORE]         = nullptr;
+		methods[NV406E_SEMAPHORE_OFFSET]                  = nullptr;
+		methods[NV406E_SEMAPHORE_ACQUIRE]                 = nullptr;
+		methods[NV406E_SEMAPHORE_RELEASE]                 = nullptr;
 
-		//do not try process on gpu
-		template<int id, rsx_impl_method_t impl_func>      static void bind_cpu_only() { bind_cpu_only_impl<id, rsx_impl_method_t, impl_func>(); }
-		//do not try process on gpu
-		template<int id, rsx_method_t impl_func = nullptr> static void bind_cpu_only() { bind_cpu_only_impl<id, rsx_method_t, impl_func>(); }
+		// NV40_CURIE_PRIMITIVE	(NV4097)
+		methods[NV4097_SET_OBJECT]                        = nullptr;
+		methods[NV4097_NO_OPERATION]                      = nullptr;
+		methods[NV4097_NOTIFY]                            = nullptr;
+		methods[NV4097_WAIT_FOR_IDLE]                     = nullptr;
+		methods[NV4097_PM_TRIGGER]                        = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_NOTIFIES]          = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_A]                 = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_B]                 = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_COLOR_B]           = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_STATE]             = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_COLOR_A]           = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_ZETA]              = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_VERTEX_A]          = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_VERTEX_B]          = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_SEMAPHORE]         = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_REPORT]            = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_CLIP_ID]           = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_CULL_DATA]         = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_COLOR_C]           = nullptr;
+		methods[NV4097_SET_CONTEXT_DMA_COLOR_D]           = nullptr;
+		methods[NV4097_SET_SURFACE_CLIP_HORIZONTAL]       = nullptr;
+		methods[NV4097_SET_SURFACE_CLIP_VERTICAL]         = nullptr;
+		methods[NV4097_SET_SURFACE_FORMAT]                = nullptr;
+		methods[NV4097_SET_SURFACE_PITCH_A]               = nullptr;
+		methods[NV4097_SET_SURFACE_COLOR_AOFFSET]         = nullptr;
+		methods[NV4097_SET_SURFACE_ZETA_OFFSET]           = nullptr;
+		methods[NV4097_SET_SURFACE_COLOR_BOFFSET]         = nullptr;
+		methods[NV4097_SET_SURFACE_PITCH_B]               = nullptr;
+		methods[NV4097_SET_SURFACE_COLOR_TARGET]          = nullptr;
+		methods[NV4097_SET_SURFACE_PITCH_Z]               = nullptr;
+		methods[NV4097_INVALIDATE_ZCULL]                  = nullptr;
+		methods[NV4097_SET_CYLINDRICAL_WRAP]              = nullptr;
+		methods[NV4097_SET_CYLINDRICAL_WRAP1]             = nullptr;
+		methods[NV4097_SET_SURFACE_PITCH_C]               = nullptr;
+		methods[NV4097_SET_SURFACE_PITCH_D]               = nullptr;
+		methods[NV4097_SET_SURFACE_COLOR_COFFSET]         = nullptr;
+		methods[NV4097_SET_SURFACE_COLOR_DOFFSET]         = nullptr;
+		methods[NV4097_SET_WINDOW_OFFSET]                 = nullptr;
+		methods[NV4097_SET_WINDOW_CLIP_TYPE]              = nullptr;
+		methods[NV4097_SET_WINDOW_CLIP_HORIZONTAL]        = nullptr;
+		methods[NV4097_SET_WINDOW_CLIP_VERTICAL]          = nullptr;
+		methods[NV4097_SET_DITHER_ENABLE]                 = nullptr;
+		methods[NV4097_SET_ALPHA_TEST_ENABLE]             = nullptr;
+		methods[NV4097_SET_ALPHA_FUNC]                    = nullptr;
+		methods[NV4097_SET_ALPHA_REF]                     = nullptr;
+		methods[NV4097_SET_BLEND_ENABLE]                  = nullptr;
+		methods[NV4097_SET_BLEND_FUNC_SFACTOR]            = nullptr;
+		methods[NV4097_SET_BLEND_FUNC_DFACTOR]            = nullptr;
+		methods[NV4097_SET_BLEND_COLOR]                   = nullptr;
+		methods[NV4097_SET_BLEND_EQUATION]                = nullptr;
+		methods[NV4097_SET_COLOR_MASK]                    = nullptr;
+		methods[NV4097_SET_STENCIL_TEST_ENABLE]           = nullptr;
+		methods[NV4097_SET_STENCIL_MASK]                  = nullptr;
+		methods[NV4097_SET_STENCIL_FUNC]                  = nullptr;
+		methods[NV4097_SET_STENCIL_FUNC_REF]              = nullptr;
+		methods[NV4097_SET_STENCIL_FUNC_MASK]             = nullptr;
+		methods[NV4097_SET_STENCIL_OP_FAIL]               = nullptr;
+		methods[NV4097_SET_STENCIL_OP_ZFAIL]              = nullptr;
+		methods[NV4097_SET_STENCIL_OP_ZPASS]              = nullptr;
+		methods[NV4097_SET_TWO_SIDED_STENCIL_TEST_ENABLE] = nullptr;
+		methods[NV4097_SET_BACK_STENCIL_MASK]             = nullptr;
+		methods[NV4097_SET_BACK_STENCIL_FUNC]             = nullptr;
+		methods[NV4097_SET_BACK_STENCIL_FUNC_REF]         = nullptr;
+		methods[NV4097_SET_BACK_STENCIL_FUNC_MASK]        = nullptr;
+		methods[NV4097_SET_BACK_STENCIL_OP_FAIL]          = nullptr;
+		methods[NV4097_SET_BACK_STENCIL_OP_ZFAIL]         = nullptr;
+		methods[NV4097_SET_BACK_STENCIL_OP_ZPASS]         = nullptr;
+		methods[NV4097_SET_SHADE_MODE]                    = nullptr;
+		methods[NV4097_SET_BLEND_ENABLE_MRT]              = nullptr;
+		methods[NV4097_SET_COLOR_MASK_MRT]                = nullptr;
+		methods[NV4097_SET_LOGIC_OP_ENABLE]               = nullptr;
+		methods[NV4097_SET_LOGIC_OP]                      = nullptr;
+		methods[NV4097_SET_BLEND_COLOR2]                  = nullptr;
+		methods[NV4097_SET_DEPTH_BOUNDS_TEST_ENABLE]      = nullptr;
+		methods[NV4097_SET_DEPTH_BOUNDS_MIN]              = nullptr;
+		methods[NV4097_SET_DEPTH_BOUNDS_MAX]              = nullptr;
+		methods[NV4097_SET_CLIP_MIN]                      = nullptr;
+		methods[NV4097_SET_CLIP_MAX]                      = nullptr;
+		methods[NV4097_SET_CONTROL0]                      = nullptr;
+		methods[NV4097_SET_LINE_WIDTH]                    = nullptr;
+		methods[NV4097_SET_LINE_SMOOTH_ENABLE]            = nullptr;
+		methods[NV4097_SET_ANISO_SPREAD]                  = nullptr;
+		methods[NV4097_SET_SCISSOR_HORIZONTAL]            = nullptr;
+		methods[NV4097_SET_SCISSOR_VERTICAL]              = nullptr;
+		methods[NV4097_SET_FOG_MODE]                      = nullptr;
+		methods[NV4097_SET_FOG_PARAMS]                    = nullptr;
+		methods[NV4097_SET_FOG_PARAMS + 1]                = nullptr;
+		methods[NV4097_SET_SHADER_PROGRAM]                = nullptr;
+		methods[NV4097_SET_VERTEX_TEXTURE_OFFSET]         = nullptr;
+		methods[NV4097_SET_VERTEX_TEXTURE_FORMAT]         = nullptr;
+		methods[NV4097_SET_VERTEX_TEXTURE_ADDRESS]        = nullptr;
+		methods[NV4097_SET_VERTEX_TEXTURE_CONTROL0]       = nullptr;
+		methods[NV4097_SET_VERTEX_TEXTURE_CONTROL3]       = nullptr;
+		methods[NV4097_SET_VERTEX_TEXTURE_FILTER]         = nullptr;
+		methods[NV4097_SET_VERTEX_TEXTURE_IMAGE_RECT]     = nullptr;
+		methods[NV4097_SET_VERTEX_TEXTURE_BORDER_COLOR]   = nullptr;
+		methods[NV4097_SET_VIEWPORT_HORIZONTAL]           = nullptr;
+		methods[NV4097_SET_VIEWPORT_VERTICAL]             = nullptr;
+		methods[NV4097_SET_POINT_CENTER_MODE]             = nullptr;
+		methods[NV4097_ZCULL_SYNC]                        = nullptr;
+		methods[NV4097_SET_VIEWPORT_OFFSET]               = nullptr;
+		methods[NV4097_SET_VIEWPORT_OFFSET + 1]           = nullptr;
+		methods[NV4097_SET_VIEWPORT_OFFSET + 2]           = nullptr;
+		methods[NV4097_SET_VIEWPORT_OFFSET + 3]           = nullptr;
+		methods[NV4097_SET_VIEWPORT_SCALE]                = nullptr;
+		methods[NV4097_SET_VIEWPORT_SCALE + 1]            = nullptr;
+		methods[NV4097_SET_VIEWPORT_SCALE + 2]            = nullptr;
+		methods[NV4097_SET_VIEWPORT_SCALE + 3]            = nullptr;
+		methods[NV4097_SET_POLY_OFFSET_POINT_ENABLE]      = nullptr;
+		methods[NV4097_SET_POLY_OFFSET_LINE_ENABLE]       = nullptr;
+		methods[NV4097_SET_POLY_OFFSET_FILL_ENABLE]       = nullptr;
+		methods[NV4097_SET_DEPTH_FUNC]                    = nullptr;
+		methods[NV4097_SET_DEPTH_MASK]                    = nullptr;
+		methods[NV4097_SET_DEPTH_TEST_ENABLE]             = nullptr;
+		methods[NV4097_SET_POLYGON_OFFSET_SCALE_FACTOR]   = nullptr;
+		methods[NV4097_SET_POLYGON_OFFSET_BIAS]           = nullptr;
+		methods[NV4097_SET_VERTEX_DATA_SCALED4S_M]        = nullptr;
+		methods[NV4097_SET_TEXTURE_CONTROL2]              = nullptr;
+		methods[NV4097_SET_TEX_COORD_CONTROL]             = nullptr;
+		methods[NV4097_SET_TRANSFORM_PROGRAM]             = nullptr;
+		methods[NV4097_SET_SPECULAR_ENABLE]               = nullptr;
+		methods[NV4097_SET_TWO_SIDE_LIGHT_EN]             = nullptr;
+		methods[NV4097_CLEAR_ZCULL_SURFACE]               = nullptr;
+		methods[NV4097_SET_PERFORMANCE_PARAMS]            = nullptr;
+		methods[NV4097_SET_FLAT_SHADE_OP]                 = nullptr;
+		methods[NV4097_SET_EDGE_FLAG]                     = nullptr;
+		methods[NV4097_SET_USER_CLIP_PLANE_CONTROL]       = nullptr;
+		methods[NV4097_SET_POLYGON_STIPPLE]               = nullptr;
+		methods[NV4097_SET_POLYGON_STIPPLE_PATTERN]       = nullptr;
+		methods[NV4097_SET_VERTEX_DATA3F_M]               = nullptr;
+		methods[NV4097_SET_VERTEX_DATA_ARRAY_OFFSET]      = nullptr;
+		methods[NV4097_INVALIDATE_VERTEX_CACHE_FILE]      = nullptr;
+		methods[NV4097_INVALIDATE_VERTEX_FILE]            = nullptr;
+		methods[NV4097_PIPE_NOP]                          = nullptr;
+		methods[NV4097_SET_VERTEX_DATA_BASE_OFFSET]       = nullptr;
+		methods[NV4097_SET_VERTEX_DATA_BASE_INDEX]        = nullptr;
+		methods[NV4097_SET_VERTEX_DATA_ARRAY_FORMAT]      = nullptr;
+		methods[NV4097_CLEAR_REPORT_VALUE]                = nullptr;
+		methods[NV4097_SET_ZPASS_PIXEL_COUNT_ENABLE]      = nullptr;
+		methods[NV4097_GET_REPORT]                        = nullptr;
+		methods[NV4097_SET_ZCULL_STATS_ENABLE]            = nullptr;
+		methods[NV4097_SET_BEGIN_END]                     = nullptr;
+		methods[NV4097_ARRAY_ELEMENT16]                   = nullptr;
+		methods[NV4097_ARRAY_ELEMENT32]                   = nullptr;
+		methods[NV4097_DRAW_ARRAYS]                       = nullptr;
+		methods[NV4097_INLINE_ARRAY]                      = nullptr;
+		methods[NV4097_SET_INDEX_ARRAY_ADDRESS]           = nullptr;
+		methods[NV4097_SET_INDEX_ARRAY_DMA]               = nullptr;
+		methods[NV4097_DRAW_INDEX_ARRAY]                  = nullptr;
+		methods[NV4097_SET_FRONT_POLYGON_MODE]            = nullptr;
+		methods[NV4097_SET_BACK_POLYGON_MODE]             = nullptr;
+		methods[NV4097_SET_CULL_FACE]                     = nullptr;
+		methods[NV4097_SET_FRONT_FACE]                    = nullptr;
+		methods[NV4097_SET_POLY_SMOOTH_ENABLE]            = nullptr;
+		methods[NV4097_SET_CULL_FACE_ENABLE]              = nullptr;
+		methods[NV4097_SET_TEXTURE_CONTROL3]              = nullptr;
+		methods[NV4097_SET_VERTEX_DATA2F_M]               = nullptr;
+		methods[NV4097_SET_VERTEX_DATA2S_M]               = nullptr;
+		methods[NV4097_SET_VERTEX_DATA4UB_M]              = nullptr;
+		methods[NV4097_SET_VERTEX_DATA4S_M]               = nullptr;
+		methods[NV4097_SET_TEXTURE_OFFSET]                = nullptr;
+		methods[NV4097_SET_TEXTURE_FORMAT]                = nullptr;
+		methods[NV4097_SET_TEXTURE_ADDRESS]               = nullptr;
+		methods[NV4097_SET_TEXTURE_CONTROL0]              = nullptr;
+		methods[NV4097_SET_TEXTURE_CONTROL1]              = nullptr;
+		methods[NV4097_SET_TEXTURE_FILTER]                = nullptr;
+		methods[NV4097_SET_TEXTURE_IMAGE_RECT]            = nullptr;
+		methods[NV4097_SET_TEXTURE_BORDER_COLOR]          = nullptr;
+		methods[NV4097_SET_VERTEX_DATA4F_M]               = nullptr;
+		methods[NV4097_SET_COLOR_KEY_COLOR]               = nullptr;
+		methods[NV4097_SET_SHADER_CONTROL]                = nullptr;
+		methods[NV4097_SET_INDEXED_CONSTANT_READ_LIMITS]  = nullptr;
+		methods[NV4097_SET_SEMAPHORE_OFFSET]              = nullptr;
+		methods[NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE]  = nullptr;
+		methods[NV4097_TEXTURE_READ_SEMAPHORE_RELEASE]    = nullptr;
+		methods[NV4097_SET_ZMIN_MAX_CONTROL]              = nullptr;
+		methods[NV4097_SET_ANTI_ALIASING_CONTROL]         = nullptr;
+		methods[NV4097_SET_SURFACE_COMPRESSION]           = nullptr;
+		methods[NV4097_SET_ZCULL_EN]                      = nullptr;
+		methods[NV4097_SET_SHADER_WINDOW]                 = nullptr;
+		methods[NV4097_SET_ZSTENCIL_CLEAR_VALUE]          = nullptr;
+		methods[NV4097_SET_COLOR_CLEAR_VALUE]             = nullptr;
+		methods[NV4097_CLEAR_SURFACE]                     = nullptr;
+		methods[NV4097_SET_CLEAR_RECT_HORIZONTAL]         = nullptr;
+		methods[NV4097_SET_CLEAR_RECT_VERTICAL]           = nullptr;
+		methods[NV4097_SET_CLIP_ID_TEST_ENABLE]           = nullptr;
+		methods[NV4097_SET_RESTART_INDEX_ENABLE]          = nullptr;
+		methods[NV4097_SET_RESTART_INDEX]                 = nullptr;
+		methods[NV4097_SET_LINE_STIPPLE]                  = nullptr;
+		methods[NV4097_SET_LINE_STIPPLE_PATTERN]          = nullptr;
+		methods[NV4097_SET_VERTEX_DATA1F_M]               = nullptr;
+		methods[NV4097_SET_TRANSFORM_EXECUTION_MODE]      = nullptr;
+		methods[NV4097_SET_RENDER_ENABLE]                 = nullptr;
+		methods[NV4097_SET_TRANSFORM_PROGRAM_LOAD]        = nullptr;
+		methods[NV4097_SET_TRANSFORM_PROGRAM_START]       = nullptr;
+		methods[NV4097_SET_ZCULL_CONTROL0]                = nullptr;
+		methods[NV4097_SET_ZCULL_CONTROL1]                = nullptr;
+		methods[NV4097_SET_SCULL_CONTROL]                 = nullptr;
+		methods[NV4097_SET_POINT_SIZE]                    = nullptr;
+		methods[NV4097_SET_POINT_PARAMS_ENABLE]           = nullptr;
+		methods[NV4097_SET_POINT_SPRITE_CONTROL]          = nullptr;
+		methods[NV4097_SET_TRANSFORM_TIMEOUT]             = nullptr;
+		methods[NV4097_SET_TRANSFORM_CONSTANT_LOAD]       = nullptr;
+		methods[NV4097_SET_TRANSFORM_CONSTANT]            = nullptr;
+		methods[NV4097_SET_FREQUENCY_DIVIDER_OPERATION]   = nullptr;
+		methods[NV4097_SET_ATTRIB_COLOR]                  = nullptr;
+		methods[NV4097_SET_ATTRIB_TEX_COORD]              = nullptr;
+		methods[NV4097_SET_ATTRIB_TEX_COORD_EX]           = nullptr;
+		methods[NV4097_SET_ATTRIB_UCLIP0]                 = nullptr;
+		methods[NV4097_SET_ATTRIB_UCLIP1]                 = nullptr;
+		methods[NV4097_INVALIDATE_L2]                     = nullptr;
+		methods[NV4097_SET_REDUCE_DST_COLOR]              = nullptr;
+		methods[NV4097_SET_NO_PARANOID_TEXTURE_FETCHES]   = nullptr;
+		methods[NV4097_SET_SHADER_PACKER]                 = nullptr;
+		methods[NV4097_SET_VERTEX_ATTRIB_INPUT_MASK]      = nullptr;
+		methods[NV4097_SET_VERTEX_ATTRIB_OUTPUT_MASK]     = nullptr;
+		methods[NV4097_SET_TRANSFORM_BRANCH_BITS]         = nullptr;
 
-		__rsx_methods_t()
-		{
-			// NV406E
-			bind_cpu_only<NV406E_SET_REFERENCE, nv406e::set_reference>();
-			bind<NV406E_SEMAPHORE_ACQUIRE, nv406e::semaphore_acquire>();
-			bind<NV406E_SEMAPHORE_RELEASE, nv406e::semaphore_release>();
+		// NV03_MEMORY_TO_MEMORY_FORMAT	(NV0039)
+		methods[NV0039_SET_OBJECT]                        = nullptr;
+		methods[NV0039_SET_CONTEXT_DMA_NOTIFIES]          = nullptr;
+		methods[NV0039_SET_CONTEXT_DMA_BUFFER_IN]         = nullptr;
+		methods[NV0039_SET_CONTEXT_DMA_BUFFER_OUT]        = nullptr;
+		methods[NV0039_OFFSET_IN]                         = nullptr;
+		methods[NV0039_OFFSET_OUT]                        = nullptr;
+		methods[NV0039_PITCH_IN]                          = nullptr;
+		methods[NV0039_PITCH_OUT]                         = nullptr;
+		methods[NV0039_LINE_LENGTH_IN]                    = nullptr;
+		methods[NV0039_LINE_COUNT]                        = nullptr;
+		methods[NV0039_FORMAT]                            = nullptr;
+		methods[NV0039_BUFFER_NOTIFY]                     = nullptr;
 
-			/*
+		// NV30_CONTEXT_SURFACES_2D	(NV3062)
+		methods[NV3062_SET_OBJECT]                        = nullptr;
+		methods[NV3062_SET_CONTEXT_DMA_NOTIFIES]          = nullptr;
+		methods[NV3062_SET_CONTEXT_DMA_IMAGE_SOURCE]      = nullptr;
+		methods[NV3062_SET_CONTEXT_DMA_IMAGE_DESTIN]      = nullptr;
+		methods[NV3062_SET_COLOR_FORMAT]                  = nullptr;
+		methods[NV3062_SET_PITCH]                         = nullptr;
+		methods[NV3062_SET_OFFSET_SOURCE]                 = nullptr;
+		methods[NV3062_SET_OFFSET_DESTIN]                 = nullptr;
 
-			// Store previous fbo addresses to detect RTT config changes.
-			std::array<u32, 4> m_previous_color_address = {};
-			u32 m_previous_address_z = 0;
-			u32 m_previous_target = 0;
-			u32 m_previous_clip_horizontal = 0;
-			u32 m_previous_clip_vertical = 0;
-			*/
+		// NV30_CONTEXT_SURFACE_SWIZZLED (NV309E)
+		methods[NV309E_SET_OBJECT]                        = nullptr;
+		methods[NV309E_SET_CONTEXT_DMA_NOTIFIES]          = nullptr;
+		methods[NV309E_SET_CONTEXT_DMA_IMAGE]             = nullptr;
+		methods[NV309E_SET_FORMAT]                        = nullptr;
+		methods[NV309E_SET_OFFSET]                        = nullptr;
 
-			// NV4097
-			bind<NV4097_TEXTURE_READ_SEMAPHORE_RELEASE, nv4097::texture_read_semaphore_release>();
-			bind<NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE, nv4097::back_end_write_semaphore_release>();
-			bind<NV4097_SET_BEGIN_END, nv4097::set_begin_end>();
-			bind<NV4097_CLEAR_SURFACE>();
-			bind<NV4097_DRAW_ARRAYS, nv4097::draw_arrays>();
-			bind<NV4097_DRAW_INDEX_ARRAY, nv4097::draw_index_array>();
-			bind<NV4097_INLINE_ARRAY, nv4097::draw_inline_array>();
-			bind_range<NV4097_SET_VERTEX_DATA_ARRAY_FORMAT, 1, 16, nv4097::set_vertex_data_array_format>();
-			bind_range<NV4097_SET_VERTEX_DATA4UB_M, 1, 16, nv4097::set_vertex_data4ub_m>();
-			bind_range<NV4097_SET_VERTEX_DATA1F_M, 1, 16, nv4097::set_vertex_data1f_m>();
-			bind_range<NV4097_SET_VERTEX_DATA2F_M + 1, 2, 16, nv4097::set_vertex_data2f_m>();
-			bind_range<NV4097_SET_VERTEX_DATA3F_M + 2, 3, 16, nv4097::set_vertex_data3f_m>();
-			bind_range<NV4097_SET_VERTEX_DATA4F_M + 3, 4, 16, nv4097::set_vertex_data4f_m>();
-			bind_range<NV4097_SET_VERTEX_DATA2S_M, 1, 16, nv4097::set_vertex_data2s_m>();
-			bind_range<NV4097_SET_VERTEX_DATA4S_M + 1, 2, 16, nv4097::set_vertex_data4s_m>();
-			bind_range<NV4097_SET_TRANSFORM_CONSTANT, 1, 32, nv4097::set_transform_constant>();
-			bind_range<NV4097_SET_TRANSFORM_PROGRAM + 3, 4, 128, nv4097::set_transform_program>();
-			bind_cpu_only<NV4097_GET_REPORT, nv4097::get_report>();
-			bind_cpu_only<NV4097_CLEAR_REPORT_VALUE, nv4097::clear_report_value>();
-			bind<NV4097_SET_SURFACE_CLIP_HORIZONTAL, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_SURFACE_CLIP_VERTICAL, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_SURFACE_COLOR_AOFFSET, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_SURFACE_COLOR_BOFFSET, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_SURFACE_COLOR_COFFSET, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_SURFACE_COLOR_DOFFSET, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_SURFACE_ZETA_OFFSET, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_CONTEXT_DMA_COLOR_A, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_CONTEXT_DMA_COLOR_B, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_CONTEXT_DMA_COLOR_C, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_CONTEXT_DMA_COLOR_D, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_CONTEXT_DMA_ZETA, nv4097::set_surface_dirty_bit>();
-			bind<NV4097_SET_SURFACE_FORMAT, nv4097::set_surface_dirty_bit>();
-			bind_range<NV4097_SET_TEXTURE_OFFSET, 8, 16, nv4097::set_texture_dirty_bit>();
-			bind_range<NV4097_SET_TEXTURE_FORMAT, 8, 16, nv4097::set_texture_dirty_bit>();
-			bind_range<NV4097_SET_TEXTURE_ADDRESS, 8, 16, nv4097::set_texture_dirty_bit>();
-			bind_range<NV4097_SET_TEXTURE_CONTROL0, 8, 16, nv4097::set_texture_dirty_bit>();
-			bind_range<NV4097_SET_TEXTURE_CONTROL1, 8, 16, nv4097::set_texture_dirty_bit>();
-			bind_range<NV4097_SET_TEXTURE_CONTROL2, 8, 16, nv4097::set_texture_dirty_bit>();
-			bind_range<NV4097_SET_TEXTURE_CONTROL3, 1, 16, nv4097::set_texture_dirty_bit>();
-			bind_range<NV4097_SET_TEXTURE_FILTER, 8, 16, nv4097::set_texture_dirty_bit>();
-			bind_range<NV4097_SET_TEXTURE_IMAGE_RECT, 8, 16, nv4097::set_texture_dirty_bit>();
-			bind_range<NV4097_SET_TEXTURE_BORDER_COLOR, 8, 16, nv4097::set_texture_dirty_bit>();
+		// NV30_IMAGE_FROM_CPU (NV308A)
+		methods[NV308A_SET_OBJECT]                        = nullptr;
+		methods[NV308A_SET_CONTEXT_DMA_NOTIFIES]          = nullptr;
+		methods[NV308A_SET_CONTEXT_COLOR_KEY]             = nullptr;
+		methods[NV308A_SET_CONTEXT_CLIP_RECTANGLE]        = nullptr;
+		methods[NV308A_SET_CONTEXT_PATTERN]               = nullptr;
+		methods[NV308A_SET_CONTEXT_ROP]                   = nullptr;
+		methods[NV308A_SET_CONTEXT_BETA1]                 = nullptr;
+		methods[NV308A_SET_CONTEXT_BETA4]                 = nullptr;
+		methods[NV308A_SET_CONTEXT_SURFACE]               = nullptr;
+		methods[NV308A_SET_COLOR_CONVERSION]              = nullptr;
+		methods[NV308A_SET_OPERATION]                     = nullptr;
+		methods[NV308A_SET_COLOR_FORMAT]                  = nullptr;
+		methods[NV308A_POINT]                             = nullptr;
+		methods[NV308A_SIZE_OUT]                          = nullptr;
+		methods[NV308A_SIZE_IN]                           = nullptr;
+		methods[NV308A_COLOR]                             = nullptr;
 
-			//NV308A
-			bind_range<NV308A_COLOR, 1, 256, nv308a::color>();
-			bind_range<NV308A_COLOR + 256, 1, 512, nv308a::color, 256>();
+		// NV30_SCALED_IMAGE_FROM_MEMORY (NV3089)
+		methods[NV3089_SET_OBJECT]                        = nullptr;
+		methods[NV3089_SET_CONTEXT_DMA_NOTIFIES]          = nullptr;
+		methods[NV3089_SET_CONTEXT_DMA_IMAGE]             = nullptr;
+		methods[NV3089_SET_CONTEXT_PATTERN]               = nullptr;
+		methods[NV3089_SET_CONTEXT_ROP]                   = nullptr;
+		methods[NV3089_SET_CONTEXT_BETA1]                 = nullptr;
+		methods[NV3089_SET_CONTEXT_BETA4]                 = nullptr;
+		methods[NV3089_SET_CONTEXT_SURFACE]               = nullptr;
+		methods[NV3089_SET_COLOR_CONVERSION]              = nullptr;
+		methods[NV3089_SET_COLOR_FORMAT]                  = nullptr;
+		methods[NV3089_SET_OPERATION]                     = nullptr;
+		methods[NV3089_CLIP_POINT]                        = nullptr;
+		methods[NV3089_CLIP_SIZE]                         = nullptr;
+		methods[NV3089_IMAGE_OUT_POINT]                   = nullptr;
+		methods[NV3089_IMAGE_OUT_SIZE]                    = nullptr;
+		methods[NV3089_DS_DX]                             = nullptr;
+		methods[NV3089_DT_DY]                             = nullptr;
+		methods[NV3089_IMAGE_IN_SIZE]                     = nullptr;
+		methods[NV3089_IMAGE_IN_FORMAT]                   = nullptr;
+		methods[NV3089_IMAGE_IN_OFFSET]                   = nullptr;
+		methods[NV3089_IMAGE_IN]                          = nullptr;
 
-			//NV3089
-			bind<NV3089_IMAGE_IN, nv3089::image_in>();
+		bind_array<NV4097_SET_ANISO_SPREAD, 1, 16, nullptr>();
+		bind_array<NV4097_SET_VERTEX_TEXTURE_OFFSET, 1, 8 * 4, nullptr>();
+		bind_array<NV4097_SET_VERTEX_DATA_SCALED4S_M, 1, 32, nullptr>();
+		bind_array<NV4097_SET_TEXTURE_CONTROL2, 1, 16, nullptr>();
+		bind_array<NV4097_SET_TEX_COORD_CONTROL, 1, 10, nullptr>();
+		bind_array<NV4097_SET_TRANSFORM_PROGRAM, 1, 32, nullptr>();
+		bind_array<NV4097_SET_VERTEX_DATA3F_M, 1, 48, nullptr>();
+		bind_array<NV4097_SET_VERTEX_DATA_ARRAY_OFFSET, 1, 16, nullptr>();
+		bind_array<NV4097_SET_VERTEX_DATA_ARRAY_FORMAT, 1, 16, nullptr>();
+		bind_array<NV4097_SET_TEXTURE_CONTROL3, 1, 16, nullptr>();
+		bind_array<NV4097_SET_VERTEX_DATA2F_M, 1, 32, nullptr>();
+		bind_array<NV4097_SET_VERTEX_DATA2S_M, 1, 16, nullptr>();
+		bind_array<NV4097_SET_VERTEX_DATA4UB_M, 1, 16, nullptr>();
+		bind_array<NV4097_SET_VERTEX_DATA4S_M, 1, 32, nullptr>();
+		bind_array<NV4097_SET_TEXTURE_OFFSET, 1, 8 * 16, nullptr>();
+		bind_array<NV4097_SET_VERTEX_DATA4F_M, 1, 64, nullptr>();
+		bind_array<NV4097_SET_VERTEX_DATA1F_M, 1, 16, nullptr>();
 
-			//NV0039
-			bind<NV0039_BUFFER_NOTIFY, nv0039::buffer_notify>();
+		// NV406E
+		bind<NV406E_SET_REFERENCE, nv406e::set_reference>();
+		bind<NV406E_SEMAPHORE_ACQUIRE, nv406e::semaphore_acquire>();
+		bind<NV406E_SEMAPHORE_RELEASE, nv406e::semaphore_release>();
 
-			// custom methods
-			bind_cpu_only<GCM_FLIP_COMMAND, flip_command>();
-			bind_cpu_only<GCM_SET_USER_COMMAND, user_command>();
-		}
-	} __rsx_methods;
+		/*
+
+		// Store previous fbo addresses to detect RTT config changes.
+		std::array<u32, 4> m_previous_color_address = {};
+		u32 m_previous_address_z = 0;
+		u32 m_previous_target = 0;
+		u32 m_previous_clip_horizontal = 0;
+		u32 m_previous_clip_vertical = 0;
+		*/
+
+		// NV4097
+		bind<NV4097_TEXTURE_READ_SEMAPHORE_RELEASE, nv4097::texture_read_semaphore_release>();
+		bind<NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE, nv4097::back_end_write_semaphore_release>();
+		bind<NV4097_SET_BEGIN_END, nv4097::set_begin_end>();
+		bind<NV4097_CLEAR_SURFACE, nv4097::clear>();
+		bind<NV4097_DRAW_ARRAYS, nv4097::draw_arrays>();
+		bind<NV4097_DRAW_INDEX_ARRAY, nv4097::draw_index_array>();
+		bind<NV4097_INLINE_ARRAY, nv4097::draw_inline_array>();
+		bind_range<NV4097_SET_VERTEX_DATA_ARRAY_FORMAT, 1, 16, nv4097::set_vertex_data_array_format>();
+		bind_range<NV4097_SET_VERTEX_DATA4UB_M, 1, 16, nv4097::set_vertex_data4ub_m>();
+		bind_range<NV4097_SET_VERTEX_DATA1F_M, 1, 16, nv4097::set_vertex_data1f_m>();
+		bind_range<NV4097_SET_VERTEX_DATA2F_M, 1, 32, nv4097::set_vertex_data2f_m>();
+		bind_range<NV4097_SET_VERTEX_DATA3F_M, 1, 48, nv4097::set_vertex_data3f_m>();
+		bind_range<NV4097_SET_VERTEX_DATA4F_M, 1, 64, nv4097::set_vertex_data4f_m>();
+		bind_range<NV4097_SET_VERTEX_DATA2S_M, 1, 16, nv4097::set_vertex_data2s_m>();
+		bind_range<NV4097_SET_VERTEX_DATA4S_M, 1, 32, nv4097::set_vertex_data4s_m>();
+		bind_range<NV4097_SET_TRANSFORM_CONSTANT, 1, 32, nv4097::set_transform_constant>();
+		bind_range<NV4097_SET_TRANSFORM_PROGRAM + 3, 4, 128, nv4097::set_transform_program>();
+		bind<NV4097_GET_REPORT, nv4097::get_report>();
+		bind<NV4097_CLEAR_REPORT_VALUE, nv4097::clear_report_value>();
+		bind<NV4097_SET_SURFACE_CLIP_HORIZONTAL, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_SURFACE_CLIP_VERTICAL, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_SURFACE_COLOR_AOFFSET, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_SURFACE_COLOR_BOFFSET, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_SURFACE_COLOR_COFFSET, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_SURFACE_COLOR_DOFFSET, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_SURFACE_ZETA_OFFSET, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_CONTEXT_DMA_COLOR_A, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_CONTEXT_DMA_COLOR_B, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_CONTEXT_DMA_COLOR_C, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_CONTEXT_DMA_COLOR_D, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_CONTEXT_DMA_ZETA, nv4097::set_surface_dirty_bit>();
+		bind<NV4097_SET_SURFACE_FORMAT, nv4097::set_surface_dirty_bit>();
+		bind_range<NV4097_SET_TEXTURE_OFFSET, 8, 16, nv4097::set_texture_dirty_bit>();
+		bind_range<NV4097_SET_TEXTURE_FORMAT, 8, 16, nv4097::set_texture_dirty_bit>();
+		bind_range<NV4097_SET_TEXTURE_ADDRESS, 8, 16, nv4097::set_texture_dirty_bit>();
+		bind_range<NV4097_SET_TEXTURE_CONTROL0, 8, 16, nv4097::set_texture_dirty_bit>();
+		bind_range<NV4097_SET_TEXTURE_CONTROL1, 8, 16, nv4097::set_texture_dirty_bit>();
+		bind_range<NV4097_SET_TEXTURE_CONTROL2, 8, 16, nv4097::set_texture_dirty_bit>();
+		bind_range<NV4097_SET_TEXTURE_CONTROL3, 1, 16, nv4097::set_texture_dirty_bit>();
+		bind_range<NV4097_SET_TEXTURE_FILTER, 8, 16, nv4097::set_texture_dirty_bit>();
+		bind_range<NV4097_SET_TEXTURE_IMAGE_RECT, 8, 16, nv4097::set_texture_dirty_bit>();
+		bind_range<NV4097_SET_TEXTURE_BORDER_COLOR, 8, 16, nv4097::set_texture_dirty_bit>();
+
+		//NV308A
+		bind_range<NV308A_COLOR, 1, 256, nv308a::color>();
+		bind_range<NV308A_COLOR + 256, 1, 512, nv308a::color, 256>();
+
+		//NV3089
+		bind<NV3089_IMAGE_IN, nv3089::image_in>();
+
+		//NV0039
+		bind<NV0039_BUFFER_NOTIFY, nv0039::buffer_notify>();
+
+		// custom methods
+		bind<GCM_FLIP_COMMAND, flip_command>();
+		bind<GCM_SET_USER_COMMAND, user_command>();
+
+		return true;	
+	}();
 }

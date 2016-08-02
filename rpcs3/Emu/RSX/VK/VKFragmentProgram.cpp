@@ -37,6 +37,8 @@ void VKFragmentDecompilerThread::insertHeader(std::stringstream & OS)
 	OS << "	mat4 scaleOffsetMat;" << std::endl;
 	OS << "	float fog_param0;" << std::endl;
 	OS << "	float fog_param1;" << std::endl;
+	OS << "	uint alpha_test;" << std::endl;
+	OS << "	float alpha_ref;" << std::endl;
 	OS << "};" << std::endl << std::endl;
 
 	vk::glsl::program_input in;
@@ -54,13 +56,40 @@ void VKFragmentDecompilerThread::insertIntputs(std::stringstream & OS)
 	{
 		for (const ParamItem& PI : PT.items)
 		{
+			//ssa is defined in the program body and is not a varying type
+			if (PI.name == "ssa") continue;
+
 			const vk::varying_register_t &reg = vk::get_varying_register(PI.name);
-			
 			std::string var_name = PI.name;
+
+			if (m_prog.front_back_color_enabled)
+			{
+				if (m_prog.back_color_diffuse_output && var_name == "diff_color")
+					var_name = "back_diff_color";
+
+				if (m_prog.back_color_specular_output && var_name == "spec_color")
+					var_name = "back_spec_color";
+			}
+
 			if (var_name == "fogc")
 				var_name = "fog_c";
 
 			OS << "layout(location=" << reg.reg_location << ") in " << PT.type << " " << var_name << ";" << std::endl;
+		}
+	}
+
+	if (m_prog.front_back_color_enabled)
+	{
+		if (m_prog.front_color_diffuse_output)
+		{
+			const vk::varying_register_t &reg = vk::get_varying_register("front_diff_color");
+			OS << "layout(location=" << reg.reg_location << ") in vec4 front_diff_color;" << std::endl;
+		}
+
+		if (m_prog.front_color_specular_output)
+		{
+			const vk::varying_register_t &reg = vk::get_varying_register("front_spec_color");
+			OS << "layout(location=" << reg.reg_location << ") in vec4 front_spec_color;" << std::endl;
 		}
 	}
 }
@@ -197,10 +226,51 @@ void VKFragmentDecompilerThread::insertMainStart(std::stringstream & OS)
 	{
 		for (const ParamItem& PI : PT.items)
 		{
+			if (m_prog.front_back_color_enabled)
+			{
+				if (PI.name == "spec_color")
+				{
+					if (m_prog.back_color_specular_output || m_prog.front_color_specular_output)
+					{
+						if (m_prog.back_color_specular_output && m_prog.front_color_specular_output)
+						{
+							OS << "	vec4 spec_color = gl_FrontFacing ? front_spec_color : back_spec_color;\n";
+						}
+						else if (m_prog.back_color_specular_output)
+						{
+							OS << "	vec4 spec_color = back_spec_color;\n";
+						}
+						else
+							OS << "	vec4 spec_color = front_spec_color;\n";
+					}
+
+					continue;
+				}
+
+				else if (PI.name == "diff_color")
+				{
+					if (m_prog.back_color_diffuse_output || m_prog.front_color_diffuse_output)
+					{
+						if (m_prog.back_color_diffuse_output && m_prog.front_color_diffuse_output)
+						{
+							OS << "	vec4 diff_color = gl_FrontFacing ? front_diff_color : back_diff_color;\n";
+						}
+						else if (m_prog.back_color_diffuse_output)
+						{
+							OS << "	vec4 diff_color = back_diff_color;\n";
+						}
+						else
+							OS << "	vec4 diff_color = front_diff_color;\n";
+					}
+
+					continue;
+				}
+			}
+
 			if (PI.name == "fogc")
 			{
 				vk::insert_fog_declaration(OS, m_prog.fog_equation);
-				return;
+				continue;
 			}
 		}
 	}
@@ -216,10 +286,14 @@ void VKFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 		{ "ocol3", m_ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS ? "r4" : "h8" },
 	};
 
+	std::string first_output_name;
 	for (int i = 0; i < sizeof(table) / sizeof(*table); ++i)
 	{
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", table[i].second))
+		{
 			OS << "	" << table[i].first << " = " << table[i].second << ";" << std::endl;
+			if (first_output_name.empty()) first_output_name = table[i].first;
+		}
 	}
 
 	if (m_ctrl & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT)
@@ -234,6 +308,30 @@ void VKFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 		}
 	}
 
+	if (!first_output_name.empty())
+	{
+		switch (m_prog.alpha_func)
+		{
+		case rsx::comparison_function::equal:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a != alpha_ref) discard;\n";
+			break;
+		case rsx::comparison_function::not_equal:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a == alpha_ref) discard;\n";
+			break;
+		case rsx::comparison_function::less_or_equal:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a > alpha_ref) discard;\n";
+			break;
+		case rsx::comparison_function::less:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a >= alpha_ref) discard;\n";
+			break;
+		case rsx::comparison_function::greater:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a <= alpha_ref) discard;\n";
+			break;
+		case rsx::comparison_function::greater_or_equal:
+			OS << "	if (bool(alpha_test) && " << first_output_name << ".a < alpha_ref) discard;\n";
+			break;
+		}
+	}
 
 	OS << "}" << std::endl;
 }
@@ -273,7 +371,8 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 
 void VKFragmentProgram::Compile()
 {
-	fs::file(fs::get_config_dir() + "FragmentProgram.frag", fom::rewrite).write(shader);
+	fs::create_path(fs::get_config_dir() + "/shaderlog");
+	fs::file(fs::get_config_dir() + "shaderlog/FragmentProgram.spirv", fs::rewrite).write(shader);
 
 	std::vector<u32> spir_v;
 	if (!vk::compile_glsl_to_spv(shader, vk::glsl::glsl_fragment_program, spir_v))

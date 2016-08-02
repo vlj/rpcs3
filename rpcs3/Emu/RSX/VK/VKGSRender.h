@@ -21,10 +21,7 @@ private:
 	vk::glsl::program *m_program;
 	vk::context m_thread_context;
 
-	rsx::surface_info m_surface;
-
-	vk::data_heap m_attrib_ring_info;
-	std::unique_ptr<vk::buffer> m_attrib_buffers;
+	vk::vk_data_heap m_attrib_ring_info;
 	
 	vk::texture_cache m_texture_cache;
 	rsx::vk_render_targets m_rtts;
@@ -45,12 +42,9 @@ private:
 	vk::swap_chain* m_swap_chain;
 	//buffer
 
-	vk::data_heap m_uniform_buffer_ring_info;
-	std::unique_ptr<vk::buffer> m_uniform_buffer;
-	vk::data_heap m_index_buffer_ring_info;
-	std::unique_ptr<vk::buffer> m_index_buffer;
-	vk::data_heap m_texture_upload_buffer_ring_info;
-	std::unique_ptr<vk::buffer> m_texture_upload_buffer;
+	vk::vk_data_heap m_uniform_buffer_ring_info;
+	vk::vk_data_heap m_index_buffer_ring_info;
+	vk::vk_data_heap m_texture_upload_buffer_ring_info;
 
 	//Vulkan internals
 	u32 m_current_present_image = 0xFFFF;
@@ -73,7 +67,11 @@ private:
 	std::vector<std::unique_ptr<vk::framebuffer> > m_framebuffer_to_clean;
 	std::vector<std::unique_ptr<vk::sampler> > m_sampler_to_clean;
 
+	u32 m_client_width = 0;
+	u32 m_client_height = 0;
+
 	u32 m_draw_calls = 0;
+	u32 m_used_descriptors = 0;
 	u8 m_draw_buffers_count = 0;
 
 public:

@@ -1,387 +1,707 @@
 #include "stdafx.h"
+#include "Utilities/Config.h"
+#include "Utilities/VirtualMemory.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
-#include "Emu/state.h"
 #include "Emu/IdManager.h"
-#include "Emu/Cell/PPUThread.h"
-#include "Emu/Cell/PPUDecoder.h"
-#include "Emu/Cell/PPUInterpreter.h"
-#include "Emu/Cell/PPUInterpreter2.h"
-#include "Emu/Cell/PPULLVMRecompiler.h"
-//#include "Emu/Cell/PPURecompiler.h"
-#include "Utilities/VirtualMemory.h"
+#include "PPUThread.h"
+#include "PPUInterpreter.h"
+#include "PPUAnalyser.h"
+#include "PPUModule.h"
 
-#ifdef _WIN32
-#include <Windows.h>
-#else
-#include <sys/mman.h>
-#include <sys/stat.h>
+#ifdef LLVM_AVAILABLE
+#ifdef _MSC_VER
+#pragma warning(push, 0)
+#endif
+#include "llvm/Support/FormattedStream.h"
+#include "llvm/IR/LLVMContext.h"
+//#include "llvm/IR/Dominators.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/LegacyPassManager.h"
+//#include "llvm/IR/Module.h"
+//#include "llvm/IR/Function.h"
+//#include "llvm/Analysis/Passes.h"
+//#include "llvm/Analysis/BasicAliasAnalysis.h"
+//#include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Analysis/MemoryDependenceAnalysis.h"
+//#include "llvm/Analysis/LoopInfo.h"
+//#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/Lint.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/IPO.h"
+#include "llvm/Transforms/Vectorize.h"
+#ifdef _MSC_VER
+#pragma warning(pop)
 #endif
 
-u64 rotate_mask[64][64];
+#include "Utilities/JIT.h"
+#include "PPUTranslator.h"
+#endif
 
-extern u32 ppu_get_tls(u32 thread);
-extern void ppu_free_tls(u32 thread);
-
-//thread_local const std::weak_ptr<ppu_decoder_cache_t> g_tls_ppu_decoder_cache = fxm::get<ppu_decoder_cache_t>();
-thread_local const ppu_decoder_cache_t* g_tls_ppu_decoder_cache = nullptr; // temporarily, because thread_local is not fully available
-
-ppu_decoder_cache_t::ppu_decoder_cache_t()
-	: pointer(static_cast<decltype(pointer)>(memory_helper::reserve_memory(0x200000000)))
+enum class ppu_decoder_type
 {
-}
+	precise,
+	fast,
+	llvm,
+};
 
-ppu_decoder_cache_t::~ppu_decoder_cache_t()
+cfg::map_entry<ppu_decoder_type> g_cfg_ppu_decoder(cfg::root.core, "PPU Decoder", 1,
 {
-	memory_helper::free_reserved_memory(pointer, 0x200000000);
-}
+	{ "Interpreter (precise)", ppu_decoder_type::precise },
+	{ "Interpreter (fast)", ppu_decoder_type::fast },
+	{ "Recompiler (LLVM)", ppu_decoder_type::llvm },
+});
 
-void ppu_decoder_cache_t::initialize(u32 addr, u32 size)
+const ppu_decoder<ppu_interpreter_precise> s_ppu_interpreter_precise;
+const ppu_decoder<ppu_interpreter_fast> s_ppu_interpreter_fast;
+
+extern void ppu_execute_syscall(ppu_thread& ppu, u64 code);
+extern void ppu_execute_function(ppu_thread& ppu, u32 index);
+
+const auto s_ppu_compiled = static_cast<u32*>(memory_helper::reserve_memory(0x100000000));
+
+extern void ppu_register_function_at(u32 addr, ppu_function_t ptr)
 {
-	memory_helper::commit_page_memory(pointer + addr / 4, size * 2);
-
-	PPUInterpreter2* inter;
-	PPUDecoder dec(inter = new PPUInterpreter2);
-
-	for (u32 pos = addr; pos < addr + size; pos += 4)
+	if (g_cfg_ppu_decoder.get() == ppu_decoder_type::llvm)
 	{
-		inter->func = ppu_interpreter::NULL_OP;
-
-		// decode PPU opcode
-		dec.Decode(vm::ps3::read32(pos));
-
-		// store function address
-		pointer[pos / 4] = inter->func;
+		memory_helper::commit_page_memory(s_ppu_compiled + addr / 4, sizeof(s_ppu_compiled[0]));
+		s_ppu_compiled[addr / 4] = (u32)(std::uintptr_t)ptr;
 	}
 }
 
-PPUThread::PPUThread(const std::string& name)
-	: CPUThread(CPU_THREAD_PPU, name)
+std::string ppu_thread::get_name() const
 {
-	InitRotateMask();
+	return fmt::format("PPU[0x%x] Thread (%s)", id, m_name);
 }
 
-PPUThread::~PPUThread()
+std::string ppu_thread::dump() const
 {
-	close_stack();
-	ppu_free_tls(m_id);
-}
+	std::string ret;
 
-std::string PPUThread::get_name() const
-{
-	return fmt::format("PPU Thread[0x%x] (%s)[0x%08x]", m_id, CPUThread::get_name(), PC);
-}
+	ret += fmt::format("Type: %s\n", typeid(*this).name());
+	ret += fmt::format("State: 0x%08x\n", state.load());
+	ret += fmt::format("Priority: %d\n", prio);
+	
+	ret += "\nRegisters:\n=========\n";
+	for (uint i = 0; i < 32; ++i) ret += fmt::format("GPR[%d] = 0x%llx\n", i, gpr[i]);
+	for (uint i = 0; i < 32; ++i) ret += fmt::format("FPR[%d] = %.6G\n", i, fpr[i]);
+	for (uint i = 0; i < 32; ++i) ret += fmt::format("VR[%d] = 0x%s [%s]\n", i, vr[i].to_hex().c_str(), vr[i].to_xyzw().c_str());
 
-void PPUThread::dump_info() const
-{
-	extern std::string get_ps3_function_name(u64 fid);
-
-	if (~hle_code < 1024)
+	if (g_cfg_ppu_decoder.get() != ppu_decoder_type::llvm)
 	{
-		LOG_SUCCESS(HLE, "Last syscall: %lld (%s)", ~hle_code, get_ps3_function_name(hle_code));
-	}
-	else if (hle_code)
-	{
-		LOG_SUCCESS(HLE, "Last function: %s (0x%llx)", get_ps3_function_name(hle_code), hle_code);
-	}
+		ret += fmt::format("CR = 0x%08x\n", cr_pack());
+		ret += fmt::format("LR = 0x%llx\n", lr);
+		ret += fmt::format("CTR = 0x%llx\n", ctr);
+		ret += fmt::format("VRSAVE = 0x%08x\n", vrsave);
+		ret += fmt::format("XER = [CA=%u | OV=%u | SO=%u | CNT=%u]\n", xer.ca, xer.ov, xer.so, xer.cnt);
+		ret += fmt::format("VSCR = [SAT=%u | NJ=%u]\n", sat, nj);
+		ret += fmt::format("FPSCR = [FL=%u | FG=%u | FE=%u | FU=%u]\n", fpscr.fl, fpscr.fg, fpscr.fe, fpscr.fu);
 
-	CPUThread::dump_info();
-}
-
-void PPUThread::init_regs()
-{
-	GPR[1] = align(stack_addr + stack_size, 0x200) - 0x200;
-	GPR[13] = ppu_get_tls(m_id) + 0x7000; // 0x7000 is subtracted from r13 to access first TLS element
-
-	LR = 0;
-	CTR = PC;
-	CR.CR = 0x22000082;
-	VSCR.NJ = 1;
-	TB = 0;
-
-	//m_state |= CPU_STATE_INTR;
-}
-
-void PPUThread::init_stack()
-{
-	if (!stack_addr)
-	{
-		if (!stack_size)
+		ret += "\nCall stack:\n=========\n";
+		ret += fmt::format("0x%08x (0x0) called\n", cia);
+		const u32 stack_max = ::align(stack_addr + stack_size, 0x200) - 0x200;
+		for (u64 sp = vm::read64(static_cast<u32>(gpr[1])); sp >= stack_addr && sp < stack_max; sp = vm::read64(static_cast<u32>(sp)))
 		{
-			throw EXCEPTION("Invalid stack size");
-		}
-
-		stack_addr = vm::alloc(stack_size, vm::stack);
-
-		if (!stack_addr)
-		{
-			throw EXCEPTION("Out of stack memory");
+			// TODO: print also function addresses
+			ret += fmt::format("> from 0x%08llx (0x0)\n", vm::read64(static_cast<u32>(sp + 16)));
 		}
 	}
+
+	return ret;
 }
 
-void PPUThread::close_stack()
+extern thread_local std::string(*g_tls_log_prefix)();
+
+void ppu_thread::cpu_task()
+{
+	//SetHostRoundingMode(FPSCR_RN_NEAR);
+
+	// Execute cmd_queue
+	while (ppu_cmd cmd = cmd_wait())
+	{
+		const u32 pos = cmd_queue.peek() + 1; // Additional arguments start from [pos]
+		const u32 arg = cmd.arg2<u32>(); // 32-bit arg extracted
+
+		switch (u32 type = cmd.arg1<u32>())
+		{
+		case ppu_cmd::opcode:
+		{
+			cmd_pop(), s_ppu_interpreter_fast.decode(arg)(*this, {arg});
+			break;
+		}
+		case ppu_cmd::set_gpr:
+		{
+			if (arg >= 32)
+			{
+				throw fmt::exception("Invalid ppu_cmd::set_gpr arg (0x%x)" HERE, arg);
+			}
+
+			gpr[arg % 32] = cmd_queue[pos].load().as<u64>();
+			cmd_pop(1);
+			break;
+		}
+		case ppu_cmd::set_args:
+		{
+			if (arg > 8)
+			{
+				throw fmt::exception("Unsupported ppu_cmd::set_args size (0x%x)" HERE, arg);
+			}
+
+			for (u32 i = 0; i < arg; i++)
+			{
+				gpr[i + 3] = cmd_queue[pos + i].load().as<u64>();
+			}
+
+			cmd_pop(arg);
+			break;
+		}
+		case ppu_cmd::lle_call:
+		{
+			const vm::ptr<u32> opd(arg < 32 ? vm::cast(gpr[arg]) : vm::cast(arg));
+			cmd_pop(), fast_call(opd[0], opd[1]);
+			break;
+		}
+		case ppu_cmd::hle_call:
+		{
+			cmd_pop(), ppu_execute_function(*this, arg);
+			break;
+		}
+		default:
+		{
+			throw fmt::exception("Unknown ppu_cmd(0x%x)" HERE, type);
+		}
+		}
+	}
+}
+
+void ppu_thread::exec_task()
+{
+	if (g_cfg_ppu_decoder.get() == ppu_decoder_type::llvm)
+	{
+		return reinterpret_cast<ppu_function_t>((std::uintptr_t)s_ppu_compiled[cia / 4])(*this);
+	}
+
+	const auto base = vm::_ptr<const u8>(0);
+
+	// Select opcode table
+	const auto& table = *(
+		g_cfg_ppu_decoder.get() == ppu_decoder_type::precise ? &s_ppu_interpreter_precise.get_table() :
+		g_cfg_ppu_decoder.get() == ppu_decoder_type::fast ? &s_ppu_interpreter_fast.get_table() :
+		throw std::logic_error("Invalid PPU decoder"));
+
+	v128 _op;
+	decltype(&ppu_interpreter::UNK) func0, func1, func2, func3;
+
+	while (true)
+	{
+		if (UNLIKELY(state.load()))
+		{
+			if (check_state()) return;
+		}
+
+		// Reinitialize
+		{
+			const auto _ops = _mm_shuffle_epi8(_mm_lddqu_si128(reinterpret_cast<const __m128i*>(base + cia)), _mm_set_epi8(12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3));
+			_op.vi = _ops;
+			const v128 _i = v128::fromV(_mm_and_si128(_mm_or_si128(_mm_slli_epi32(_op.vi, 6), _mm_srli_epi32(_op.vi, 26)), _mm_set1_epi32(0x1ffff)));
+			func0 = table[_i._u32[0]];
+			func1 = table[_i._u32[1]];
+			func2 = table[_i._u32[2]];
+			func3 = table[_i._u32[3]];
+		}
+
+		while (LIKELY(func0(*this, { _op._u32[0] })))
+		{
+			if (cia += 4, LIKELY(func1(*this, { _op._u32[1] })))
+			{
+				if (cia += 4, LIKELY(func2(*this, { _op._u32[2] })))
+				{
+					cia += 4;
+					func0 = func3;
+
+					const auto _ops = _mm_shuffle_epi8(_mm_lddqu_si128(reinterpret_cast<const __m128i*>(base + cia + 4)), _mm_set_epi8(12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3));
+					_op.vi = _mm_alignr_epi8(_ops, _op.vi, 12);
+					const v128 _i = v128::fromV(_mm_and_si128(_mm_or_si128(_mm_slli_epi32(_op.vi, 6), _mm_srli_epi32(_op.vi, 26)), _mm_set1_epi32(0x1ffff)));
+					func1 = table[_i._u32[1]];
+					func2 = table[_i._u32[2]];
+					func3 = table[_i._u32[3]];
+
+					if (UNLIKELY(state.load()))
+					{
+						break;
+					}
+					continue;
+				}
+				break;
+			}
+			break;
+		}
+	}
+}
+
+constexpr auto stop_state = make_bitset(cpu_state::stop, cpu_state::exit, cpu_state::suspend);
+
+ppu_thread::~ppu_thread()
 {
 	if (stack_addr)
 	{
 		vm::dealloc_verbose_nothrow(stack_addr, vm::stack);
-		stack_addr = 0;
 	}
 }
 
-bool PPUThread::handle_interrupt()
+ppu_thread::ppu_thread(const std::string& name, u32 prio, u32 stack)
+	: cpu_thread(cpu_type::ppu)
+	, prio(prio)
+	, stack_size(std::max<u32>(stack, 0x4000))
+	, stack_addr(vm::alloc(stack_size, vm::stack))
+	, m_name(name)
 {
-	return false;
-}
-
-void PPUThread::do_run()
-{
-	m_dec.reset();
-
-	switch (auto mode = rpcs3::state.config.core.ppu_decoder.value())
+	if (!stack_addr)
 	{
-	case ppu_decoder_type::interpreter: // original interpreter
+		throw fmt::exception("Out of stack memory (size=0x%x)" HERE, stack_size);
+	}
+
+	gpr[1] = ::align(stack_addr + stack_size, 0x200) - 0x200;
+}
+
+void ppu_thread::cmd_push(ppu_cmd cmd)
+{
+	// Reserve queue space
+	const u32 pos = cmd_queue.push_begin();
+
+	// Write single command
+	cmd_queue[pos] = cmd;
+}
+
+void ppu_thread::cmd_list(std::initializer_list<ppu_cmd> list)
+{
+	// Reserve queue space
+	const u32 pos = cmd_queue.push_begin(static_cast<u32>(list.size()));
+
+	// Write command tail in relaxed manner
+	for (u32 i = 1; i < list.size(); i++)
 	{
-		m_dec.reset(new PPUDecoder(new PPUInterpreter(*this)));
-		break;
+		cmd_queue[pos + i].raw() = list.begin()[i];
 	}
 
-	case ppu_decoder_type::interpreter2: // alternative interpreter
+	// Write command head after all
+	cmd_queue[pos] = *list.begin();
+}
+
+void ppu_thread::cmd_pop(u32 count)
+{
+	// Get current position
+	const u32 pos = cmd_queue.peek();
+
+	// Clean command buffer for command tail
+	for (u32 i = 1; i <= count; i++)
 	{
-		break;
+		cmd_queue[pos + i].raw() = ppu_cmd{};
 	}
 
-	case ppu_decoder_type::recompiler_llvm:
+	// Free
+	cmd_queue.pop_end(count + 1);
+}
+
+ppu_cmd ppu_thread::cmd_wait()
+{
+	std::unique_lock<named_thread> lock(*this, std::defer_lock);
+
+	while (true)
 	{
-#ifdef PPU_LLVM_RECOMPILER
-		m_dec.reset(new ppu_recompiler_llvm::CPUHybridDecoderRecompiler(*this));
-#else
-		LOG_ERROR(PPU, "This image does not include PPU JIT (LLVM)");
-		Emu.Pause();
-#endif
-		break;
+		if (UNLIKELY(state.load()))
+		{
+			if (lock) lock.unlock();
+
+			if (check_state()) // check_status() requires unlocked mutex
+			{
+				return ppu_cmd{};
+			}
+		}
+
+		// Lightweight queue doesn't care about mutex state
+		if (ppu_cmd result = cmd_queue[cmd_queue.peek()].exchange(ppu_cmd{}))
+		{
+			return result;
+		}
+
+		if (!lock)
+		{
+			lock.lock();
+			continue;
+		}
+
+		thread_ctrl::wait(); // Waiting requires locked mutex
 	}
+}
 
-	//case 3: m_dec.reset(new PPURecompiler(*this)); break;
+be_t<u64>* ppu_thread::get_stack_arg(s32 i, u64 align)
+{
+	if (align != 1 && align != 2 && align != 4 && align != 8 && align != 16) throw fmt::exception("Unsupported alignment: 0x%llx" HERE, align);
+	return vm::_ptr<u64>(vm::cast((gpr[1] + 0x30 + 0x8 * (i - 1)) & (0 - align), HERE));
+}
 
-	default:
+void ppu_thread::fast_call(u32 addr, u32 rtoc)
+{
+	const auto old_pc = cia;
+	const auto old_stack = gpr[1];
+	const auto old_rtoc = gpr[2];
+	const auto old_lr = lr;
+	const auto old_func = last_function;
+	const auto old_fmt = g_tls_log_prefix;
+
+	cia = addr;
+	gpr[2] = rtoc;
+	lr = Emu.GetCPUThreadStop();
+	last_function = nullptr;
+
+	g_tls_log_prefix = []
 	{
-		LOG_ERROR(PPU, "Invalid CPU decoder mode: %d", mode);
-		Emu.Pause();
-	}
-	}
-}
+		const auto ppu = static_cast<ppu_thread*>(get_current_cpu_thread());
 
-bool FPRdouble::IsINF(PPCdouble d)
-{
-	return ((u64&)d & 0x7FFFFFFFFFFFFFFFULL) == 0x7FF0000000000000ULL;
-}
-
-bool FPRdouble::IsNaN(PPCdouble d)
-{
-	return std::isnan((double)d) ? 1 : 0;
-}
-
-bool FPRdouble::IsQNaN(PPCdouble d)
-{
-	return 
-		((u64&)d & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL &&
-		((u64&)d & 0x0007FFFFFFFFFFFULL) == 0ULL &&
-		((u64&)d & 0x000800000000000ULL) != 0ULL;
-}
-
-bool FPRdouble::IsSNaN(PPCdouble d)
-{
-	return
-		((u64&)d & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL &&
-		((u64&)d & 0x000FFFFFFFFFFFFFULL) != 0ULL &&
-		((u64&)d & 0x0008000000000000ULL) == 0ULL;
-}
-
-int FPRdouble::Cmp(PPCdouble a, PPCdouble b)
-{
-	if(a < b) return CR_LT;
-	if(a > b) return CR_GT;
-	if(a == b) return CR_EQ;
-
-	return CR_SO;
-}
-
-u64 PPUThread::get_stack_arg(s32 i)
-{
-	return vm::ps3::read64(VM_CAST(GPR[1] + 0x70 + 0x8 * (i - 9)));
-}
-
-void PPUThread::fast_call(u32 addr, u32 rtoc)
-{
-	if (!is_current())
-	{
-		throw EXCEPTION("Called from the wrong thread");
-	}
-
-	auto old_PC = PC;
-	auto old_stack = GPR[1];
-	auto old_rtoc = GPR[2];
-	auto old_LR = LR;
-	auto old_task = std::move(custom_task);
-
-	assert(!old_task || !custom_task);
-
-	PC = addr;
-	GPR[2] = rtoc;
-	LR = Emu.GetCPUThreadStop();
-	custom_task = nullptr;
+		return fmt::format("%s [0x%08x]", ppu->get_name(), ppu->cia);
+	};
 
 	try
 	{
-		cpu_task();
-	}
-	catch (CPUThreadReturn)
-	{
-	}
+		exec_task();
 
-	m_state &= ~CPU_STATE_RETURN;
-
-	PC = old_PC;
-
-	if (GPR[1] != old_stack) // GPR[1] shouldn't change
-	{
-		throw EXCEPTION("Stack inconsistency (addr=0x%x, rtoc=0x%x, SP=0x%llx, old=0x%llx)", addr, rtoc, GPR[1], old_stack);
-	}
-
-	GPR[2] = old_rtoc;
-	LR = old_LR;
-	custom_task = std::move(old_task);
-}
-
-void PPUThread::fast_stop()
-{
-	m_state |= CPU_STATE_RETURN;
-}
-
-void PPUThread::cpu_task()
-{
-	SetHostRoundingMode(FPSCR_RN_NEAR);
-
-	if (custom_task)
-	{
-		if (check_status()) return;
-
-		return custom_task(*this);
-	}
-
-	if (!g_tls_ppu_decoder_cache)
-	{
-		const auto decoder_cache = fxm::get<ppu_decoder_cache_t>();
-
-		if (!decoder_cache)
+		if (gpr[1] != old_stack && !state.test(cpu_state::ret) && !state.test(cpu_state::exit)) // gpr[1] shouldn't change
 		{
-			throw EXCEPTION("PPU Decoder Cache not initialized");
+			throw fmt::exception("Stack inconsistency (addr=0x%x, rtoc=0x%x, SP=0x%llx, old=0x%llx)", addr, rtoc, gpr[1], old_stack);
 		}
-
-		g_tls_ppu_decoder_cache = decoder_cache.get(); // unsafe (TODO)
 	}
+	catch (cpu_state _s)
+	{
+		state += _s;
+		if (_s != cpu_state::ret) throw;
+	}
+	catch (EmulationStopped)
+	{
+		if (last_function) LOG_WARNING(PPU, "'%s' aborted", last_function);
+		last_function = old_func;
+		throw;
+	}
+	catch (...)
+	{
+		if (last_function) LOG_ERROR(PPU, "'%s' aborted", last_function);
+		last_function = old_func;
+		throw;
+	}
+
+	state -= cpu_state::ret;
+
+	cia = old_pc;
+	gpr[1] = old_stack;
+	gpr[2] = old_rtoc;
+	lr = old_lr;
+	last_function = old_func;
+	g_tls_log_prefix = old_fmt;
+}
+
+const ppu_decoder<ppu_itype> s_ppu_itype;
+
+extern u64 get_timebased_time();
+extern ppu_function_t ppu_get_syscall(u64 code);
+extern std::string ppu_get_syscall_name(u64 code);
+extern ppu_function_t ppu_get_function(u32 index);
+extern std::string ppu_get_module_function_name(u32 index);
+
+extern __m128 sse_exp2_ps(__m128 A);
+extern __m128 sse_log2_ps(__m128 A);
+extern __m128i sse_altivec_vperm(__m128i A, __m128i B, __m128i C);
+extern __m128i sse_altivec_lvsl(u64 addr);
+extern __m128i sse_altivec_lvsr(u64 addr);
+extern __m128i sse_cellbe_lvlx(u64 addr);
+extern __m128i sse_cellbe_lvrx(u64 addr);
+extern void sse_cellbe_stvlx(u64 addr, __m128i a);
+extern void sse_cellbe_stvrx(u64 addr, __m128i a);
+
+[[noreturn]] static void ppu_trap(u64 addr)
+{
+	throw fmt::exception("Trap! (0x%llx)", addr);
+}
+
+[[noreturn]] static void ppu_unreachable(u64 addr)
+{
+	throw fmt::exception("Unreachable! (0x%llx)", addr);
+}
+
+static void ppu_trace(u64 addr)
+{
+	LOG_NOTICE(PPU, "Trace: 0x%llx", addr);
+}
+
+static u32 ppu_lwarx(u32 addr)
+{
+	be_t<u32> reg_value;
+	vm::reservation_acquire(&reg_value, addr, sizeof(reg_value));
+	return reg_value;
+}
+
+static u64 ppu_ldarx(u32 addr)
+{
+	be_t<u64> reg_value;
+	vm::reservation_acquire(&reg_value, addr, sizeof(reg_value));
+	return reg_value;
+}
+
+static bool ppu_stwcx(u32 addr, u32 reg_value)
+{
+	const be_t<u32> data = reg_value;
+	return vm::reservation_update(addr, &data, sizeof(data));
+}
+
+static bool ppu_stdcx(u32 addr, u64 reg_value)
+{
+	const be_t<u64> data = reg_value;
+	return vm::reservation_update(addr, &data, sizeof(data));
+}
+
+static bool adde_carry(u64 a, u64 b, bool c)
+{
+#ifdef _MSC_VER
+	return _addcarry_u64(c, a, b, nullptr) != 0;
+#else
+	bool result;
+	__asm__("addb $0xff, %[c] \n adcq %[a], %[b] \n setb %[result]" : [a] "+&r" (a), [b] "+&r" (b), [c] "+&r" (c), [result] "=r" (result));
+	return result;
+#endif
+}
+
+extern void ppu_initialize(const std::string& name, const std::vector<ppu_function>& funcs)
+{
+	if (g_cfg_ppu_decoder.get() != ppu_decoder_type::llvm || funcs.empty())
+	{
+		if (!Emu.GetCPUThreadStop())
+		{
+			auto ppu_thr_stop_data = vm::ptr<u32>::make(vm::alloc(2 * 4, vm::main));
+			Emu.SetCPUThreadStop(ppu_thr_stop_data.addr());
+			ppu_thr_stop_data[0] = ppu_instructions::HACK(1);
+			ppu_thr_stop_data[1] = ppu_instructions::BLR();
+		}
+		
+		return;
+	}
+
+	std::unordered_map<std::string, std::uintptr_t> link_table
+	{
+		{ "__mptr", (u64)&vm::g_base_addr },
+		{ "__cptr", (u64)&s_ppu_compiled },
+		{ "__trap", (u64)&ppu_trap },
+		{ "__end", (u64)&ppu_unreachable },
+		{ "__trace", (u64)&ppu_trace },
+		{ "__hlecall", (u64)&ppu_execute_function },
+		{ "__syscall", (u64)&ppu_execute_syscall },
+		{ "__get_tbl", (u64)&get_timebased_time },
+		{ "__lwarx", (u64)&ppu_lwarx },
+		{ "__ldarx", (u64)&ppu_ldarx },
+		{ "__stwcx", (u64)&ppu_stwcx },
+		{ "__stdcx", (u64)&ppu_stdcx },
+		{ "__adde_get_ca", (u64)&adde_carry },
+		{ "__vexptefp", (u64)&sse_exp2_ps },
+		{ "__vlogefp", (u64)&sse_log2_ps },
+		{ "__vperm", (u64)&sse_altivec_vperm },
+		{ "__lvsl", (u64)&sse_altivec_lvsl },
+		{ "__lvsr", (u64)&sse_altivec_lvsr },
+		{ "__lvlx", (u64)&sse_cellbe_lvlx },
+		{ "__lvrx", (u64)&sse_cellbe_lvrx },
+		{ "__stvlx", (u64)&sse_cellbe_stvlx },
+		{ "__stvrx", (u64)&sse_cellbe_stvrx },
+	};
+
+#ifdef LLVM_AVAILABLE
+	using namespace llvm;
+
+	// Create LLVM module
+	std::unique_ptr<Module> module = std::make_unique<Module>(name, g_llvm_ctx);
+
+	// Initialize target
+	module->setTargetTriple(Triple::normalize(sys::getProcessTriple()));
 	
-	const auto exec_map = g_tls_ppu_decoder_cache->pointer;
+	// Initialize translator
+	std::unique_ptr<PPUTranslator> translator = std::make_unique<PPUTranslator>(g_llvm_ctx, module.get(), 0);
 
-	if (m_dec)
+	// Define some types
+	const auto _void = Type::getVoidTy(g_llvm_ctx);
+	const auto _func = FunctionType::get(_void, { translator->GetContextType()->getPointerTo() }, false);
+
+	// Initialize function list
+	for (const auto& info : funcs)
 	{
-		while (true)
+		if (info.size)
 		{
-			if (m_state && check_status()) break;
-
-			// decode instruction using specified decoder
-			m_dec->DecodeMemory(PC);
-
-			// next instruction
-			PC += 4;
+			const auto f = cast<Function>(module->getOrInsertFunction(fmt::format("__0x%x", info.addr), _func));
+			f->addAttribute(1, Attribute::NoAlias);
+			translator->AddFunction(info.addr, f);
 		}
-	}
-	else
-	{
-		while (true)
+		
+		for (const auto& b : info.blocks)
 		{
-			// get cached interpreter function address
-			const auto func = exec_map[PC / 4];
-
-			// check status
-			if (!m_state)
+			if (b.second)
 			{
-				// call interpreter function
-				func(*this, { vm::ps3::read32(PC) });
-
-				// next instruction
-				PC += 4;
-
-				continue;
-			}
-			
-			if (check_status())
-			{
-				break;
+				translator->AddBlockInfo(b.first);
 			}
 		}
 	}
-}
 
-ppu_thread::ppu_thread(u32 entry, const std::string& name, u32 stack_size, s32 prio)
-{
-	auto ppu = idm::make_ptr<PPUThread>(name);
+	legacy::FunctionPassManager pm(module.get());
+	
+	// Basic optimizations
+	pm.add(createCFGSimplificationPass());
+	pm.add(createPromoteMemoryToRegisterPass());
+	pm.add(createEarlyCSEPass());
+	pm.add(createTailCallEliminationPass());
+	pm.add(createReassociatePass());
+	pm.add(createInstructionCombiningPass());
+	//pm.add(createBasicAAWrapperPass());
+	//pm.add(new MemoryDependenceAnalysis());
+	pm.add(createLICMPass());
+	pm.add(createLoopInstSimplifyPass());
+	pm.add(createGVNPass());
+	pm.add(createDeadStoreEliminationPass());
+	pm.add(createSCCPPass());
+	pm.add(createInstructionCombiningPass());
+	pm.add(createInstructionSimplifierPass());
+	pm.add(createAggressiveDCEPass());
+	pm.add(createCFGSimplificationPass());
+	//pm.add(createLintPass()); // Check
 
-	if (entry)
+	// Translate functions
+	for (const auto& info : funcs)
 	{
-		ppu->PC = vm::ps3::read32(entry);
-		ppu->GPR[2] = vm::ps3::read32(entry + 4); // rtoc
+		if (info.size)
+		{
+			const auto func = translator->TranslateToIR(info, vm::_ptr<u32>(info.addr));
+
+			// Run optimization passes
+			pm.run(*func);
+
+			const auto _syscall = module->getFunction("__syscall");
+			const auto _hlecall = module->getFunction("__hlecall");
+
+			for (auto i = inst_begin(*func), end = inst_end(*func); i != end;)
+			{
+				const auto inst = &*i++;
+
+				if (const auto ci = dyn_cast<CallInst>(inst))
+				{
+					const auto cif = ci->getCalledFunction();
+					const auto op1 = ci->getNumArgOperands() > 1 ? ci->getArgOperand(1) : nullptr;
+
+					if (cif == _syscall && op1 && isa<ConstantInt>(op1))
+					{
+						// Try to determine syscall using the value from r11 (requires constant propagation)
+						const u64 index = cast<ConstantInt>(op1)->getZExtValue();
+
+						if (const auto ptr = ppu_get_syscall(index))
+						{
+							const auto n = ppu_get_syscall_name(index);
+							const auto f = cast<Function>(module->getOrInsertFunction(n, _func));
+							link_table.emplace(n, reinterpret_cast<std::uintptr_t>(ptr));
+
+							// Call the syscall directly
+							ReplaceInstWithInst(ci, CallInst::Create(f, {ci->getArgOperand(0)}));
+						}
+					}
+
+					if (cif == _hlecall && op1 && isa<ConstantInt>(op1))
+					{
+						const u32 index = static_cast<u32>(cast<ConstantInt>(op1)->getZExtValue());
+
+						if (const auto ptr = ppu_get_function(index))
+						{
+							const auto n = ppu_get_module_function_name(index);
+							const auto f = cast<Function>(module->getOrInsertFunction(n, _func));
+							link_table.emplace(n, reinterpret_cast<std::uintptr_t>(ptr));
+
+							// Call the function directly
+							ReplaceInstWithInst(ci, CallInst::Create(f, {ci->getArgOperand(0)}));
+						}
+					}
+
+					continue;
+				}
+
+				if (const auto li = dyn_cast<LoadInst>(inst))
+				{
+					// TODO: more careful check
+					if (li->getNumUses() == 0)
+					{
+						// Remove unreferenced volatile loads
+						li->eraseFromParent();
+					}
+
+					continue;
+				}
+
+				if (const auto si = dyn_cast<StoreInst>(inst))
+				{
+					// TODO: more careful check
+					if (isa<UndefValue>(si->getOperand(0)) && si->getParent() == &func->getEntryBlock())
+					{
+						// Remove undef volatile stores
+						si->eraseFromParent();
+					}
+
+					continue;
+				}
+			}
+		}
 	}
 
-	ppu->stack_size = stack_size ? stack_size : Emu.GetPrimaryStackSize();
-	ppu->prio = prio ? prio : Emu.GetPrimaryPrio();
+	legacy::PassManager mpm;
 
-	thread = std::move(ppu);
+	// Remove unused functions, structs, global variables, etc
+	mpm.add(createStripDeadPrototypesPass());
+	//mpm.add(createFunctionInliningPass());
+	mpm.add(createDeadInstEliminationPass());
+	mpm.run(*module);
 
-	argc = 0;
-}
+	std::string result;
+	raw_string_ostream out(result);
 
-cpu_thread& ppu_thread::args(std::initializer_list<std::string> values)
-{
-	if (!values.size())
-		return *this;
+	out << *module; // print IR
+	fs::file(fs::get_config_dir() + "LLVM.log", fs::rewrite)
+		.write(out.str());
 
-	assert(argc == 0);
+	result.clear();
 
-	envp.set(vm::alloc(align(SIZE_32(*envp), stack_align), vm::main));
-	*envp = 0;
-	argv.set(vm::alloc(SIZE_32(*argv) * (u32)values.size(), vm::main));
-
-	for (auto &arg : values)
+	if (verifyModule(*module, &out))
 	{
-		const u32 arg_size = align(u32(arg.size() + 1), stack_align);
-		const u32 arg_addr = vm::alloc(arg_size, vm::main);
-
-		std::memcpy(vm::base(arg_addr), arg.c_str(), arg.size() + 1);
-
-		argv[argc++] = arg_addr;
+		out.flush();
+		LOG_ERROR(PPU, "{%s} LLVM: Translation failed:\n%s", name, result);
+		return;
 	}
 
-	return *this;
-}
+	LOG_SUCCESS(PPU, "LLVM: %zu functions generated", module->getFunctionList().size());
 
-cpu_thread& ppu_thread::run()
-{
-	thread->run();
+	Module* module_ptr = module.get();
 
-	gpr(3, argc);
-	gpr(4, argv.addr());
-	gpr(5, envp.addr());
+	const auto jit = fxm::make<jit_compiler>(std::move(module), std::move(link_table));
 
-	return *this;
-}
+	if (!jit)
+	{
+		LOG_FATAL(PPU, "LLVM: Multiple modules are not yet supported");
+		return;
+	}
 
-ppu_thread& ppu_thread::gpr(uint index, u64 value)
-{
-	assert(index < 32);
+	memory_helper::free_reserved_memory(s_ppu_compiled, 0x200000000); // TODO
 
-	static_cast<PPUThread&>(*thread).GPR[index] = value;
+	// Get and install function addresses
+	for (const auto& info : funcs)
+	{
+		if (info.size)
+		{
+			const std::uintptr_t link = jit->get(fmt::format("__0x%x", info.addr));
+			ppu_register_function_at(info.addr, (ppu_function_t)link);
 
-	return *this;
+			LOG_NOTICE(PPU, "** Function __0x%x -> 0x%llx (size=0x%x, toc=0x%x, attr %#x)", info.addr, link, info.size, info.toc, info.attr);
+		}
+	}
+
+	LOG_SUCCESS(PPU, "LLVM: Compilation finished (%s)", sys::getHostCPUName().data());
+#endif
 }

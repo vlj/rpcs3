@@ -1,123 +1,92 @@
 #include "stdafx.h"
-
-#include "config.h"
-#include "events.h"
-#include "state.h"
-
+#include "Utilities/Config.h"
+#include "Utilities/AutoPause.h"
+#include "Utilities/event.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
 
-#include "Emu/GameInfo.h"
-#include "Emu/SysCalls/ModuleManager.h"
 #include "Emu/Cell/PPUThread.h"
+#include "Emu/Cell/PPUCallback.h"
+#include "Emu/Cell/PPUOpcodes.h"
 #include "Emu/Cell/SPUThread.h"
-#include "Emu/Cell/PPUInstrTable.h"
-#include "Emu/FS/vfsFile.h"
-#include "Emu/FS/vfsLocalFile.h"
-#include "Emu/FS/vfsDeviceLocalFile.h"
+#include "Emu/Cell/RawSPUThread.h"
+#include "Emu/Cell/lv2/sys_sync.h"
+#include "Emu/PSP2/ARMv7Thread.h"
 
-#include "Emu/CPU/CPUThreadManager.h"
-#include "Emu/SysCalls/Callback.h"
 #include "Emu/IdManager.h"
-#include "Emu/Io/Pad.h"
-#include "Emu/Io/Keyboard.h"
-#include "Emu/Io/Mouse.h"
-#include "Emu/RSX/GSManager.h"
-#include "Emu/Audio/AudioManager.h"
-#include "Emu/FS/VFS.h"
-#include "Emu/Event.h"
+#include "Emu/RSX/GSRender.h"
 
 #include "Loader/PSF.h"
-#include "Loader/ELF64.h"
-#include "Loader/ELF32.h"
+#include "Loader/ELF.h"
+
+#include "Utilities/StrUtil.h"
 
 #include "../Crypto/unself.h"
 
-using namespace PPU_instr;
+#include <thread>
 
-static const std::string& BreakPointsDBName = "BreakPoints.dat";
-static const u16 bpdb_version = 0x1000;
+cfg::bool_entry g_cfg_autostart(cfg::root.misc, "Always start after boot", true);
+cfg::bool_entry g_cfg_autoexit(cfg::root.misc, "Exit RPCS3 when process finishes");
 
-// Draft (not used)
-struct bpdb_header_t
-{
-	le_t<u32> magic;
-	le_t<u32> version;
-	le_t<u32> count;
-	le_t<u32> marked;
+cfg::string_entry g_cfg_vfs_emulator_dir(cfg::root.vfs, "$(EmulatorDir)"); // Default (empty): taken from fs::get_executable_dir()
+cfg::string_entry g_cfg_vfs_dev_hdd0(cfg::root.vfs, "/dev_hdd0/", "$(EmulatorDir)dev_hdd0/");
+cfg::string_entry g_cfg_vfs_dev_hdd1(cfg::root.vfs, "/dev_hdd1/", "$(EmulatorDir)dev_hdd1/");
+cfg::string_entry g_cfg_vfs_dev_flash(cfg::root.vfs, "/dev_flash/", "$(EmulatorDir)dev_flash/");
+cfg::string_entry g_cfg_vfs_dev_usb000(cfg::root.vfs, "/dev_usb000/", "$(EmulatorDir)dev_usb000/");
+cfg::string_entry g_cfg_vfs_dev_bdvd(cfg::root.vfs, "/dev_bdvd/"); // Not mounted
+cfg::string_entry g_cfg_vfs_app_home(cfg::root.vfs, "/app_home/"); // Not mounted
 
-	// POD
-	bpdb_header_t() = default;
+cfg::bool_entry g_cfg_vfs_allow_host_root(cfg::root.vfs, "Enable /host_root/", true);
 
-	bpdb_header_t(u32 count, u32 marked)
-		: magic(*reinterpret_cast<const u32*>("BPDB"))
-		, version(0x00010000)
-		, count(count)
-		, marked(marked)
-	{
-	}
-};
+std::string g_cfg_defaults;
 
-extern std::atomic<u32> g_thread_count;
+extern atomic_t<u32> g_thread_count;
 
 extern u64 get_system_time();
-extern void finalize_psv_modules();
+
+extern void ppu_load_exec(const ppu_exec_object&);
+extern void spu_load_exec(const spu_exec_object&);
+extern void arm_load_exec(const arm_exec_object&);
+extern std::shared_ptr<struct lv2_prx_t> ppu_load_prx(const ppu_prx_object&);
+
+fs::file g_tty;
+
+namespace rpcs3
+{
+	event<void>& on_run() { static event<void> on_run; return on_run; }
+	event<void>& on_stop() { static event<void> on_stop; return on_stop; }
+	event<void>& on_pause() { static event<void> on_pause; return on_pause; }
+	event<void>& on_resume() { static event<void> on_resume; return on_resume; }
+}
 
 Emulator::Emulator()
 	: m_status(Stopped)
-	, m_mode(DisAsm)
-	, m_rsx_callback(0)
 	, m_cpu_thr_stop(0)
-	, m_thread_manager(new CPUThreadManager())
-	, m_pad_manager(new PadManager())
-	, m_keyboard_manager(new KeyboardManager())
-	, m_mouse_manager(new MouseManager())
-	, m_gs_manager(new GSManager())
-	, m_audio_manager(new AudioManager())
-	, m_callback_manager(new CallbackManager())
-	, m_event_manager(new EventManager())
-	, m_module_manager(new ModuleManager())
-	, m_vfs(new VFS())
 {
-	m_loader.register_handler(new loader::handlers::elf32);
-	m_loader.register_handler(new loader::handlers::elf64);
 }
 
 void Emulator::Init()
 {
-	rpcs3::config.load();
-	rpcs3::oninit();
+	if (!g_tty)
+	{
+		g_tty.open(fs::get_config_dir() + "TTY.log", fs::rewrite + fs::append);
+	}
+	
+	idm::init();
+	fxm::init();
+
+	// Reset defaults, cache them
+	cfg::root.from_default();
+	g_cfg_defaults = cfg::root.to_string();
+
+	// Reload global configuration
+	cfg::root.from_string(fs::file(fs::get_config_dir() + "/config.yml", fs::read + fs::create).to_string());
 }
 
 void Emulator::SetPath(const std::string& path, const std::string& elf_path)
 {
 	m_path = path;
 	m_elf_path = elf_path;
-}
-
-void Emulator::SetTitleID(const std::string& id)
-{
-	m_title_id = id;
-}
-
-void Emulator::SetTitle(const std::string& title)
-{
-	m_title = title;
-}
-
-void Emulator::CreateConfig(const std::string& name)
-{
-	const std::string& path = fs::get_config_dir() + "data/" + name;
-	const std::string& ini_file = path + "/settings.ini";
-
-	if (!fs::is_dir("data"))
-		fs::create_dir("data");
-
-	if (!fs::is_dir(path))
-		fs::create_dir(path);
-
-	if (!fs::is_file(ini_file))
-		rpcs3::config_t{ ini_file }.save();
 }
 
 bool Emulator::BootGame(const std::string& path, bool direct)
@@ -156,143 +125,195 @@ bool Emulator::BootGame(const std::string& path, bool direct)
 	return false;
 }
 
+std::string Emulator::GetGameDir()
+{
+	const std::string& emu_dir_ = g_cfg_vfs_emulator_dir;
+	const std::string& emu_dir = emu_dir_.empty() ? fs::get_executable_dir() : emu_dir_;
+
+	return fmt::replace_all(g_cfg_vfs_dev_hdd0, "$(EmulatorDir)", emu_dir) + "game/";
+}
+
+std::string Emulator::GetLibDir()
+{
+	const std::string& emu_dir_ = g_cfg_vfs_emulator_dir;
+	const std::string& emu_dir = emu_dir_.empty() ? fs::get_executable_dir() : emu_dir_;
+
+	return fmt::replace_all(g_cfg_vfs_dev_flash, "$(EmulatorDir)", emu_dir) + "sys/external/";
+}
+
 void Emulator::Load()
 {
-	m_status = Ready;
+	Stop();
 
-	if (!fs::is_file(m_path))
+	try
 	{
-		m_status = Stopped;
-		return;
-	}
+		Init();
 
-	const std::string& elf_dir = fs::get_parent_dir(m_path);
-
-	if (IsSelf(m_path))
-	{
-		const std::size_t elf_ext_pos = m_path.find_last_of('.');
-		const std::string& elf_ext = fmt::toupper(m_path.substr(elf_ext_pos != -1 ? elf_ext_pos : m_path.size()));
-		const std::string& elf_name = m_path.substr(elf_dir.size());
-
-		if (elf_name.compare(elf_name.find_last_of("/\\", -1, 2) + 1, 9, "EBOOT.BIN", 9) == 0)
+		if (!fs::is_file(m_path))
 		{
-			m_path.erase(m_path.size() - 9, 1); // change EBOOT.BIN to BOOT.BIN
+			LOG_ERROR(LOADER, "File not found: %s", m_path);
+			return;
 		}
-		else if (elf_ext == ".SELF" || elf_ext == ".SPRX")
+
+		const std::string& elf_dir = fs::get_parent_dir(m_path);
+
+		if (IsSelf(m_path))
 		{
-			m_path.erase(m_path.size() - 4, 1); // change *.self to *.elf, *.sprx to *.prx
+			const std::size_t elf_ext_pos = m_path.find_last_of('.');
+			const std::string& elf_ext = fmt::to_upper(m_path.substr(elf_ext_pos != -1 ? elf_ext_pos : m_path.size()));
+			const std::string& elf_name = m_path.substr(elf_dir.size());
+
+			if (elf_name.compare(elf_name.find_last_of("/\\", -1, 2) + 1, 9, "EBOOT.BIN", 9) == 0)
+			{
+				m_path.erase(m_path.size() - 9, 1); // change EBOOT.BIN to BOOT.BIN
+			}
+			else if (elf_ext == ".SELF" || elf_ext == ".SPRX")
+			{
+				m_path.erase(m_path.size() - 4, 1); // change *.self to *.elf, *.sprx to *.prx
+			}
+			else
+			{
+				m_path += ".decrypted.elf";
+			}
+
+			if (!DecryptSelf(m_path, elf_dir + elf_name))
+			{
+				LOG_ERROR(LOADER, "Failed to decrypt %s", elf_dir + elf_name);
+				return;
+			}
+		}
+
+		SetCPUThreadStop(0);
+
+		LOG_NOTICE(LOADER, "Path: %s", m_path);
+
+		// Load custom config
+		if (fs::file cfg_file{ m_path + ".yml" })
+		{
+			LOG_NOTICE(LOADER, "Custom config: %s.yml", m_path);
+			cfg::root.from_string(cfg_file.to_string());
+		}
+
+		const fs::file elf_file(m_path);
+		ppu_exec_object ppu_exec;
+		ppu_prx_object ppu_prx;
+		spu_exec_object spu_exec;
+		arm_exec_object arm_exec;
+
+		if (!elf_file)
+		{
+			LOG_ERROR(LOADER, "Failed to open %s", m_path);
+			return;
+		}
+		else if (ppu_exec.open(elf_file) == elf_error::ok)
+		{
+			// PS3 executable
+			m_status = Ready;
+			vm::ps3::init();
+
+			if (m_elf_path.empty())
+			{
+				m_elf_path = "/host_root/" + m_path;
+				LOG_NOTICE(LOADER, "Elf path: %s", m_elf_path);
+			}
+
+			// Load PARAM.SFO
+			const auto _psf = psf::load_object(fs::file(elf_dir + "/../PARAM.SFO"));
+			m_title = psf::get_string(_psf, "TITLE", m_path);
+			m_title_id = psf::get_string(_psf, "TITLE_ID");
+			fs::get_data_dir(m_title_id, m_path);
+
+			LOG_NOTICE(LOADER, "Title: %s", GetTitle());
+			LOG_NOTICE(LOADER, "Serial: %s", GetTitleID());
+
+			// Mount all devices
+			const std::string& emu_dir_ = g_cfg_vfs_emulator_dir;
+			const std::string& emu_dir = emu_dir_.empty() ? fs::get_executable_dir() : emu_dir_;
+			const std::string& bdvd_dir = g_cfg_vfs_dev_bdvd;
+			const std::string& home_dir = g_cfg_vfs_app_home;
+
+			vfs::mount("dev_hdd0", fmt::replace_all(g_cfg_vfs_dev_hdd0, "$(EmulatorDir)", emu_dir));
+			vfs::mount("dev_hdd1", fmt::replace_all(g_cfg_vfs_dev_hdd1, "$(EmulatorDir)", emu_dir));
+			vfs::mount("dev_flash", fmt::replace_all(g_cfg_vfs_dev_flash, "$(EmulatorDir)", emu_dir));
+			vfs::mount("dev_usb", fmt::replace_all(g_cfg_vfs_dev_usb000, "$(EmulatorDir)", emu_dir));
+			vfs::mount("dev_usb000", fmt::replace_all(g_cfg_vfs_dev_usb000, "$(EmulatorDir)", emu_dir));
+			vfs::mount("app_home", home_dir.empty() ? elf_dir + '/' : fmt::replace_all(home_dir, "$(EmulatorDir)", emu_dir));
+
+			// Mount /dev_bdvd/ if necessary
+			if (bdvd_dir.empty() && fs::is_file(elf_dir + "/../../PS3_DISC.SFB"))
+			{
+				const auto dir_list = fmt::split(elf_dir, { "/", "\\" });
+
+				// Check latest two directories
+				if (dir_list.size() >= 2 && dir_list.back() == "USRDIR" && *(dir_list.end() - 2) == "PS3_GAME")
+				{
+					vfs::mount("dev_bdvd", elf_dir.substr(0, elf_dir.length() - 15));
+				}
+				else
+				{
+					vfs::mount("dev_bdvd", elf_dir + "/../../");
+				}
+
+				LOG_NOTICE(LOADER, "Disc: %s", vfs::get("/dev_bdvd"));
+			}
+			else if (bdvd_dir.size())
+			{
+				vfs::mount("dev_bdvd", fmt::replace_all(bdvd_dir, "$(EmulatorDir)", emu_dir));
+			}
+
+			// Mount /host_root/ if necessary
+			if (g_cfg_vfs_allow_host_root)
+			{
+				vfs::mount("host_root", {});
+			}
+
+			LOG_NOTICE(LOADER, "Used configuration:\n%s\n", cfg::root.to_string());
+
+			ppu_load_exec(ppu_exec);
+
+			fxm::import<GSRender>(PURE_EXPR(Emu.GetCallbacks().get_gs_render())); // TODO: must be created in appropriate sys_rsx syscall
+		}
+		else if (ppu_prx.open(elf_file) == elf_error::ok)
+		{
+			// PPU PRX (experimental)
+			m_status = Ready;
+			vm::ps3::init();
+			ppu_load_prx(ppu_prx);
+		}
+		else if (spu_exec.open(elf_file) == elf_error::ok)
+		{
+			// SPU executable (experimental)
+			m_status = Ready;
+			vm::ps3::init();
+			spu_load_exec(spu_exec);
+		}
+		else if (arm_exec.open(elf_file) == elf_error::ok)
+		{
+			// ARMv7 executable
+			m_status = Ready;
+			vm::psv::init();
+			arm_load_exec(arm_exec);
 		}
 		else
 		{
-			m_path += ".decrypted.elf";
-		}
+			LOG_ERROR(LOADER, "Invalid or unsupported file format: %s", m_path);
 
-		if (!DecryptSelf(m_path, elf_dir + elf_name))
-		{
-			m_status = Stopped;
+			LOG_WARNING(LOADER, "** ppu_exec -> %s", ppu_exec.get_error());
+			LOG_WARNING(LOADER, "** ppu_prx  -> %s", ppu_prx.get_error());
+			LOG_WARNING(LOADER, "** spu_exec -> %s", spu_exec.get_error());
+			LOG_WARNING(LOADER, "** arm_exec -> %s", arm_exec.get_error());
 			return;
 		}
+
+		debug::autopause::reload();
+		SendDbgCommand(DID_READY_EMU);
+		if (g_cfg_autostart) Run();
 	}
-
-	ResetInfo();
-	GetVFS().Init(elf_dir);
-
-	LOG_NOTICE(LOADER, "Loading '%s'...", m_path.c_str());
-
-	// /dev_bdvd/ mounting
-	vfsFile f("/app_home/../dev_bdvd.path");
-	if (f.IsOpened())
+	catch (const std::exception& e)
 	{
-		// load specified /dev_bdvd/ directory and mount it
-		std::string bdvd;
-		bdvd.resize(f.GetSize());
-		f.Read(&bdvd[0], bdvd.size());
-
-		Emu.GetVFS().Mount("/dev_bdvd/", bdvd, new vfsDeviceLocalFile());
+		LOG_FATAL(LOADER, "%s thrown: %s", typeid(e).name(), e.what());
+		Stop();
 	}
-	else if (fs::is_file(elf_dir + "/../../PS3_DISC.SFB")) // guess loading disc game
-	{
-		const auto dir_list = fmt::split(elf_dir, { "/", "\\" });
-
-		// check latest two directories
-		if (dir_list.size() >= 2 && dir_list.back() == "USRDIR" && *(dir_list.end() - 2) == "PS3_GAME")
-		{
-			// mount detected /dev_bdvd/ directory
-			Emu.GetVFS().Mount("/dev_bdvd/", elf_dir.substr(0, elf_dir.length() - 16), new vfsDeviceLocalFile());
-		}
-	}
-
-	LOG_NOTICE(LOADER, "");
-	LOG_NOTICE(LOADER, "Mount info:");
-	for (uint i = 0; i < GetVFS().m_devices.size(); ++i)
-	{
-		LOG_NOTICE(LOADER, "%s -> %s", GetVFS().m_devices[i]->GetPs3Path().c_str(), GetVFS().m_devices[i]->GetLocalPath().c_str());
-	}
-
-	LOG_NOTICE(LOADER, "");
-	f.Open("/app_home/../PARAM.SFO");
-	const auto& psf = psf::load(f.VRead<char>());
-	std::string title = psf::get_string(psf, "TITLE");
-	std::string title_id = psf::get_string(psf, "TITLE_ID");
-	LOG_NOTICE(LOADER, "Title: %s", title.c_str());
-	LOG_NOTICE(LOADER, "Serial: %s", title_id.c_str());
-
-	title.length() ? SetTitle(title) : SetTitle(m_path);
-	SetTitleID(title_id);
-
-	rpcs3::state.config = rpcs3::config;
-
-	// load custom config
-	if (!rpcs3::config.misc.use_default_ini.value())
-	{
-		if (title_id.size())
-		{
-			title_id = title_id.substr(0, 4) + "-" + title_id.substr(4, 5);
-			CreateConfig(title_id);
-			rpcs3::config_t custom_config { fs::get_config_dir() + "data/" + title_id + "/settings.ini" };
-			custom_config.load();
-			rpcs3::state.config = custom_config;
-		}
-	}
-
-	LOG_NOTICE(LOADER, "Used configuration: '%s'", rpcs3::state.config.path().c_str());
-	LOG_NOTICE(LOADER, "");
-	LOG_NOTICE(LOADER, rpcs3::state.config.to_string().c_str());
-
-	if (m_elf_path.empty())
-	{
-		GetVFS().GetDeviceLocal(m_path, m_elf_path);
-
-		LOG_NOTICE(LOADER, "Elf path: %s", m_elf_path);
-		LOG_NOTICE(LOADER, "");
-	}
-
-	f.Open(m_elf_path);
-
-	if (!f.IsOpened())
-	{
-		LOG_ERROR(LOADER, "Opening '%s' failed", m_path.c_str());
-		m_status = Stopped;
-		return;
-	}
-
-	if (!m_loader.load(f))
-	{
-		LOG_ERROR(LOADER, "Loading '%s' failed", m_path.c_str());
-		LOG_NOTICE(LOADER, "");
-		m_status = Stopped;
-		vm::close();
-		return;
-	}
-	
-	LoadPoints(fs::get_config_dir() + BreakPointsDBName);
-
-	GetGSManager().Init();
-	GetCallbackManager().Init();
-	GetAudioManager().Init();
-	GetEventManager().Init();
-
-	SendDbgCommand(DID_READY_EMU);
 }
 
 void Emulator::Run()
@@ -311,7 +332,7 @@ void Emulator::Run()
 		return;
 	}
 
-	rpcs3::onstart();
+	rpcs3::on_run()();
 
 	SendDbgCommand(DID_START_EMU);
 
@@ -319,7 +340,11 @@ void Emulator::Run()
 	m_pause_amend_time = 0;
 	m_status = Running;
 
-	GetCPU().Exec();
+	idm::select<ppu_thread, SPUThread, RawSPUThread, ARMv7Thread>([](u32, cpu_thread& cpu)
+	{
+		cpu.run();
+	});
+
 	SendDbgCommand(DID_STARTED_EMU);
 }
 
@@ -327,15 +352,15 @@ bool Emulator::Pause()
 {
 	const u64 start = get_system_time();
 
-	// try to set Paused status
-	if (!sync_bool_compare_and_swap(&m_status, Running, Paused))
+	// Try to pause
+	if (!m_status.compare_and_swap_test(Running, Paused))
 	{
 		return false;
 	}
 
-	rpcs3::onpause();
+	rpcs3::on_pause()();
 
-	// update pause start time
+	// Update pause start time
 	if (m_pause_start_time.exchange(start))
 	{
 		LOG_ERROR(GENERAL, "Emulator::Pause() error: concurrent access");
@@ -343,10 +368,10 @@ bool Emulator::Pause()
 
 	SendDbgCommand(DID_PAUSE_EMU);
 
-	for (auto& t : GetCPU().GetAllThreads())
+	idm::select<ppu_thread, SPUThread, RawSPUThread, ARMv7Thread>([](u32, cpu_thread& cpu)
 	{
-		t->sleep(); // trigger status check
-	}
+		cpu.state += cpu_state::dbg_global_pause;
+	});
 
 	SendDbgCommand(DID_PAUSED_EMU);
 
@@ -355,17 +380,17 @@ bool Emulator::Pause()
 
 void Emulator::Resume()
 {
-	// get pause start time
+	// Get pause start time
 	const u64 time = m_pause_start_time.exchange(0);
 
-	// try to increment summary pause time
+	// Try to increment summary pause time
 	if (time)
 	{
 		m_pause_amend_time += get_system_time() - time;
 	}
 
-	// try to resume
-	if (!sync_bool_compare_and_swap(&m_status, Paused, Running))
+	// Try to resume
+	if (!m_status.compare_and_swap_test(Paused, Running))
 	{
 		return;
 	}
@@ -377,42 +402,40 @@ void Emulator::Resume()
 
 	SendDbgCommand(DID_RESUME_EMU);
 
-	for (auto& t : GetCPU().GetAllThreads())
+	idm::select<ppu_thread, SPUThread, RawSPUThread, ARMv7Thread>([](u32, cpu_thread& cpu)
 	{
-		t->awake(); // untrigger status check and signal
-	}
+		cpu.state -= cpu_state::dbg_global_pause;
+		cpu.lock_notify();
+	});
 
-	rpcs3::onstart();
+	rpcs3::on_resume()();
 
 	SendDbgCommand(DID_RESUMED_EMU);
 }
 
-extern std::map<u32, std::string> g_armv7_dump;
-
 void Emulator::Stop()
 {
-	LOG_NOTICE(GENERAL, "Stopping emulator...");
-
-	if (sync_lock_test_and_set(&m_status, Stopped) == Stopped)
+	if (m_status.exchange(Stopped) == Stopped)
 	{
 		return;
 	}
 
-	rpcs3::onstop();
+	LOG_NOTICE(GENERAL, "Stopping emulator...");
+
+	rpcs3::on_stop()();
 	SendDbgCommand(DID_STOP_EMU);
 
 	{
 		LV2_LOCK;
 
-		// notify all threads
-		for (auto& t : GetCPU().GetAllThreads())
+		idm::select<ppu_thread, SPUThread, RawSPUThread, ARMv7Thread>([](u32, cpu_thread& cpu)
 		{
-			std::lock_guard<std::mutex> lock(t->mutex);
-
-			t->sleep(); // trigger status check
-
-			t->cv.notify_one(); // signal
-		}
+			cpu.state += cpu_state::dbg_global_stop;
+			cpu->lock();
+			cpu->set_exception(std::make_exception_ptr(EmulationStopped()));
+			cpu->unlock();
+			cpu->notify();
+		});
 	}
 
 	LOG_NOTICE(GENERAL, "All threads signaled...");
@@ -431,86 +454,19 @@ void Emulator::Stop()
 
 	LOG_NOTICE(GENERAL, "Objects cleared...");
 
-	finalize_psv_modules();
-
-	for (auto& v : decltype(g_armv7_dump)(std::move(g_armv7_dump)))
-	{
-		LOG_NOTICE(ARMv7, "%s", v.second);
-	}
-
-	m_rsx_callback = 0;
-	m_cpu_thr_stop = 0;
-
-	// TODO: check finalization order
-
-	SavePoints(fs::get_config_dir() + BreakPointsDBName);
-	m_break_points.clear();
-	m_marked_points.clear();
-
-	GetVFS().UnMountAll();
-
-	GetGSManager().Close();
-	GetAudioManager().Close();
-	GetEventManager().Clear();
-	GetCPU().Close();
-	GetPadManager().Close();
-	GetKeyboardManager().Close();
-	GetMouseManager().Close();
-	GetCallbackManager().Clear();
-	GetModuleManager().Close();
-
 	RSXIOMem.Clear();
 	vm::close();
 
 	SendDbgCommand(DID_STOPPED_EMU);
-}
 
-void Emulator::SavePoints(const std::string& path)
-{
-	const u32 break_count = size32(m_break_points);
-	const u32 marked_count = size32(m_marked_points);
-
-	fs::file(path, fom::rewrite)
-		.write(bpdb_version)
-		.write(break_count)
-		.write(marked_count)
-		.write(m_break_points)
-		.write(m_marked_points);
-}
-
-bool Emulator::LoadPoints(const std::string& path)
-{
-	if (fs::file f{ path })
+	if (g_cfg_autoexit)
 	{
-		u16 version;
-		u32 break_count;
-		u32 marked_count;
-
-		if (!f.read(version) || !f.read(break_count) || !f.read(marked_count))
-		{
-			LOG_ERROR(LOADER, "BP file '%s' is broken (length=0x%llx)", path, f.size());
-			return false;
-		}
-
-		if (version != bpdb_version)
-		{
-			LOG_ERROR(LOADER, "BP file '%s' has unsupported version (version=0x%x)", path, version);
-			return false;
-		}
-
-		m_break_points.resize(break_count);
-		m_marked_points.resize(marked_count);
-
-		if (!f.read(m_break_points) || !f.read(m_marked_points))
-		{
-			LOG_ERROR(LOADER, "'BP file %s' is broken (length=0x%llx, break_count=%u, marked_count=%u)", path, f.size(), break_count, marked_count);
-			return false;
-		}
-
-		return true;
+		GetCallbacks().exit();
 	}
-
-	return false;
+	else
+	{
+		Init();
+	}
 }
 
 Emulator Emu;

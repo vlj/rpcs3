@@ -81,7 +81,12 @@ namespace vk
 			change_image_layout(cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dstLayout, vk::get_image_subresource_range(0, 0, 1, 1, aspect));
 	}
 
-	void copy_scaled_image(VkCommandBuffer cmd, VkImage & src, VkImage & dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 src_width, u32 src_height, u32 dst_width, u32 dst_height, u32 mipmaps, VkImageAspectFlagBits aspect)
+	void copy_scaled_image(VkCommandBuffer cmd,
+			VkImage & src, VkImage & dst,
+			VkImageLayout srcLayout, VkImageLayout dstLayout,
+			u32 src_x_offset, u32 src_y_offset, u32 src_width, u32 src_height,
+			u32 dst_x_offset, u32 dst_y_offset, u32 dst_width, u32 dst_height,
+			u32 mipmaps, VkImageAspectFlagBits aspect)
 	{
 		VkImageSubresourceLayers a_src = {}, a_dst = {};
 		a_src.aspectMask = aspect;
@@ -91,11 +96,13 @@ namespace vk
 
 		a_dst = a_src;
 
+		//TODO: Use an array of offsets/dimensions for mipmapped blits (mipmap count > 1) since subimages will have different dimensions
+
 		VkImageBlit rgn = {};
-		rgn.srcOffsets[0] = { 0, 0, 0 };
+		rgn.srcOffsets[0] = { (int32_t)src_x_offset, (int32_t)src_y_offset, 0 };
 		rgn.srcOffsets[1] = { (int32_t)src_width, (int32_t)src_height, 1 };
-		rgn.dstOffsets[0] = { 0, 0, 0 };
-		rgn.dstOffsets[1] = { (int32_t)dst_width, (int32_t)dst_height, 1 };
+		rgn.dstOffsets[0] = { (int32_t)dst_x_offset, (int32_t)dst_y_offset, 0 };
+		rgn.dstOffsets[1] = { (int32_t)(dst_width + dst_x_offset), (int32_t)(dst_height + dst_y_offset), 1 };
 		rgn.dstSubresource = a_dst;
 		rgn.srcSubresource = a_src;
 
@@ -129,8 +136,8 @@ namespace vk
 	}
 
 	void copy_mipmaped_image_using_buffer(VkCommandBuffer cmd, VkImage dst_image,
-		const std::vector<rsx_subresource_layout> subresource_layout, int format, bool is_swizzled,
-		vk::data_heap &upload_heap, vk::buffer* upload_buffer)
+		const std::vector<rsx_subresource_layout> subresource_layout, int format, bool is_swizzled, u16 mipmap_count,
+		vk::vk_data_heap &upload_heap, vk::buffer* upload_buffer)
 	{
 		u32 mipmap_level = 0;
 		u32 block_in_pixel = get_format_block_size_in_texel(format);
@@ -153,7 +160,8 @@ namespace vk
 			copy_info.imageExtent.depth = layout.depth;
 			copy_info.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 			copy_info.imageSubresource.layerCount = 1;
-			copy_info.imageSubresource.mipLevel = mipmap_level;
+			copy_info.imageSubresource.baseArrayLayer = mipmap_level / mipmap_count;
+			copy_info.imageSubresource.mipLevel = mipmap_level % mipmap_count;
 			copy_info.bufferRowLength = block_in_pixel * row_pitch / block_size_in_bytes;
 
 			vkCmdCopyBufferToImage(cmd, upload_buffer->value, dst_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_info);

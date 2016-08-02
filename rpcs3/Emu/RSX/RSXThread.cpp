@@ -1,41 +1,57 @@
 #include "stdafx.h"
+#include "Utilities/Config.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
-#include "Emu/state.h"
-#include "Emu/RSX/GSManager.h"
+#include "Emu/IdManager.h"
 #include "RSXThread.h"
 
-#include "Emu/SysCalls/Callback.h"
-#include "Emu/SysCalls/CB_FUNC.h"
-#include "Emu/SysCalls/lv2/sys_time.h"
+#include "Emu/Cell/PPUCallback.h"
 
 #include "Common/BufferUtils.h"
 #include "rsx_methods.h"
 
+#include "Utilities/GSL.h"
+#include "Utilities/StrUtil.h"
+
+#include <thread>
+
+class GSRender;
+
 #define CMD_DEBUG 0
 
+cfg::bool_entry g_cfg_rsx_write_color_buffers(cfg::root.video, "Write Color Buffers");
+cfg::bool_entry g_cfg_rsx_write_depth_buffer(cfg::root.video, "Write Depth Buffer");
+cfg::bool_entry g_cfg_rsx_read_color_buffers(cfg::root.video, "Read Color Buffers");
+cfg::bool_entry g_cfg_rsx_read_depth_buffer(cfg::root.video, "Read Depth Buffer");
+cfg::bool_entry g_cfg_rsx_log_programs(cfg::root.video, "Log shader programs");
+cfg::bool_entry g_cfg_rsx_vsync(cfg::root.video, "VSync");
+cfg::bool_entry g_cfg_rsx_debug_output(cfg::root.video, "Debug output");
+cfg::bool_entry g_cfg_rsx_overlay(cfg::root.video, "Debug overlay");
+
 bool user_asked_for_frame_capture = false;
-frame_capture_data frame_debug;
+rsx::frame_capture_data frame_debug;
+
+namespace vm { using namespace ps3; }
 
 namespace rsx
 {
 	std::function<bool(u32 addr, bool is_writing)> g_access_violation_handler;
 
-	std::string shaders_cache::path_to_root()
+	std::string old_shaders_cache::shaders_cache::path_to_root()
 	{
 		return fs::get_executable_dir() + "data/";
 	}
 
-	void shaders_cache::load(const std::string &path, shader_language lang)
+	void old_shaders_cache::shaders_cache::load(const std::string &path, shader_language lang)
 	{
-		std::string lang_name = convert::to<std::string>(lang);
+		const std::string lang_name(::unveil<shader_language>::get(lang));
 
 		auto extract_hash = [](const std::string &string)
 		{
 			return std::stoull(string.substr(0, string.find('.')).c_str(), 0, 16);
 		};
 
-		for (const fs::dir::entry &entry : fs::dir{ path })
+		for (const auto& entry : fs::dir(path))
 		{
 			if (entry.name == "." || entry.name == "..")
 				continue;
@@ -48,7 +64,7 @@ namespace rsx
 			}
 			catch (...)
 			{
-				LOG_ERROR(RSX, "Cache file '%s' ignored", entry.name);
+				LOG_WARNING(RSX, "Cache file '%s' ignored", entry.name);
 				continue;
 			}
 
@@ -68,7 +84,7 @@ namespace rsx
 		}
 	}
 
-	void shaders_cache::load(shader_language lang)
+	void old_shaders_cache::shaders_cache::load(shader_language lang)
 	{
 		std::string root = path_to_root();
 
@@ -106,7 +122,7 @@ namespace rsx
 				throw EXCEPTION("GetAddress(offset=0x%x, location=0x%x): RSXIO memory not mapped", offset, location);
 			}
 
-			//if (Emu.GetGSManager().GetRender().strict_ordering[offset >> 20])
+			//if (fxm::get<GSRender>()->strict_ordering[offset >> 20])
 			//{
 			//	_mm_mfence(); // probably doesn't have any effect on current implementation
 			//}
@@ -162,7 +178,7 @@ namespace rsx
 			}
 			throw EXCEPTION("Wrong vector size");
 		case vertex_base_type::cmp: return sizeof(u16) * 4;
-		case vertex_base_type::ub256: Expects(size == 4); return sizeof(u8) * 4;
+		case vertex_base_type::ub256: EXPECTS(size == 4); return sizeof(u8) * 4;
 		}
 		throw EXCEPTION("RSXVertexData::GetTypeSize: Bad vertex data type (%d)!", type);
 	}
@@ -289,15 +305,10 @@ namespace rsx
 	{
 		frame_capture_data::draw_state draw_state = {};
 
-		int clip_w = rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL] >> 16;
-		int clip_h = rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL] >> 16;
-		rsx::surface_info surface = {};
-		surface.unpack(rsx::method_registers[NV4097_SET_SURFACE_FORMAT]);
-		draw_state.width = clip_w;
-		draw_state.height = clip_h;
-		draw_state.color_format = surface.color_format;
+		int clip_w = rsx::method_registers.surface_clip_width();
+		int clip_h = rsx::method_registers.surface_clip_height();
+		draw_state.state = rsx::method_registers;
 		draw_state.color_buffer = std::move(copy_render_targets_to_memory());
-		draw_state.depth_format = surface.depth_format;
 		draw_state.depth_stencil = std::move(copy_depth_stencil_buffer_to_memory());
 
 		if (draw_command == rsx::draw_command::indexed)
@@ -307,19 +318,17 @@ namespace rsx
 			{
 				draw_state.vertex_count += range.second;
 			}
-			draw_state.index_type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
-			if (draw_state.index_type == rsx::index_array_type::u16)
+
+			if (draw_state.state.index_type() == rsx::index_array_type::u16)
 			{
 				draw_state.index.resize(2 * draw_state.vertex_count);
-				gsl::span<u16> dst = { (u16*)draw_state.index.data(), gsl::narrow<int>(draw_state.vertex_count) };
-				write_index_array_data_to_buffer(dst, draw_mode, first_count_commands);
 			}
-			if (draw_state.index_type == rsx::index_array_type::u32)
+			if (draw_state.state.index_type() == rsx::index_array_type::u32)
 			{
 				draw_state.index.resize(4 * draw_state.vertex_count);
-				gsl::span<u16> dst = { (u16*)draw_state.index.data(), gsl::narrow<int>(draw_state.vertex_count) };
-				write_index_array_data_to_buffer(dst, draw_mode, first_count_commands);
 			}
+			gsl::span<gsl::byte> dst = { (gsl::byte*)draw_state.index.data(), gsl::narrow<int>(draw_state.index.size()) };
+			write_index_array_data_to_buffer(dst, draw_state.state.index_type(), draw_mode, first_count_commands);
 		}
 
 		draw_state.programs = get_programs();
@@ -329,18 +338,30 @@ namespace rsx
 
 	void thread::begin()
 	{
+		draw_inline_vertex_array = false;
+		inline_vertex_array.clear();
 		first_count_commands.clear();
-		draw_mode = to_primitive_type(method_registers[NV4097_SET_BEGIN_END]);
+		draw_command = rsx::draw_command::none;
+		draw_mode = method_registers.primitive_mode();
 	}
 
 	void thread::end()
 	{
-		transform_constants.clear();
+		rsx::method_registers.transform_constants.clear();
+
+		for (u8 index = 0; index < rsx::limits::vertex_count; ++index)
+		{
+			//Disabled, see https://github.com/RPCS3/rpcs3/issues/1932
+			//rsx::method_registers.register_vertex_info[index].size = 0;
+		}
 
 		if (capture_current_frame)
 		{
 			for (const auto &first_count : first_count_commands)
+			{
 				vertex_draw_count += first_count.second;
+			}
+
 			capture_frame("Draw " + std::to_string(vertex_draw_count));
 			vertex_draw_count = 0;
 		}
@@ -354,7 +375,7 @@ namespace rsx
 
 		last_flip_time = get_system_time() - 1000000;
 
-		scope_thread_t vblank(PURE_EXPR("VBlank Thread"s), [this]()
+		thread_ctrl::spawn(m_vblank_thread, "VBlank Thread", [this]()
 		{
 			const u64 start_time = get_system_time();
 
@@ -369,10 +390,13 @@ namespace rsx
 
 					if (vblank_handler)
 					{
-						Emu.GetCallbackManager().Async([func = vblank_handler](PPUThread& ppu)
-						{
-							func(ppu, 1);
+						intr_thread->cmd_list
+						({
+							{ ppu_cmd::set_args, 1 }, u64{1},
+							{ ppu_cmd::lle_call, vblank_handler },
 						});
+
+						intr_thread->lock_notify();
 					}
 
 					continue;
@@ -387,8 +411,8 @@ namespace rsx
 		{
 			CHECK_EMU_STATUS;
 
-			be_t<u32> get = ctrl->get;
-			be_t<u32> put = ctrl->put;
+			const u32 get = ctrl->get;
+			const u32 put = ctrl->put;
 
 			if (put == get || !Emu.IsRunning())
 			{
@@ -443,45 +467,56 @@ namespace rsx
 				u32 reg = cmd & CELL_GCM_METHOD_FLAG_NON_INCREMENT ? first_cmd : first_cmd + i;
 				u32 value = args[i];
 
-				if (rpcs3::config.misc.log.rsx_logging.value())
+				//LOG_NOTICE(RSX, "%s(0x%x) = 0x%x", get_method_name(reg).c_str(), reg, value);
+
+				method_registers.decode(reg, value);
+
+				if (capture_current_frame)
 				{
-					LOG_NOTICE(RSX, "%s(0x%x) = 0x%x", get_method_name(reg).c_str(), reg, value);
+					frame_debug.command_queue.push_back(std::make_pair(reg, value));
 				}
 
-				method_registers[reg] = value;
-				if (capture_current_frame)
-					frame_debug.command_queue.push_back(std::make_pair(reg, value));
-
 				if (auto method = methods[reg])
-					method(this, value);
+				{
+					method(this, reg, value);
+				}
 			}
 
 			ctrl->get = get + (count + 1) * 4;
 		}
 	}
 
+	void thread::on_exit()
+	{
+		if (m_vblank_thread)
+		{
+			m_vblank_thread->join();
+			m_vblank_thread.reset();
+		}
+	}
+
 	std::string thread::get_name() const
 	{
-		return "rsx::thread"s;
+		return "rsx::thread";
 	}
 
 	void thread::fill_scale_offset_data(void *buffer, bool is_d3d) const
 	{
-		int clip_w = rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL] >> 16;
-		int clip_h = rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL] >> 16;
+		int clip_w = rsx::method_registers.surface_clip_width();
+		int clip_h = rsx::method_registers.surface_clip_height();
 
-		float scale_x = (float&)rsx::method_registers[NV4097_SET_VIEWPORT_SCALE] / (clip_w / 2.f);
-		float offset_x = (float&)rsx::method_registers[NV4097_SET_VIEWPORT_OFFSET] - (clip_w / 2.f);
+		float scale_x = rsx::method_registers.viewport_scale_x() / (clip_w / 2.f);
+		float offset_x = rsx::method_registers.viewport_offset_x() - (clip_w / 2.f);
 		offset_x /= clip_w / 2.f;
 
-		float scale_y = (float&)rsx::method_registers[NV4097_SET_VIEWPORT_SCALE + 1] / (clip_h / 2.f);
-		float offset_y = ((float&)rsx::method_registers[NV4097_SET_VIEWPORT_OFFSET + 1] - (clip_h / 2.f));
+		float scale_y = rsx::method_registers.viewport_scale_y() / (clip_h / 2.f);
+		float offset_y = (rsx::method_registers.viewport_offset_y() - (clip_h / 2.f));
 		offset_y /= clip_h / 2.f;
 		if (is_d3d) scale_y *= -1;
 		if (is_d3d) offset_y *= -1;
 
-		float scale_z = (float&)rsx::method_registers[NV4097_SET_VIEWPORT_SCALE + 2];
-		float offset_z = (float&)rsx::method_registers[NV4097_SET_VIEWPORT_OFFSET + 2];
+		float scale_z = rsx::method_registers.viewport_scale_z();
+		float offset_z = rsx::method_registers.viewport_offset_z();
 		if (!is_d3d) offset_z -= .5;
 
 		float one = 1.f;
@@ -498,7 +533,7 @@ namespace rsx
 	*/
 	void thread::fill_vertex_program_constants_data(void *buffer)
 	{
-		for (const auto &entry : transform_constants)
+		for (const auto &entry : rsx::method_registers.transform_constants)
 			local_transform_constants[entry.first] = entry.second;
 		for (const auto &entry : local_transform_constants)
 			stream_vector_from_memory((char*)buffer + entry.first * 4 * sizeof(float), (void*)entry.second.rgba);
@@ -514,7 +549,7 @@ namespace rsx
 		{
 			for (int index = 0; index < rsx::limits::vertex_count; ++index)
 			{
-				const auto &info = vertex_arrays_info[index];
+				const auto &info = rsx::method_registers.vertex_arrays_info[index];
 
 				if (!info.size) // disabled
 					continue;
@@ -553,43 +588,44 @@ namespace rsx
 		}
 		else
 		{
-			std::lock_guard<std::mutex> lock{ m_mtx_task };
+			EXPECTS(0);
+			//std::lock_guard<std::mutex> lock{ m_mtx_task };
 
-			internal_task_entry &front = m_internal_tasks.front();
+			//internal_task_entry &front = m_internal_tasks.front();
 
-			if (front.callback())
-			{
-				front.promise.set_value();
-				m_internal_tasks.pop_front();
-			}
+			//if (front.callback())
+			//{
+			//	front.promise.set_value();
+			//	m_internal_tasks.pop_front();
+			//}
 		}
 	}
 
-	std::future<void> thread::add_internal_task(std::function<bool()> callback)
-	{
-		std::lock_guard<std::mutex> lock{ m_mtx_task };
-		m_internal_tasks.emplace_back(callback);
+	//std::future<void> thread::add_internal_task(std::function<bool()> callback)
+	//{
+	//	std::lock_guard<std::mutex> lock{ m_mtx_task };
+	//	m_internal_tasks.emplace_back(callback);
 
-		return m_internal_tasks.back().promise.get_future();
-	}
+	//	return m_internal_tasks.back().promise.get_future();
+	//}
 
-	void thread::invoke(std::function<bool()> callback)
-	{
-		if (get_thread_ctrl() == thread_ctrl::get_current())
-		{
-			while (true)
-			{
-				if (callback())
-				{
-					break;
-				}
-			}
-		}
-		else
-		{
-			add_internal_task(callback).wait();
-		}
-	}
+	//void thread::invoke(std::function<bool()> callback)
+	//{
+	//	if (operator->() == thread_ctrl::get_current())
+	//	{
+	//		while (true)
+	//		{
+	//			if (callback())
+	//			{
+	//				break;
+	//			}
+	//		}
+	//	}
+	//	else
+	//	{
+	//		add_internal_task(callback).wait();
+	//	}
+	//}
 
 	namespace
 	{
@@ -614,17 +650,17 @@ namespace rsx
 	{
 		u32 offset_color[] =
 		{
-			rsx::method_registers[NV4097_SET_SURFACE_COLOR_AOFFSET],
-			rsx::method_registers[NV4097_SET_SURFACE_COLOR_BOFFSET],
-			rsx::method_registers[NV4097_SET_SURFACE_COLOR_COFFSET],
-			rsx::method_registers[NV4097_SET_SURFACE_COLOR_DOFFSET]
+			rsx::method_registers.surface_a_offset(),
+			rsx::method_registers.surface_b_offset(),
+			rsx::method_registers.surface_c_offset(),
+			rsx::method_registers.surface_d_offset(),
 		};
 		u32 context_dma_color[] =
 		{
-			rsx::method_registers[NV4097_SET_CONTEXT_DMA_COLOR_A],
-			rsx::method_registers[NV4097_SET_CONTEXT_DMA_COLOR_B],
-			rsx::method_registers[NV4097_SET_CONTEXT_DMA_COLOR_C],
-			rsx::method_registers[NV4097_SET_CONTEXT_DMA_COLOR_D]
+			rsx::method_registers.surface_a_dma(),
+			rsx::method_registers.surface_b_dma(),
+			rsx::method_registers.surface_c_dma(),
+			rsx::method_registers.surface_d_dma(),
 		};
 		return
 		{
@@ -637,32 +673,32 @@ namespace rsx
 
 	u32 thread::get_zeta_surface_address() const
 	{
-		u32 m_context_dma_z = rsx::method_registers[NV4097_SET_CONTEXT_DMA_ZETA];
-		u32 offset_zeta = rsx::method_registers[NV4097_SET_SURFACE_ZETA_OFFSET];
+		u32 m_context_dma_z = rsx::method_registers.surface_z_dma();
+		u32 offset_zeta = rsx::method_registers.surface_z_offset();
 		return rsx::get_address(offset_zeta, m_context_dma_z);
 	}
 
 	RSXVertexProgram thread::get_current_vertex_program() const
 	{
 		RSXVertexProgram result = {};
-		u32 transform_program_start = rsx::method_registers[NV4097_SET_TRANSFORM_PROGRAM_START];
+		u32 transform_program_start = rsx::method_registers.transform_program_start();
 		result.data.reserve((512 - transform_program_start) * 4);
 
 		for (int i = transform_program_start; i < 512; ++i)
 		{
 			result.data.resize((i - transform_program_start) * 4 + 4);
-			memcpy(result.data.data() + (i - transform_program_start) * 4, transform_program + i * 4, 4 * sizeof(u32));
+			memcpy(result.data.data() + (i - transform_program_start) * 4, rsx::method_registers.transform_program.data() + i * 4, 4 * sizeof(u32));
 
 			D3 d3;
-			d3.HEX = transform_program[i * 4 + 3];
+			d3.HEX = rsx::method_registers.transform_program[i * 4 + 3];
 
 			if (d3.end)
 				break;
 		}
-		result.output_mask = rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_OUTPUT_MASK];
+		result.output_mask = rsx::method_registers.vertex_attrib_output_mask();
 
-		u32 input_mask = rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_INPUT_MASK];
-		u32 modulo_mask = rsx::method_registers[NV4097_SET_FREQUENCY_DIVIDER_OPERATION];
+		u32 input_mask = rsx::method_registers.vertex_attrib_input_mask();
+		u32 modulo_mask = rsx::method_registers.frequency_divider_operation_mask();
 		result.rsx_vertex_inputs.clear();
 		for (u8 index = 0; index < rsx::limits::vertex_count; ++index)
 		{
@@ -670,29 +706,29 @@ namespace rsx
 			if (!enabled)
 				continue;
 
-			if (vertex_arrays_info[index].size > 0)
+			if (rsx::method_registers.vertex_arrays_info[index].size > 0)
 			{
 				result.rsx_vertex_inputs.push_back(
 				{
 					index,
-					vertex_arrays_info[index].size,
-					vertex_arrays_info[index].frequency,
+					rsx::method_registers.vertex_arrays_info[index].size,
+					rsx::method_registers.vertex_arrays_info[index].frequency,
 					!!((modulo_mask >> index) & 0x1),
 					true,
-					is_int_type(vertex_arrays_info[index].type)
+					is_int_type(rsx::method_registers.vertex_arrays_info[index].type)
 				}
 				);
 			}
-			else if (register_vertex_info[index].size > 0)
+			else if (rsx::method_registers.register_vertex_info[index].size > 0)
 			{
 				result.rsx_vertex_inputs.push_back(
 				{
 					index,
-					register_vertex_info[index].size,
-					register_vertex_info[index].frequency,
+					rsx::method_registers.register_vertex_info[index].size,
+					rsx::method_registers.register_vertex_info[index].frequency,
 					!!((modulo_mask >> index) & 0x1),
 					false,
-					is_int_type(vertex_arrays_info[index].type)
+					is_int_type(rsx::method_registers.vertex_arrays_info[index].type)
 				}
 				);
 			}
@@ -704,29 +740,30 @@ namespace rsx
 	RSXFragmentProgram thread::get_current_fragment_program() const
 	{
 		RSXFragmentProgram result = {};
-		u32 shader_program = rsx::method_registers[NV4097_SET_SHADER_PROGRAM];
+		u32 shader_program = rsx::method_registers.shader_program_address();
 		result.offset = shader_program & ~0x3;
 		result.addr = vm::base(rsx::get_address(result.offset, (shader_program & 0x3) - 1));
-		result.ctrl = rsx::method_registers[NV4097_SET_SHADER_CONTROL];
+		result.ctrl = rsx::method_registers.shader_control();
 		result.unnormalized_coords = 0;
-		result.front_back_color_enabled = !rsx::method_registers[NV4097_SET_TWO_SIDE_LIGHT_EN];
-		result.back_color_diffuse_output = !!(rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_OUTPUT_MASK] & CELL_GCM_ATTRIB_OUTPUT_MASK_BACKDIFFUSE);
-		result.back_color_specular_output = !!(rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_OUTPUT_MASK] & CELL_GCM_ATTRIB_OUTPUT_MASK_BACKSPECULAR);
-		result.alpha_func = to_comparaison_function(rsx::method_registers[NV4097_SET_ALPHA_FUNC]);
-		result.fog_equation = rsx::to_fog_mode(rsx::method_registers[NV4097_SET_FOG_MODE]);
-		u32 shader_window = rsx::method_registers[NV4097_SET_SHADER_WINDOW];
-		result.origin_mode = rsx::to_window_origin((shader_window >> 12) & 0xF);
-		result.pixel_center_mode = rsx::to_window_pixel_center((shader_window >> 16) & 0xF);
-		result.height = shader_window & 0xFFF;
+		result.front_back_color_enabled = !rsx::method_registers.two_side_light_en();
+		result.back_color_diffuse_output = !!(rsx::method_registers.vertex_attrib_output_mask() & CELL_GCM_ATTRIB_OUTPUT_MASK_BACKDIFFUSE);
+		result.back_color_specular_output = !!(rsx::method_registers.vertex_attrib_output_mask() & CELL_GCM_ATTRIB_OUTPUT_MASK_BACKSPECULAR);
+		result.front_color_diffuse_output = !!(rsx::method_registers.vertex_attrib_output_mask() & CELL_GCM_ATTRIB_OUTPUT_MASK_FRONTDIFFUSE);
+		result.front_color_specular_output = !!(rsx::method_registers.vertex_attrib_output_mask() & CELL_GCM_ATTRIB_OUTPUT_MASK_FRONTSPECULAR);
+		result.alpha_func = rsx::method_registers.alpha_func();
+		result.fog_equation = rsx::method_registers.fog_equation();
+		result.origin_mode = rsx::method_registers.shader_window_origin();
+		result.pixel_center_mode = rsx::method_registers.shader_window_pixel();
+		result.height = rsx::method_registers.shader_window_height();
 
 		std::array<texture_dimension_extended, 16> texture_dimensions;
-		for (u32 i = 0; i < rsx::limits::textures_count; ++i)
+		for (u32 i = 0; i < rsx::limits::fragment_textures_count; ++i)
 		{
-			if (!textures[i].enabled())
+			if (!rsx::method_registers.fragment_textures[i].enabled())
 				texture_dimensions[i] = texture_dimension_extended::texture_dimension_2d;
 			else
-				texture_dimensions[i] = textures[i].get_extended_texture_dimension();
-			if (textures[i].enabled() && (textures[i].format() & CELL_GCM_TEXTURE_UN))
+				texture_dimensions[i] = rsx::method_registers.fragment_textures[i].get_extended_texture_dimension();
+			if (rsx::method_registers.fragment_textures[i].enabled() && (rsx::method_registers.fragment_textures[i].format() & CELL_GCM_TEXTURE_UN))
 				result.unnormalized_coords |= (1 << i);
 		}
 		result.set_texture_dimension(texture_dimensions);
@@ -734,92 +771,105 @@ namespace rsx
 		return result;
 	}
 
+	raw_program thread::get_raw_program() const
+	{
+		raw_program result{};
+
+		u32 fp_info = rsx::method_registers.shader_program_address();
+
+		result.state.input_attributes = rsx::method_registers.vertex_attrib_input_mask();
+		result.state.output_attributes = rsx::method_registers.vertex_attrib_output_mask();
+		result.state.ctrl = rsx::method_registers.shader_control();
+		result.state.divider_op = rsx::method_registers.frequency_divider_operation_mask();
+		result.state.alpha_func = (u32)rsx::method_registers.alpha_func();
+		result.state.fog_mode = (u32)rsx::method_registers.fog_equation();
+		result.state.is_int = 0;
+
+		for (u8 index = 0; index < rsx::limits::vertex_count; ++index)
+		{
+			bool is_int = false;
+
+			if (rsx::method_registers.vertex_arrays_info[index].size > 0)
+			{
+				is_int = is_int_type(rsx::method_registers.vertex_arrays_info[index].type);
+				result.state.frequency[index] = rsx::method_registers.vertex_arrays_info[index].frequency;
+			}
+			else if (rsx::method_registers.register_vertex_info[index].size > 0)
+			{
+				is_int = is_int_type(rsx::method_registers.register_vertex_info[index].type);
+				result.state.frequency[index] = rsx::method_registers.register_vertex_info[index].frequency;
+				result.state.divider_op |= (1 << index);
+			}
+			else
+			{
+				result.state.frequency[index] = 0;
+			}
+
+			if (is_int)
+			{
+				result.state.is_int |= 1 << index;
+			}
+		}
+
+		for (u8 index = 0; index < rsx::limits::fragment_textures_count; ++index)
+		{
+			if (!rsx::method_registers.fragment_textures[index].enabled())
+			{
+				result.state.textures_alpha_kill[index] = 0;
+				result.state.textures_zfunc[index] = 0;
+				result.state.textures[index] = rsx::texture_target::none;
+				continue;
+			}
+
+			result.state.textures_alpha_kill[index] = rsx::method_registers.fragment_textures[index].alpha_kill_enabled() ? 1 : 0;
+			result.state.textures_zfunc[index] = rsx::method_registers.fragment_textures[index].zfunc();
+
+			switch (rsx::method_registers.fragment_textures[index].get_extended_texture_dimension())
+			{
+			case rsx::texture_dimension_extended::texture_dimension_1d: result.state.textures[index] = rsx::texture_target::_1; break;
+			case rsx::texture_dimension_extended::texture_dimension_2d: result.state.textures[index] = rsx::texture_target::_2; break;
+			case rsx::texture_dimension_extended::texture_dimension_3d: result.state.textures[index] = rsx::texture_target::_3; break;
+			case rsx::texture_dimension_extended::texture_dimension_cubemap: result.state.textures[index] = rsx::texture_target::cube; break;
+
+			default:
+				result.state.textures[index] = rsx::texture_target::none;
+				break;
+			}
+		}
+
+		for (u8 index = 0; index < rsx::limits::vertex_textures_count; ++index)
+		{
+			if (!rsx::method_registers.fragment_textures[index].enabled())
+			{
+				result.state.vertex_textures[index] = rsx::texture_target::none;
+				continue;
+			}
+
+			switch (rsx::method_registers.fragment_textures[index].get_extended_texture_dimension())
+			{
+			case rsx::texture_dimension_extended::texture_dimension_1d: result.state.vertex_textures[index] = rsx::texture_target::_1; break;
+			case rsx::texture_dimension_extended::texture_dimension_2d: result.state.vertex_textures[index] = rsx::texture_target::_2; break;
+			case rsx::texture_dimension_extended::texture_dimension_3d: result.state.vertex_textures[index] = rsx::texture_target::_3; break;
+			case rsx::texture_dimension_extended::texture_dimension_cubemap: result.state.vertex_textures[index] = rsx::texture_target::cube; break;
+
+			default:
+				result.state.vertex_textures[index] = rsx::texture_target::none;
+				break;
+			}
+		}
+
+		result.vertex_shader.ucode_ptr = rsx::method_registers.transform_program.data();
+		result.vertex_shader.offset = rsx::method_registers.transform_program_start();
+
+		result.fragment_shader.ucode_ptr = vm::base(rsx::get_address(fp_info & ~0x3, (fp_info & 0x3) - 1));
+		result.fragment_shader.offset = 0;
+
+		return result;
+	}
+
 	void thread::reset()
 	{
-		//setup method registers
-		std::memset(method_registers, 0, sizeof(method_registers));
-
-		method_registers[NV4097_SET_COLOR_MASK] = CELL_GCM_COLOR_MASK_R | CELL_GCM_COLOR_MASK_G | CELL_GCM_COLOR_MASK_B | CELL_GCM_COLOR_MASK_A;
-		method_registers[NV4097_SET_SCISSOR_HORIZONTAL] = (4096 << 16) | 0;
-		method_registers[NV4097_SET_SCISSOR_VERTICAL] = (4096 << 16) | 0;
-
-		method_registers[NV4097_SET_ALPHA_FUNC] = CELL_GCM_ALWAYS;
-		method_registers[NV4097_SET_ALPHA_REF] = 0;
-
-		method_registers[NV4097_SET_BLEND_FUNC_SFACTOR] = (CELL_GCM_ONE << 16) | CELL_GCM_ONE;
-		method_registers[NV4097_SET_BLEND_FUNC_DFACTOR] = (CELL_GCM_ZERO << 16) | CELL_GCM_ZERO;
-		method_registers[NV4097_SET_BLEND_COLOR] = 0;
-		method_registers[NV4097_SET_BLEND_COLOR2] = 0;
-		method_registers[NV4097_SET_BLEND_EQUATION] = (CELL_GCM_FUNC_ADD << 16) | CELL_GCM_FUNC_ADD;
-
-		method_registers[NV4097_SET_STENCIL_MASK] = 0xff;
-		method_registers[NV4097_SET_STENCIL_FUNC] = CELL_GCM_ALWAYS;
-		method_registers[NV4097_SET_STENCIL_FUNC_REF] = 0x00;
-		method_registers[NV4097_SET_STENCIL_FUNC_MASK] = 0xff;
-		method_registers[NV4097_SET_STENCIL_OP_FAIL] = CELL_GCM_KEEP;
-		method_registers[NV4097_SET_STENCIL_OP_ZFAIL] = CELL_GCM_KEEP;
-		method_registers[NV4097_SET_STENCIL_OP_ZPASS] = CELL_GCM_KEEP;
-
-		method_registers[NV4097_SET_BACK_STENCIL_MASK] = 0xff;
-		method_registers[NV4097_SET_BACK_STENCIL_FUNC] = CELL_GCM_ALWAYS;
-		method_registers[NV4097_SET_BACK_STENCIL_FUNC_REF] = 0x00;
-		method_registers[NV4097_SET_BACK_STENCIL_FUNC_MASK] = 0xff;
-		method_registers[NV4097_SET_BACK_STENCIL_OP_FAIL] = CELL_GCM_KEEP;
-		method_registers[NV4097_SET_BACK_STENCIL_OP_ZFAIL] = CELL_GCM_KEEP;
-		method_registers[NV4097_SET_BACK_STENCIL_OP_ZPASS] = CELL_GCM_KEEP;
-
-		method_registers[NV4097_SET_SHADE_MODE] = CELL_GCM_SMOOTH;
-
-		method_registers[NV4097_SET_LOGIC_OP] = CELL_GCM_COPY;
-
-		(f32&)method_registers[NV4097_SET_DEPTH_BOUNDS_MIN] = 0.f;
-		(f32&)method_registers[NV4097_SET_DEPTH_BOUNDS_MAX] = 1.f;
-
-		(f32&)method_registers[NV4097_SET_CLIP_MIN] = 0.f;
-		(f32&)method_registers[NV4097_SET_CLIP_MAX] = 1.f;
-
-		method_registers[NV4097_SET_LINE_WIDTH] = 1 << 3;
-
-		// These defaults were found using After Burner Climax (which never set fog mode despite using fog input)
-		method_registers[NV4097_SET_FOG_MODE] = 0x2601; // rsx::fog_mode::linear;
-		(f32&)method_registers[NV4097_SET_FOG_PARAMS] = 1.;
-		(f32&)method_registers[NV4097_SET_FOG_PARAMS + 1] = 1.;
-
-		method_registers[NV4097_SET_DEPTH_FUNC] = CELL_GCM_LESS;
-		method_registers[NV4097_SET_DEPTH_MASK] = CELL_GCM_TRUE;
-		(f32&)method_registers[NV4097_SET_POLYGON_OFFSET_SCALE_FACTOR] = 0.f;
-		(f32&)method_registers[NV4097_SET_POLYGON_OFFSET_BIAS] = 0.f;
-		method_registers[NV4097_SET_FRONT_POLYGON_MODE] = CELL_GCM_POLYGON_MODE_FILL;
-		method_registers[NV4097_SET_BACK_POLYGON_MODE] = CELL_GCM_POLYGON_MODE_FILL;
-		method_registers[NV4097_SET_CULL_FACE] = CELL_GCM_BACK;
-		method_registers[NV4097_SET_FRONT_FACE] = CELL_GCM_CCW;
-		method_registers[NV4097_SET_RESTART_INDEX] = -1;
-
-		method_registers[NV4097_SET_CLEAR_RECT_HORIZONTAL] = (4096 << 16) | 0;
-		method_registers[NV4097_SET_CLEAR_RECT_VERTICAL] = (4096 << 16) | 0;
-
-		method_registers[NV4097_SET_ZSTENCIL_CLEAR_VALUE] = 0xffffffff;
-
-		method_registers[NV4097_SET_CONTEXT_DMA_REPORT] = CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_REPORT;
-		rsx::method_registers[NV4097_SET_TWO_SIDE_LIGHT_EN] = true;
-		rsx::method_registers[NV4097_SET_ALPHA_FUNC] = CELL_GCM_ALWAYS;
-
-		// Reset vertex attrib array
-		for (int i = 0; i < limits::vertex_count; i++)
-		{
-			vertex_arrays_info[i].size = 0;
-		}
-
-		// Construct Textures
-		for (int i = 0; i < limits::textures_count; i++)
-		{
-			textures[i].init(i);
-		}
-
-		for (int i = 0; i < limits::vertex_textures_count; i++)
-		{
-			vertex_textures[i].init(i);
-		}
+		rsx::method_registers.reset();
 	}
 
 	void thread::init(const u32 ioAddress, const u32 ioSize, const u32 ctrlAddress, const u32 localAddress)
@@ -832,8 +882,8 @@ namespace rsx
 
 		m_used_gcm_commands.clear();
 
-		on_init();
-		start();
+		on_init_rsx();
+		start_thread(fxm::get<GSRender>());
 	}
 
 	GcmTileInfo *thread::find_tile(u32 offset, u32 location)

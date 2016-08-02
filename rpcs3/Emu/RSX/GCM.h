@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Emu/Memory/vm.h"
+#include "gcm_enums.h"
 
 enum
 {
@@ -22,197 +23,6 @@ enum
 	CELL_GCM_DISPLAY_FREQUENCY_SCANOUT = 2,
 	CELL_GCM_DISPLAY_FREQUENCY_DISABLE = 3,
 };
-
-namespace rsx
-{
-	enum class vertex_base_type : u8
-	{
-		s1, ///< signed byte
-		f, ///< float
-		sf, ///< half float
-		ub, ///< unsigned byte interpreted as 0.f and 1.f
-		s32k, ///< signed 32bits int
-		cmp, ///< compressed aka X11G11Z10 and always 1. W.
-		ub256, ///< unsigned byte interpreted as between 0 and 255.
-	};
-
-	vertex_base_type to_vertex_base_type(u8 in);
-
-	enum class index_array_type : u8
-	{
-		u32,
-		u16,
-	};
-
-	index_array_type to_index_array_type(u8 in);
-
-	enum class primitive_type : u8
-	{
-		points,
-		lines,
-		line_loop, // line strip with last end being joined with first end.
-		line_strip,
-		triangles,
-		triangle_strip,
-		triangle_fan, // like strip except that every triangle share the first vertex and one instead of 2 from previous triangle.
-		quads,
-		quad_strip,
-		polygon, // convex polygon
-	};
-
-	primitive_type to_primitive_type(u8 in);
-
-	enum class surface_target : u8
-	{
-		none,
-		surface_a,
-		surface_b,
-		surfaces_a_b,
-		surfaces_a_b_c,
-		surfaces_a_b_c_d,
-	};
-
-	surface_target to_surface_target(u8 in);
-
-	enum class surface_depth_format : u8
-	{
-		z16, // unsigned 16 bits depth
-		z24s8, // unsigned 24 bits depth + 8 bits stencil
-	};
-
-	surface_depth_format to_surface_depth_format(u8 in);
-
-	enum class surface_antialiasing : u8
-	{
-		center_1_sample,
-		diagonal_centered_2_samples,
-		square_centered_4_samples,
-		square_rotated_4_samples,
-	};
-
-	surface_antialiasing to_surface_antialiasing(u8 in);
-
-	enum class surface_color_format : u8
-	{
-		x1r5g5b5_z1r5g5b5,
-		x1r5g5b5_o1r5g5b5,
-		r5g6b5,
-		x8r8g8b8_z8r8g8b8,
-		x8r8g8b8_o8r8g8b8,
-		a8r8g8b8,
-		b8,
-		g8b8,
-		w16z16y16x16,
-		w32z32y32x32,
-		x32,
-		x8b8g8r8_z8b8g8r8,
-		x8b8g8r8_o8b8g8r8,
-		a8b8g8r8,
-	};
-
-	surface_color_format to_surface_color_format(u8 in);
-
-	enum class window_origin : u8
-	{
-		top,
-		bottom
-	};
-
-	window_origin to_window_origin(u8 in);
-
-	enum class window_pixel_center : u8
-	{
-		half,
-		integer
-	};
-
-	window_pixel_center to_window_pixel_center(u8 in);
-
-	enum class comparaison_function : u8
-	{
-		never,
-		less,
-		equal,
-		less_or_equal,
-		greater,
-		not_equal,
-		greater_or_equal,
-		always
-	};
-
-	comparaison_function to_comparaison_function(u16 in);
-
-	enum class fog_mode : u8
-	{
-		linear,
-		exponential,
-		exponential2,
-		exponential_abs,
-		exponential2_abs,
-		linear_abs
-	};
-
-	fog_mode to_fog_mode(u32 in);
-
-	enum class texture_dimension : u8
-	{
-		dimension1d,
-		dimension2d,
-		dimension3d,
-	};
-
-	texture_dimension to_texture_dimension(u8 in);
-
-	enum class texture_wrap_mode : u8
-	{
-		wrap,
-		mirror,
-		clamp_to_edge,
-		border,
-		clamp,
-		mirror_once_clamp_to_edge,
-		mirror_once_border,
-		mirror_once_clamp,
-	};
-
-	texture_wrap_mode to_texture_wrap_mode(u8 in);
-
-	enum class texture_max_anisotropy : u8
-	{
-		x1,
-		x2,
-		x4,
-		x6,
-		x8,
-		x10,
-		x12,
-		x16,
-	};
-
-	texture_max_anisotropy to_texture_max_anisotropy(u8 in);
-
-	enum class texture_minify_filter : u8
-	{
-		nearest, ///< no filtering, mipmap base level
-		linear, ///< linear filtering, mipmap base level
-		nearest_nearest, ///< no filtering, closest mipmap level
-		linear_nearest, ///< linear filtering, closest mipmap level
-		nearest_linear, ///< no filtering, linear mix between closest mipmap levels
-		linear_linear, ///< linear filtering, linear mix between closest mipmap levels
-		convolution_min, ///< Unknow mode but looks close to linear_linear
-	};
-
-	texture_minify_filter to_texture_minify_filter(u8 in);
-
-	enum class texture_magnify_filter : u8
-	{
-		nearest, ///< no filtering
-		linear, ///< linear filtering
-		convolution_mag, ///< Unknow mode but looks close to linear
-	};
-
-	texture_magnify_filter to_texture_magnify_filter(u8 in);
-}
 
 enum
 {
@@ -236,12 +46,6 @@ enum CellRescTableElement
 {
 	CELL_RESC_ELEMENT_HALF  = 0,
 	CELL_RESC_ELEMENT_FLOAT = 1,
-};
-
-enum
-{
-	CELL_GCM_FLAT   = 0x1D00,
-	CELL_GCM_SMOOTH = 0x1D01,
 };
 
 enum
@@ -296,43 +100,6 @@ enum
 	// Surface type
 	CELL_GCM_SURFACE_PITCH    = 1,
 	CELL_GCM_SURFACE_SWIZZLE  = 2,
-};
-
-enum
-{
-	// Transfer operations
-	CELL_GCM_TRANSFER_OPERATION_SRCCOPY_AND     = 0,
-	CELL_GCM_TRANSFER_OPERATION_ROP_AND         = 1,
-	CELL_GCM_TRANSFER_OPERATION_BLEND_AND       = 2,
-	CELL_GCM_TRANSFER_OPERATION_SRCCOPY         = 3,
-	CELL_GCM_TRANSFER_OPERATION_SRCCOPY_PREMULT = 4,
-	CELL_GCM_TRANSFER_OPERATION_BLEND_PREMULT   = 5,
-
-	CELL_GCM_TRANSFER_ORIGIN_CENTER = 1,
-	CELL_GCM_TRANSFER_ORIGIN_CORNER = 2,
-
-	CELL_GCM_TRANSFER_INTERPOLATOR_ZOH = 0,
-	CELL_GCM_TRANSFER_INTERPOLATOR_FOH = 1,
-
-	// Destination Format conversions
-	CELL_GCM_TRANSFER_SURFACE_FORMAT_R5G6B5   = 4,
-	CELL_GCM_TRANSFER_SURFACE_FORMAT_A8R8G8B8 = 10,
-	CELL_GCM_TRANSFER_SURFACE_FORMAT_Y32      = 11,
-
-	// Source Format conversions
-	CELL_GCM_TRANSFER_SCALE_FORMAT_A1R5G5B5         = 1,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_X1R5G5B5         = 2,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_A8R8G8B8         = 3,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_X8R8G8B8         = 4,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_CR8YB8CB8YA8     = 5,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_YB8CR8YA8CB8     = 6,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_R5G6B5           = 7,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_Y8               = 8,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_AY8              = 9,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_EYB8ECR8EYA8ECB8 = 10,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_ECR8EYB8ECB8EYA8 = 11,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_A8B8G8R8         = 12,
-	CELL_GCM_TRANSFER_SCALE_FORMAT_X8B8G8R8         = 13,
 };
 
 enum
@@ -428,28 +195,6 @@ enum
 
 	CELL_GCM_ZERO = 0,
 	CELL_GCM_ONE = 1,
-	CELL_GCM_SRC_COLOR = 0x0300,
-	CELL_GCM_ONE_MINUS_SRC_COLOR = 0x0301,
-	CELL_GCM_SRC_ALPHA = 0x0302,
-	CELL_GCM_ONE_MINUS_SRC_ALPHA = 0x0303,
-	CELL_GCM_DST_ALPHA = 0x0304,
-	CELL_GCM_ONE_MINUS_DST_ALPHA = 0x0305,
-	CELL_GCM_DST_COLOR = 0x0306,
-	CELL_GCM_ONE_MINUS_DST_COLOR = 0x0307,
-	CELL_GCM_SRC_ALPHA_SATURATE = 0x0308,
-	CELL_GCM_CONSTANT_COLOR = 0x8001,
-	CELL_GCM_ONE_MINUS_CONSTANT_COLOR = 0x8002,
-	CELL_GCM_CONSTANT_ALPHA = 0x8003,
-	CELL_GCM_ONE_MINUS_CONSTANT_ALPHA = 0x8004,
-
-	CELL_GCM_FUNC_ADD = 0x8006,
-	CELL_GCM_MIN = 0x8007,
-	CELL_GCM_MAX = 0x8008,
-	CELL_GCM_FUNC_SUBTRACT = 0x800A,
-	CELL_GCM_FUNC_REVERSE_SUBTRACT = 0x800B,
-	CELL_GCM_FUNC_REVERSE_SUBTRACT_SIGNED = 0x0000F005,
-	CELL_GCM_FUNC_ADD_SIGNED = 0x0000F006,
-	CELL_GCM_FUNC_REVERSE_ADD_SIGNED = 0x0000F007,
 
 	CELL_GCM_FRONT = 0x0404,
 	CELL_GCM_BACK = 0x0405,
@@ -457,30 +202,6 @@ enum
 
 	CELL_GCM_CW = 0x0900,
 	CELL_GCM_CCW = 0x0901,
-
-	CELL_GCM_CLEAR = 0x1500,
-	CELL_GCM_AND = 0x1501,
-	CELL_GCM_AND_REVERSE = 0x1502,
-	CELL_GCM_COPY = 0x1503,
-	CELL_GCM_AND_INVERTED = 0x1504,
-	CELL_GCM_NOOP = 0x1505,
-	CELL_GCM_XOR = 0x1506,
-	CELL_GCM_OR = 0x1507,
-	CELL_GCM_NOR = 0x1508,
-	CELL_GCM_EQUIV = 0x1509,
-	CELL_GCM_INVERT = 0x150A,
-	CELL_GCM_OR_REVERSE = 0x150B,
-	CELL_GCM_COPY_INVERTED = 0x150C,
-	CELL_GCM_OR_INVERTED = 0x150D,
-	CELL_GCM_NAND = 0x150E,
-	CELL_GCM_SET = 0x150F,
-
-	CELL_GCM_KEEP = 0x1E00,
-	CELL_GCM_REPLACE = 0x1E01,
-	CELL_GCM_INCR = 0x1E02,
-	CELL_GCM_DECR = 0x1E03,
-	CELL_GCM_INCR_WRAP = 0x8507,
-	CELL_GCM_DECR_WRAP = 0x8508,
 
 	CELL_GCM_TRANSFER_LOCAL_TO_LOCAL = 0,
 	CELL_GCM_TRANSFER_MAIN_TO_LOCAL = 1,
@@ -515,39 +236,54 @@ enum
 	CELL_GCM_SCULL_SFUNC_GEQUAL = 6,
 	CELL_GCM_SCULL_SFUNC_ALWAYS = 7,
 
-	CELL_GCM_ATTRIB_OUTPUT_MASK_FRONTDIFFUSE = 1 << 0,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_FRONTSPECULAR = 1 << 1,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_BACKDIFFUSE = 1 << 2,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_BACKSPECULAR = 1 << 3,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_FOG = 1 << 4,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_POINTSIZE = 1 << 5,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_UC0 = 1 << 6,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_UC1 = 1 << 7,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_UC2 = 1 << 8,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_UC3 = 1 << 9,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_UC4 = 1 << 10,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_UC5 = 1 << 11,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX8 = 1 << 12,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX9 = 1 << 13,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX0 = 1 << 14,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX1 = 1 << 15,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX2 = 1 << 16,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX3 = 1 << 17,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX4 = 1 << 18,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX5 = 1 << 19,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX6 = 1 << 20,
-	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX7 = 1 << 21,
+	CELL_GCM_ATTRIB_OUTPUT_FRONTDIFFUSE = 0,
+	CELL_GCM_ATTRIB_OUTPUT_FRONTSPECULAR = 1,
+	CELL_GCM_ATTRIB_OUTPUT_BACKDIFFUSE = 2,
+	CELL_GCM_ATTRIB_OUTPUT_BACKSPECULAR = 3,
+	CELL_GCM_ATTRIB_OUTPUT_FOG = 4,
+	CELL_GCM_ATTRIB_OUTPUT_POINTSIZE = 5,
+	CELL_GCM_ATTRIB_OUTPUT_UC0 = 6,
+	CELL_GCM_ATTRIB_OUTPUT_UC1 = 7,
+	CELL_GCM_ATTRIB_OUTPUT_UC2 = 8,
+	CELL_GCM_ATTRIB_OUTPUT_UC3 = 9,
+	CELL_GCM_ATTRIB_OUTPUT_UC4 = 10,
+	CELL_GCM_ATTRIB_OUTPUT_UC5 = 11,
+	CELL_GCM_ATTRIB_OUTPUT_TEX8 = 12,
+	CELL_GCM_ATTRIB_OUTPUT_TEX9 = 13,
+	CELL_GCM_ATTRIB_OUTPUT_TEX0 = 14,
+	CELL_GCM_ATTRIB_OUTPUT_TEX1 = 15,
+	CELL_GCM_ATTRIB_OUTPUT_TEX2 = 16,
+	CELL_GCM_ATTRIB_OUTPUT_TEX3 = 17,
+	CELL_GCM_ATTRIB_OUTPUT_TEX4 = 18,
+	CELL_GCM_ATTRIB_OUTPUT_TEX5 = 19,
+	CELL_GCM_ATTRIB_OUTPUT_TEX6 = 20,
+	CELL_GCM_ATTRIB_OUTPUT_TEX7 = 21,
 
-	CELL_GCM_POLYGON_MODE_POINT = 0x1B00,
-	CELL_GCM_POLYGON_MODE_LINE = 0x1B01,
-	CELL_GCM_POLYGON_MODE_FILL = 0x1B02,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_FRONTDIFFUSE = 1 << CELL_GCM_ATTRIB_OUTPUT_FRONTDIFFUSE,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_FRONTSPECULAR = 1 << CELL_GCM_ATTRIB_OUTPUT_FRONTSPECULAR,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_BACKDIFFUSE = 1 << CELL_GCM_ATTRIB_OUTPUT_BACKDIFFUSE,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_BACKSPECULAR = 1 << CELL_GCM_ATTRIB_OUTPUT_BACKSPECULAR,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_FOG = 1 << CELL_GCM_ATTRIB_OUTPUT_FOG,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_POINTSIZE = 1 << CELL_GCM_ATTRIB_OUTPUT_POINTSIZE,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_UC0 = 1 << CELL_GCM_ATTRIB_OUTPUT_UC0,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_UC1 = 1 << CELL_GCM_ATTRIB_OUTPUT_UC1,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_UC2 = 1 << CELL_GCM_ATTRIB_OUTPUT_UC2,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_UC3 = 1 << CELL_GCM_ATTRIB_OUTPUT_UC3,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_UC4 = 1 << CELL_GCM_ATTRIB_OUTPUT_UC4,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_UC5 = 1 << CELL_GCM_ATTRIB_OUTPUT_UC5,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX8 = 1 << CELL_GCM_ATTRIB_OUTPUT_TEX8,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX9 = 1 << CELL_GCM_ATTRIB_OUTPUT_TEX9,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX0 = 1 << CELL_GCM_ATTRIB_OUTPUT_TEX0,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX1 = 1 << CELL_GCM_ATTRIB_OUTPUT_TEX1,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX2 = 1 << CELL_GCM_ATTRIB_OUTPUT_TEX2,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX3 = 1 << CELL_GCM_ATTRIB_OUTPUT_TEX3,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX4 = 1 << CELL_GCM_ATTRIB_OUTPUT_TEX4,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX5 = 1 << CELL_GCM_ATTRIB_OUTPUT_TEX5,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX6 = 1 << CELL_GCM_ATTRIB_OUTPUT_TEX6,
+	CELL_GCM_ATTRIB_OUTPUT_MASK_TEX7 = 1 << CELL_GCM_ATTRIB_OUTPUT_TEX7,
 
 	CELL_GCM_TRUE = 1,
 	CELL_GCM_FALSE = 0,
-
-	CELL_GCM_USER_CLIP_PLANE_DISABLE = 0,
-	CELL_GCM_USER_CLIP_PLANE_ENABLE_LT = 1,
-	CELL_GCM_USER_CLIP_PLANE_ENABLE_GE = 2,
 };
 
 enum
@@ -571,10 +307,8 @@ enum
 {
 	CELL_GCM_CONTEXT_DMA_MEMORY_FRAME_BUFFER   = 0xFEED0000, // Local memory
 	CELL_GCM_CONTEXT_DMA_MEMORY_HOST_BUFFER    = 0xFEED0001, // Main memory
-	CELL_GCM_CONTEXT_SURFACE2D                 = 0x313371C3,
-	CELL_GCM_CONTEXT_SWIZZLE2D                 = 0x31337A73,
-	CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_REPORT  = 0x66626660,
-	CELL_GCM_CONTEXT_DMA_REPORT_LOCATION_MAIN  = 0xBAD68000,
+	CELL_GCM_CONTEXT_DMA_TO_MEMORY_GET_REPORT = 0x66626660,
+	CELL_GCM_CONTEXT_DMA_REPORT_LOCATION_MAIN = 0xBAD68000,
 	CELL_GCM_CONTEXT_DMA_NOTIFY_MAIN_0         = 0x6660420F,
 };
 
@@ -1041,33 +775,25 @@ enum Method
 
 namespace rsx
 {
-	template<typename ...T>
-	static auto make_command(u32 start_register, T... values) -> std::array<u32, sizeof...(values) + 1>
+	template<typename AT>
+	static inline u32 make_command(vm::_ptr_base<be_t<u32>, AT>& dst, u32 start_register, std::initializer_list<any32> values)
 	{
-		return{ (start_register << 2) | u32(sizeof...(values) << 18), u32(values)... };
-	}
+		*dst++ = start_register << 2 | static_cast<u32>(values.size()) << 18;
 
-	static u32 make_jump(u32 offset)
-	{
-		return CELL_GCM_METHOD_FLAG_JUMP | offset;
-	}
-
-	template<typename AT, typename ...T>
-	static size_t make_command(vm::ps3::ptr<u32, AT> &dst, u32 start_register, T... values)
-	{
-		for (u32 command : { (start_register << 2) | u32(sizeof...(values) << 18), static_cast<u32>(values)... })
+		for (const any32& cmd : values)
 		{
-			*dst++ = command;
+			*dst++ = cmd.as<u32>();
 		}
 
-		return sizeof...(values) + 1;
+		return SIZE_32(u32) * (static_cast<u32>(values.size()) + 1);
 	}
 
 	template<typename AT>
-	static size_t make_jump(vm::ps3::ptr<u32, AT> &dst, u32 offset)
+	static inline u32 make_jump(vm::_ptr_base<be_t<u32>, AT>& dst, u32 offset)
 	{
-		*dst++ = make_jump(offset);
-		return 1;
+		*dst++ = CELL_GCM_METHOD_FLAG_JUMP | offset;
+
+		return SIZE_32(u32);
 	}
 
 	std::string get_method_name(const u32 id);

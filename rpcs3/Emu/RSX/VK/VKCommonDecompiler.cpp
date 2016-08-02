@@ -30,7 +30,7 @@ namespace vk
 		case FUNCTION::FUNCTION_DP2:
 			return "vec4(dot($0.xy, $1.xy))";
 		case FUNCTION::FUNCTION_DP2A:
-			return "";
+			return "vec4(dot($0.xy, $1.xy) + $2.x)";
 		case FUNCTION::FUNCTION_DP3:
 			return "vec4(dot($0.xyz, $1.xyz))";
 		case FUNCTION::FUNCTION_DP4:
@@ -43,24 +43,32 @@ namespace vk
 			return "vec4(1., 1., 1., 1.)";
 		case FUNCTION::FUNCTION_FRACT:
 			return "fract($0)";
+		case FUNCTION::FUNCTION_REFL:
+			return "vec4($0 - 2.0 * (dot($0, $1)) * $1)";
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE1D:
 			return "texture($t, $0.x)";
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE1D_PROJ:
 			return "textureProj($t, $0.x, $1.x)"; // Note: $1.x is bias
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE1D_LOD:
 			return "textureLod($t, $0.x, $1.x)";
+		case FUNCTION::FUNCTION_TEXTURE_SAMPLE1D_GRAD:
+			return "textureGrad($t, $0.x, $1.x, $2.y)";
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE2D:
 			return "texture($t, $0.xy)";
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE2D_PROJ:
 			return "textureProj($t, $0.xyz, $1.x)"; // Note: $1.x is bias
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLE2D_LOD:
 			return "textureLod($t, $0.xy, $1.x)";
+		case FUNCTION::FUNCTION_TEXTURE_SAMPLE2D_GRAD:
+			return "textureGrad($t, $0.xyz, $1.x, $2.y)"; // Note: $1.x is bias
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLECUBE:
 			return "texture($t, $0.xyz)";
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLECUBE_PROJ:
 			return "textureProj($t, $0.xyzw, $1.x)"; // Note: $1.x is bias
 		case FUNCTION::FUNCTION_TEXTURE_SAMPLECUBE_LOD:
 			return "textureLod($t, $0.xyz, $1.x)";
+		case FUNCTION::FUNCTION_TEXTURE_SAMPLECUBE_GRAD:
+			return "textureGrad($t, $0.xyzw, $1.x, $2.y)";
 		case FUNCTION::FUNCTION_DFDX:
 			return "dFdx($0)";
 		case FUNCTION::FUNCTION_DFDY:
@@ -85,7 +93,7 @@ namespace vk
 		case COMPARE::FUNCTION_SNE:
 			return "notEqual(" + Op0 + ", " + Op1 + ")";
 		}
-		throw EXCEPTION("Unknow compare function");
+		throw EXCEPTION("Unknown compare function");
 	}
 
 	void insert_glsl_legacy_function(std::ostream& OS)
@@ -223,20 +231,22 @@ namespace vk
 
 	static const varying_register_t varying_regs[] =
 	{
-		{ "diff_color", 0 },
-		{ "tc0", 1 },
-		{ "tc1", 2 },
-		{ "tc2", 3 },
-		{ "tc3", 4 },
-		{ "tc4", 5 },
-		{ "tc5", 6 },
-		{ "tc6", 7 },
-		{ "tc7", 8 },
-		{ "tc8", 9 },
-		{ "tc9", 10 },
+		{ "tc0", 0 },
+		{ "tc1", 1 },
+		{ "tc2", 2 },
+		{ "tc3", 3 },
+		{ "tc4", 4 },
+		{ "tc5", 5 },
+		{ "tc6", 6 },
+		{ "tc7", 7 },
+		{ "tc8", 8 },
+		{ "tc9", 9 },
+		{ "diff_color", 10 },
+		{ "back_diff_color", 10 },
 		{ "front_diff_color", 11 },
-		{ "front_spec_color", 12 },
-		{ "spec_color", 13 },
+		{ "spec_color", 12 },
+		{ "back_spec_color", 12 },
+		{ "front_spec_color", 13 },
 		{ "fog_c", 14 },
 		{ "fogc", 14 }
 	};

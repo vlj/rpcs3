@@ -1,11 +1,14 @@
 #pragma once
-#include "config.h"
-
-std::vector<std::string> GetAdapters();
 
 class SettingsDialog : public wxDialog
 {
 public:
-	SettingsDialog(wxWindow *parent, rpcs3::config_t* cfg = &rpcs3::config);
-};
+	SettingsDialog(wxWindow* parent);
 
+private:
+	wxCheckListBox* chbox_list_core_lle;
+
+	void OnModuleListItemToggled(wxCommandEvent& event);
+	void OnSearchBoxTextChanged(wxCommandEvent& event);
+	std::map<std::string, bool> lle_module_list;
+};

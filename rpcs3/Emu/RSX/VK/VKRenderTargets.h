@@ -17,17 +17,19 @@ namespace rsx
 
 		static std::unique_ptr<vk::image> create_new_surface(u32 address, surface_color_format format, size_t width, size_t height, vk::render_device &device, vk::command_buffer *cmd, const vk::gpu_formats_support &support, const vk::memory_type_mapping &mem_mapping)
 		{
-			VkFormat requested_format = vk::get_compatible_surface_format(format);
+			auto fmt = vk::get_compatible_surface_format(format);
+			VkFormat requested_format = fmt.first;
 
 			std::unique_ptr<vk::image> rtt;
 			rtt.reset(new vk::image(device, mem_mapping.device_local,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 				VK_IMAGE_TYPE_2D,
 				requested_format,
 				static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1, 1, 1,
 				VK_SAMPLE_COUNT_1_BIT,
 				VK_IMAGE_LAYOUT_UNDEFINED,
 				VK_IMAGE_TILING_OPTIMAL,
-				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,
+				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,
 				0));
 			change_image_layout(*cmd, rtt->value, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, vk::get_image_subresource_range(0, 0, 1, 1, VK_IMAGE_ASPECT_COLOR_BIT));
 			//Clear new surface
@@ -42,6 +44,7 @@ namespace rsx
 			vkCmdClearColorImage(*cmd, rtt->value, VK_IMAGE_LAYOUT_GENERAL, &clear_color, 1, &range);
 			change_image_layout(*cmd, rtt->value, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, vk::get_image_subresource_range(0, 0, 1, 1, VK_IMAGE_ASPECT_COLOR_BIT));
 
+			rtt->native_layout = fmt.second;
 			return rtt;
 		}
 
@@ -55,7 +58,15 @@ namespace rsx
 
 			std::unique_ptr<vk::image> ds;
 			ds.reset(new vk::image(device, mem_mapping.device_local,
-				VK_IMAGE_TYPE_2D, requested_format, static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1, 1, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT, 0));
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+				VK_IMAGE_TYPE_2D,
+				requested_format,
+				static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1, 1, 1,
+				VK_SAMPLE_COUNT_1_BIT,
+				VK_IMAGE_LAYOUT_UNDEFINED,
+				VK_IMAGE_TILING_OPTIMAL,
+				VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0));
+
 			change_image_layout(*cmd, ds->value, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, range);
 
 			//Clear new surface..
@@ -93,7 +104,7 @@ namespace rsx
 
 		static bool rtt_has_format_width_height(const std::unique_ptr<vk::image> &rtt, surface_color_format format, size_t width, size_t height)
 		{
-			VkFormat fmt = vk::get_compatible_surface_format(format);
+			VkFormat fmt = vk::get_compatible_surface_format(format).first;
 
 			if (rtt->info.format == fmt &&
 				rtt->info.extent.width == width &&

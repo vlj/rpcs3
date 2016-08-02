@@ -22,6 +22,7 @@
 [submodule "libpng"]
 	path = 3rdparty/libpng
 	url = https://github.com/RPCS3/libpng
+	ignore = dirty
 [submodule "Vulkan/glslang"]
 	path = Vulkan/glslang
 	url = https://github.com/KhronosGroup/glslang.git
@@ -34,3 +35,9 @@
 [submodule "3rdparty/pugixml"]
 	path = 3rdparty/pugixml
 	url = https://github.com/RPCS3/pugixml
+[submodule "3rdparty/cereal"]
+	path = 3rdparty/cereal
+	url = https://github.com/USCiLab/cereal.git
+[submodule "rsx-debugger"]
+	path = rsx-debugger
+	url = https://github.com/RPCS3/rsx-debugger.git

@@ -1,17 +1,45 @@
 #include "stdafx.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
-#include "Emu/SysCalls/Callback.h"
+#include "Emu/IdManager.h"
+#include "Loader/ELF.h"
 
 #include "Emu/Cell/RawSPUThread.h"
 
 // Originally, SPU MFC registers are accessed externally in a concurrent manner (don't mix with channels, SPU MFC channels are isolated)
 thread_local spu_mfc_arg_t raw_spu_mfc[8] = {};
 
-RawSPUThread::RawSPUThread(const std::string& name, u32 index)
-	: SPUThread(CPU_THREAD_RAW_SPU, name, index, RAW_SPU_BASE_ADDR + RAW_SPU_OFFSET * index)
+void RawSPUThread::cpu_task()
 {
-	CHECK_ASSERTION(vm::falloc(offset, 0x40000) == offset);
+	// get next PC and SPU Interrupt status
+	pc = npc.exchange(0);
+
+	set_interrupt_status((pc & 1) != 0);
+
+	pc &= 0x3fffc;
+
+	SPUThread::cpu_task();
+
+	// save next PC and current SPU Interrupt status
+	npc = pc | ((ch_event_stat & SPU_EVENT_INTR_ENABLED) != 0);
+}
+
+void RawSPUThread::on_init(const std::shared_ptr<void>& _this)
+{
+	if (!offset)
+	{
+		// Install correct SPU index and LS address
+		const_cast<u32&>(index) = id;
+		const_cast<u32&>(offset) = vm::falloc(RAW_SPU_BASE_ADDR + RAW_SPU_OFFSET * index, 0x40000);
+		VERIFY(offset);
+
+		SPUThread::on_init(_this);
+	}
+}
+
+RawSPUThread::RawSPUThread(const std::string& name)
+	: SPUThread(name)
+{
 }
 
 bool RawSPUThread::read_reg(const u32 addr, u32& value)
@@ -34,16 +62,7 @@ bool RawSPUThread::read_reg(const u32 addr, u32& value)
 
 	case SPU_Out_MBox_offs:
 	{
-		value = ch_out_mbox.pop();
-
-		if (ch_out_mbox.notification_required)
-		{
-			// lock for reliable notification
-			std::lock_guard<std::mutex> lock(mutex);
-
-			cv.notify_one();
-		}
-
+		value = ch_out_mbox.pop(*this);
 		return true;
 	}
 
@@ -68,20 +87,9 @@ bool RawSPUThread::write_reg(const u32 addr, const u32 value)
 {
 	auto try_start = [this]()
 	{
-		if (status.atomic_op([](u32& status) -> bool
+		if (!status.test_and_set(SPU_STATUS_RUNNING))
 		{
-			if (status & SPU_STATUS_RUNNING)
-			{
-				return false;
-			}
-			else
-			{
-				status = SPU_STATUS_RUNNING;
-				return true;
-			}
-		}))
-		{
-			exec();
+			run();
 		}
 	};
 
@@ -162,14 +170,7 @@ bool RawSPUThread::write_reg(const u32 addr, const u32 value)
 
 	case SPU_In_MBox_offs:
 	{
-		if (ch_in_mbox.push(value))
-		{
-			// lock for reliable notification
-			std::lock_guard<std::mutex> lock(mutex);
-
-			cv.notify_one();
-		}
-
+		ch_in_mbox.push(*this, value);
 		return true;
 	}
 
@@ -182,7 +183,7 @@ bool RawSPUThread::write_reg(const u32 addr, const u32 value)
 		else if (value == SPU_RUNCNTL_STOP_REQUEST)
 		{
 			status &= ~SPU_STATUS_RUNNING;
-			stop();
+			state += cpu_state::stop;
 		}
 		else
 		{
@@ -221,17 +222,18 @@ bool RawSPUThread::write_reg(const u32 addr, const u32 value)
 	return false;
 }
 
-void RawSPUThread::cpu_task()
+void spu_load_exec(const spu_exec_object& elf)
 {
-	// get next PC and SPU Interrupt status
-	pc = npc.exchange(0);
+	auto spu = idm::make_ptr<RawSPUThread>("TEST_SPU");
 
-	set_interrupt_status((pc & 1) != 0);
+	for (const auto& prog : elf.progs)
+	{
+		if (prog.p_type == 0x1 /* LOAD */ && prog.p_memsz)
+		{
+			std::memcpy(vm::base(spu->offset + prog.p_vaddr), prog.bin.data(), prog.p_filesz);
+		}
+	}
 
-	pc &= 0x3fffc;
-
-	SPUThread::cpu_task();
-
-	// save next PC and current SPU Interrupt status
-	npc = pc | ((ch_event_stat & SPU_EVENT_INTR_ENABLED) != 0);
+	spu->cpu_init();
+	spu->npc = elf.header.e_entry;
 }
