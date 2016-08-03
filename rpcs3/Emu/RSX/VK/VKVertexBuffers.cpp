@@ -222,14 +222,13 @@ namespace vk
 		bool emulated = false;
 		get_appropriate_topology(type, emulated);
 
-		u32 min_index, max_index;
-
-		if (!emulated)
+		if (indexed_draw)
 		{
+			u32 min_index, max_index;
 			size_t index_size = (index_type == rsx::index_array_type::u32) ? 4 : 2;
 			std::tie(min_index, max_index) = write_index_array_data_to_buffer(gsl::span<gsl::byte>(static_cast<gsl::byte*>(dst_ptr), vertex_count * index_size), raw_index_buffer,
 				index_type, type, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
-				[](auto prim) { return false; });
+				[](auto prim) { return !is_primitive_native(prim); });
 
 			switch (index_type)
 			{
@@ -244,53 +243,13 @@ namespace vk
 		{
 		case rsx::primitive_type::line_loop:
 		{
-			if (!indexed_draw)
-			{
-				expand_line_loop_array_to_strip(vertex_count, static_cast<u16*>(dst_ptr));
-				return std::make_tuple(0, vertex_count-1, VK_INDEX_TYPE_UINT16);
-			}
-
-			VkIndexType vk_index_type = VK_INDEX_TYPE_UINT16;
-
-			switch (index_type)
-			{
-			case rsx::index_array_type::u32:
-			{
-				u32 *idx_ptr = static_cast<u32*>(dst_ptr);
-				std::tie(min_index, max_index) = write_index_array_data_to_buffer(gsl::span<gsl::byte>(static_cast<gsl::byte*>(dst_ptr), vertex_count * 4), raw_index_buffer,
-					index_type, type, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
-					[](auto prim) { return false; });
-				idx_ptr[vertex_count] = idx_ptr[0];
-				vk_index_type = VK_INDEX_TYPE_UINT32;
-				break;
-			}
-			case rsx::index_array_type::u16:
-			{
-				u16 *idx_ptr = static_cast<u16*>(dst_ptr);
-				std::tie(min_index, max_index) = write_index_array_data_to_buffer(gsl::span<gsl::byte>(static_cast<gsl::byte*>(dst_ptr), vertex_count * 2), raw_index_buffer,
-					index_type, type, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
-					[](auto prim) { return false; });
-				idx_ptr[vertex_count] = idx_ptr[0];
-				break;
-			}
-			}
-
-			return std::make_tuple(min_index, max_index, vk_index_type);
+			expand_line_loop_array_to_strip(vertex_count, static_cast<u16*>(dst_ptr));
+			return std::make_tuple(0, vertex_count-1, VK_INDEX_TYPE_UINT16);
 		}
 		default:
 		{
-			if (indexed_draw)
-			{
-				std::tie(min_index, max_index) = write_index_array_data_to_buffer(gsl::span<gsl::byte>(static_cast<gsl::byte*>(dst_ptr), index_count * 2), raw_index_buffer,
-					rsx::index_array_type::u16, type, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
-					[](auto prim) { return !is_primitive_native(prim); });
-				return std::make_tuple(min_index, max_index, VK_INDEX_TYPE_UINT16);
-			}
-			else
-			{
-				write_index_array_for_non_indexed_non_native_primitive_to_buffer(reinterpret_cast<char*>(dst_ptr), type, 0, vertex_count);
-				return std::make_tuple(0, vertex_count-1, VK_INDEX_TYPE_UINT16);
-			}
+			write_index_array_for_non_indexed_non_native_primitive_to_buffer(reinterpret_cast<char*>(dst_ptr), type, 0, vertex_count);
+			return std::make_tuple(0, vertex_count-1, VK_INDEX_TYPE_UINT16);
 		}
 		}
 	}
