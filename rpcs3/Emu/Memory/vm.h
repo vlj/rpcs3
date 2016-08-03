@@ -3,6 +3,9 @@
 #include <map>
 #include <functional>
 #include <memory>
+#include <unordered_map>
+#include <Utilities/StrFmt.h>
+#include <Utilities/BEType.h>
 
 class thread_ctrl;
 

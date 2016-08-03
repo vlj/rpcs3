@@ -2,9 +2,10 @@
 
 #include <vector>
 
+#include <Utilities/types.h>
 #include "Utilities/GSL.h"
-#include "Emu/Memory/vm.h"
-#include "../RSXThread.h"
+//#include "Emu/Memory/vm.h"
+#include "../gcm_enums.h"
 
 /**
  * Write count vertex attributes from src_ptr starting at first.

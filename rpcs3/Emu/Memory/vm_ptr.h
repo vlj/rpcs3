@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Utilities/Macro.h>
 #include "vm_ref.h"
 
 class ppu_thread;

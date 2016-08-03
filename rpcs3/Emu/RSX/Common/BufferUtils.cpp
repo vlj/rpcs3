@@ -1,6 +1,10 @@
-#include "stdafx.h"
+//#include "stdafx.h"
 #include "BufferUtils.h"
-#include "../rsx_methods.h"
+//#include "../rsx_methods.h"
+#include <Utilities/BEType.h>
+#include <Utilities/Macro.h>
+#include <Utilities/StrFmt.h>
+#define EXCEPTION(format_str, ...) fmt::exception(format_str, ##__VA_ARGS__)
 
 namespace
 {
