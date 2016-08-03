@@ -158,30 +158,15 @@ namespace
 	{
 		u32 min_index, max_index, vertex_draw_count = initial_vertex_count;
 
-		if (gl::is_primitive_native(draw_mode))
-		{
-			if (type == rsx::index_array_type::u16)
-				std::tie(min_index, max_index) = write_index_array_data_to_buffer(gsl::span<gsl::byte>(static_cast<gsl::byte*>(ptr), vertex_draw_count * 2), raw_index_buffer,
-					type, draw_mode, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
-					[](auto prim) { return false; });
-			else
-				std::tie(min_index, max_index) = write_index_array_data_to_buffer(gsl::span<gsl::byte>(static_cast<gsl::byte*>(ptr), vertex_draw_count * 4), raw_index_buffer,
-					type, draw_mode, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
-					[](auto prim) { return false; });
+		vertex_draw_count = (u32)get_index_count(draw_mode, gsl::narrow<int>(vertex_draw_count));
 
-		}
-		else
-		{
-			vertex_draw_count = (u32)get_index_count(draw_mode, gsl::narrow<int>(vertex_draw_count));
-			
-			u32 type_size = gsl::narrow<u32>(get_index_type_size(type));
-			u32 block_sz = vertex_draw_count * type_size;
-			
-			gsl::span<gsl::byte> dst{ reinterpret_cast<gsl::byte*>(ptr), gsl::narrow<u32>(block_sz) };
-			std::tie(min_index, max_index) = write_index_array_data_to_buffer(dst, raw_index_buffer,
-				type, draw_mode, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
-				[](auto prim) { return !is_primitive_native(prim); });
-		}
+		u32 type_size = gsl::narrow<u32>(get_index_type_size(type));
+		u32 block_sz = vertex_draw_count * type_size;
+
+		gsl::span<gsl::byte> dst{ reinterpret_cast<gsl::byte*>(ptr), gsl::narrow<u32>(block_sz) };
+		std::tie(min_index, max_index) = write_index_array_data_to_buffer(dst, raw_index_buffer,
+			type, draw_mode, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
+			[](auto prim) { return !is_primitive_native(prim); });
 
 		return std::make_tuple(min_index, max_index, vertex_draw_count);
 	}
