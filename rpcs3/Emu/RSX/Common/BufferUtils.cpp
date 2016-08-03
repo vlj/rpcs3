@@ -247,11 +247,11 @@ bool is_primitive_native(rsx::primitive_type draw_mode)
 	{
 	case rsx::primitive_type::points:
 	case rsx::primitive_type::lines:
-	case rsx::primitive_type::line_loop:
 	case rsx::primitive_type::line_strip:
 	case rsx::primitive_type::triangles:
 	case rsx::primitive_type::triangle_strip:
 		return true;
+	case rsx::primitive_type::line_loop:
 	case rsx::primitive_type::polygon:
 	case rsx::primitive_type::triangle_fan:
 	case rsx::primitive_type::quads:
@@ -274,6 +274,8 @@ size_t get_index_count(rsx::primitive_type draw_mode, unsigned initial_index_cou
 
 	switch (draw_mode)
 	{
+	case rsx::primitive_type::line_loop:
+		return initial_index_count + 1;
 	case rsx::primitive_type::polygon:
 	case rsx::primitive_type::triangle_fan:
 		return (initial_index_count - 2) * 3;
@@ -301,6 +303,9 @@ void write_index_array_for_non_indexed_non_native_primitive_to_buffer(char* dst,
 	unsigned short *typedDst = (unsigned short *)(dst);
 	switch (draw_mode)
 	{
+	case rsx::primitive_type::line_loop:
+		// TODO
+		throw;
 	case rsx::primitive_type::triangle_fan:
 	case rsx::primitive_type::polygon:
 		for (unsigned i = 0; i < (count - 2); i++)
@@ -338,7 +343,6 @@ void write_index_array_for_non_indexed_non_native_primitive_to_buffer(char* dst,
 		return;
 	case rsx::primitive_type::points:
 	case rsx::primitive_type::lines:
-	case rsx::primitive_type::line_loop:
 	case rsx::primitive_type::line_strip:
 	case rsx::primitive_type::triangles:
 	case rsx::primitive_type::triangle_strip:
@@ -375,12 +379,14 @@ namespace
 		{
 		case rsx::primitive_type::points:
 		case rsx::primitive_type::lines:
-		case rsx::primitive_type::line_loop:
 		case rsx::primitive_type::line_strip:
 		case rsx::primitive_type::triangles:
 		case rsx::primitive_type::triangle_strip:
 		case rsx::primitive_type::quad_strip:
 			return upload_untouched<T>(src.subspan(first), dst, restart_index_enabled, restart_index);
+		case rsx::primitive_type::line_loop:
+			// TODO
+			throw;
 		case rsx::primitive_type::polygon:
 		case rsx::primitive_type::triangle_fan:
 			if (expands(draw_mode))
