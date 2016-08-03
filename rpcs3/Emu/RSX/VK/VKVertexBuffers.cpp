@@ -217,6 +217,18 @@ namespace vk
 		}
 	}
 
+	VkIndexType get_index_type(rsx::index_array_type type)
+	{
+		switch (type)
+		{
+		case rsx::index_array_type::u32:
+			return VK_INDEX_TYPE_UINT32;
+		case rsx::index_array_type::u16:
+			return VK_INDEX_TYPE_UINT16;
+		}
+		throw;
+	}
+
 	std::tuple<u32, u32, VkIndexType> upload_index_buffer(gsl::span<const gsl::byte> raw_index_buffer, rsx::primitive_type type, rsx::index_array_type index_type, void *dst_ptr, bool indexed_draw, u32 vertex_count, u32 index_count, std::vector<std::pair<u32, u32>> first_count_commands)
 	{
 		bool emulated = false;
@@ -230,13 +242,7 @@ namespace vk
 				index_type, type, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
 				[](auto prim) { return !is_primitive_native(prim); });
 
-			switch (index_type)
-			{
-			case rsx::index_array_type::u32:
-				return std::make_tuple(min_index, max_index, VK_INDEX_TYPE_UINT32);
-			case rsx::index_array_type::u16:
-				return std::make_tuple(min_index, max_index, VK_INDEX_TYPE_UINT16);
-			}
+			return std::make_tuple(min_index, max_index, get_index_type(index_type));
 		}
 
 		switch (type)
