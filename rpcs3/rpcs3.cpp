@@ -95,7 +95,7 @@ cfg::map_entry<std::function<std::shared_ptr<GSRender>()>> g_cfg_gs_render(cfg::
 	{ "Null", &std::make_shared<NullGSRender> },
 	{ "OpenGL", &std::make_shared<GLGSRender> },
 #ifdef _MSC_VER
-	{ "D3D12", &std::make_shared<D3D12GSRender> },
+	{ "DirectX 12", &std::make_shared<D3D12GSRender> },
 #endif
 #ifdef _WIN32
 	{ "Vulkan", &std::make_shared<VKGSRender> },
