@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 2.8.12)
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake_modules")
+set(RES_FILES "")
 include(cotire)
 
 project(rpcs3)
@@ -15,9 +16,11 @@ add_custom_command(OUTPUT something_that_never_exists
 # Check for a sufficient compiler and set build options
 include(ConfigureCompiler)
 
+
 if(WIN32)
 	add_definitions(-DUNICODE)
 	add_definitions(-D_WIN32_WINNT=0x0601)
+	set(RES_FILES "rpcs3_.rc")
 endif()
 
 if(NOT MSVC)
@@ -26,7 +29,7 @@ if(NOT MSVC)
 		set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O1") # fix for travis gcc OoM crash. Might be fixed with the move to containers.
 	endif()
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -fexceptions")
-	add_compile_options(-msse -msse2 -mcx16 -mssse3 -march=native)
+	add_compile_options(-msse -msse2 -mcx16 -mssse3)
 else()
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:throwingNew /D _CRT_SECURE_NO_DEPRECATE=1 /D _CRT_NON_CONFORMING_SWPRINTFS=1 /D _SCL_SECURE_NO_WARNINGS=1")
 endif()
@@ -193,7 +196,7 @@ if(NOT WIN32)
 	endforeach(TMP_PATH)
 endif()
 
-add_executable(rpcs3 ${RPCS3_SRC})
+add_executable(rpcs3 ${RPCS3_SRC} ${RES_FILES})
 
 
 if(MSVC)

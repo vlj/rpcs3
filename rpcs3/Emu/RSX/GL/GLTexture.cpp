@@ -140,26 +140,20 @@ namespace
 		case CELL_GCM_TEXTURE_COMPRESSED_R8B8_R8G8:
 			return { GL_ALPHA, GL_RED, GL_GREEN, GL_BLUE };
 
-		case CELL_GCM_TEXTURE_B8: 
-			return { GL_RED, GL_RED, GL_RED, GL_RED };
+		case CELL_GCM_TEXTURE_A4R4G4B4:
+			return { GL_BLUE, GL_GREEN, GL_RED, GL_ALPHA };
 
-		case CELL_GCM_TEXTURE_A4R4G4B4: 
-			return { GL_BLUE, GL_ALPHA, GL_RED, GL_GREEN };
+		case CELL_GCM_TEXTURE_B8:
+		case CELL_GCM_TEXTURE_X16:
+		case CELL_GCM_TEXTURE_X32_FLOAT:
+			return { GL_RED, GL_RED, GL_RED, GL_RED };
 
 		case CELL_GCM_TEXTURE_G8B8: 
 			return { GL_GREEN, GL_RED, GL_GREEN, GL_RED};
 
-		case CELL_GCM_TEXTURE_X16: 
-			return { GL_RED, GL_RED, GL_RED, GL_RED };
-
-		case CELL_GCM_TEXTURE_Y16_X16: 
+		case CELL_GCM_TEXTURE_Y16_X16:
+		case CELL_GCM_TEXTURE_Y16_X16_FLOAT:
 			return { GL_RED, GL_GREEN, GL_RED, GL_GREEN};
-
-		case CELL_GCM_TEXTURE_X32_FLOAT: 
-			return { GL_RED, GL_RED, GL_RED, GL_RED };
-
-		case CELL_GCM_TEXTURE_Y16_X16_FLOAT: 
-			return { GL_GREEN, GL_RED, GL_GREEN, GL_RED };
 
 		case CELL_GCM_TEXTURE_W16_Z16_Y16_X16_FLOAT:
 		case CELL_GCM_TEXTURE_W32_Z32_Y32_X32_FLOAT:
@@ -340,7 +334,8 @@ namespace rsx
 						for (const rsx_subresource_layout &layout : input_layouts)
 						{
 							u32 size = layout.width_in_block * ((format == CELL_GCM_TEXTURE_COMPRESSED_DXT1) ? 8 : 16);
-							__glcheck glCompressedTexSubImage1D(GL_TEXTURE_1D, mip_level++, 0, layout.width_in_block * 4, get_sized_internal_format(format), size, layout.data.data());
+							__glcheck upload_texture_subresource(staging_buffer, layout, format, is_swizzled, 4);
+							__glcheck glCompressedTexSubImage1D(GL_TEXTURE_1D, mip_level++, 0, layout.width_in_block * 4, get_sized_internal_format(format), size, staging_buffer.data());
 						}
 					}
 					return;
@@ -363,7 +358,8 @@ namespace rsx
 						for (const rsx_subresource_layout &layout : input_layouts)
 						{
 							u32 size = layout.width_in_block * layout.height_in_block * ((format == CELL_GCM_TEXTURE_COMPRESSED_DXT1) ? 8 : 16);
-							__glcheck glCompressedTexSubImage2D(GL_TEXTURE_2D, mip_level++, 0, 0, layout.width_in_block * 4, layout.height_in_block * 4, get_sized_internal_format(format), size, layout.data.data());
+							__glcheck upload_texture_subresource(staging_buffer, layout, format, is_swizzled, 4);
+							__glcheck glCompressedTexSubImage2D(GL_TEXTURE_2D, mip_level++, 0, 0, layout.width_in_block * 4, layout.height_in_block * 4, get_sized_internal_format(format), size, staging_buffer.data());
 						}
 					}
 					return;
@@ -390,7 +386,8 @@ namespace rsx
 						for (const rsx_subresource_layout &layout : input_layouts)
 						{
 							u32 size = layout.width_in_block * layout.height_in_block * ((format == CELL_GCM_TEXTURE_COMPRESSED_DXT1) ? 8 : 16);
-							__glcheck glCompressedTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + mip_level / mipmap_count, mip_level % mipmap_count, 0, 0, layout.width_in_block * 4, layout.height_in_block * 4, get_sized_internal_format(format), size, layout.data.data());
+							__glcheck upload_texture_subresource(staging_buffer, layout, format, is_swizzled, 4);
+							__glcheck glCompressedTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + mip_level / mipmap_count, mip_level % mipmap_count, 0, 0, layout.width_in_block * 4, layout.height_in_block * 4, get_sized_internal_format(format), size, staging_buffer.data());
 							mip_level++;
 						}
 					}
@@ -414,7 +411,8 @@ namespace rsx
 						for (const rsx_subresource_layout &layout : input_layouts)
 						{
 							u32 size = layout.width_in_block * layout.height_in_block * layout.depth * ((format == CELL_GCM_TEXTURE_COMPRESSED_DXT1) ? 8 : 16);
-							__glcheck glCompressedTexSubImage3D(GL_TEXTURE_3D, mip_level++, 0, 0, 0, layout.width_in_block * 4, layout.height_in_block * 4, layout.depth, get_sized_internal_format(format), size, layout.data.data());
+							__glcheck upload_texture_subresource(staging_buffer, layout, format, is_swizzled, 4);
+							__glcheck glCompressedTexSubImage3D(GL_TEXTURE_3D, mip_level++, 0, 0, 0, layout.width_in_block * 4, layout.height_in_block * 4, layout.depth, get_sized_internal_format(format), size, staging_buffer.data());
 						}
 					}
 					return;
@@ -490,48 +488,60 @@ namespace rsx
 
 			const std::array<GLenum, 4>& glRemap = get_swizzle_remap(format);
 
+			glTexParameteri(m_target, GL_TEXTURE_BASE_LEVEL, 0);
 			glTexParameteri(m_target, GL_TEXTURE_MAX_LEVEL, tex.get_exact_mipmap_count() - 1);
 
-			if (format != CELL_GCM_TEXTURE_B8 && format != CELL_GCM_TEXTURE_X16 && format != CELL_GCM_TEXTURE_X32_FLOAT)
-			{
-				u8 remap_a = tex.remap() & 0x3;
-				u8 remap_r = (tex.remap() >> 2) & 0x3;
-				u8 remap_g = (tex.remap() >> 4) & 0x3;
-				u8 remap_b = (tex.remap() >> 6) & 0x3;
+			u8 remap_a = tex.remap() & 0x3;
+			u8 remap_r = (tex.remap() >> 2) & 0x3;
+			u8 remap_g = (tex.remap() >> 4) & 0x3;
+			u8 remap_b = (tex.remap() >> 6) & 0x3;
 
-				__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_A, glRemap[remap_a]);
-				__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_R, glRemap[remap_r]);
-				__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_G, glRemap[remap_g]);
-				__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_B, glRemap[remap_b]);
-			}
-			else
-			{
-				__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_A, glRemap[0]);
-				__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_R, glRemap[1]);
-				__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_G, glRemap[2]);
-				__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_B, glRemap[3]);
-			}
+			__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_A, glRemap[remap_a]);
+			__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_R, glRemap[remap_r]);
+			__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_G, glRemap[remap_g]);
+			__glcheck glTexParameteri(m_target, GL_TEXTURE_SWIZZLE_B, glRemap[remap_b]);
 
 			__glcheck glTexParameteri(m_target, GL_TEXTURE_WRAP_S, gl_wrap(tex.wrap_s()));
 			__glcheck glTexParameteri(m_target, GL_TEXTURE_WRAP_T, gl_wrap(tex.wrap_t()));
 			__glcheck glTexParameteri(m_target, GL_TEXTURE_WRAP_R, gl_wrap(tex.wrap_r()));
 
-			__glcheck glTexParameterf(m_target, GL_TEXTURE_LOD_BIAS, tex.bias());
-			__glcheck glTexParameteri(m_target, GL_TEXTURE_MIN_LOD, (tex.min_lod() >> 8));
-			__glcheck glTexParameteri(m_target, GL_TEXTURE_MAX_LOD, (tex.max_lod() >> 8));
-
-			int min_filter = gl_tex_min_filter(tex.min_filter());
-			
-			if (min_filter != GL_LINEAR && min_filter != GL_NEAREST)
+			if (tex.get_exact_mipmap_count() <= 1 || m_target == GL_TEXTURE_RECTANGLE)
 			{
-				if (tex.get_exact_mipmap_count() <= 1 || m_target == GL_TEXTURE_RECTANGLE)
+				GLint min_filter = gl_tex_min_filter(tex.min_filter());
+				
+				if (min_filter != GL_LINEAR && min_filter != GL_NEAREST)
 				{
 					LOG_WARNING(RSX, "Texture %d, target 0x%x, requesting mipmap filtering without any mipmaps set!", m_id, m_target);
-					min_filter = GL_LINEAR;
+					
+					switch (min_filter)
+					{
+					case GL_NEAREST_MIPMAP_NEAREST:
+					case GL_NEAREST_MIPMAP_LINEAR:
+						min_filter = GL_NEAREST; break;
+					case GL_LINEAR_MIPMAP_NEAREST:
+					case GL_LINEAR_MIPMAP_LINEAR:
+						min_filter = GL_LINEAR; break;
+					default:
+						LOG_ERROR(RSX, "No mipmap fallback defined for rsx_min_filter = 0x%X", (u32)tex.min_filter());
+						min_filter = GL_NEAREST;
+					}
 				}
+
+				__glcheck glTexParameteri(m_target, GL_TEXTURE_MIN_FILTER, min_filter);
+
+				__glcheck glTexParameterf(m_target, GL_TEXTURE_LOD_BIAS, 0.);
+				__glcheck glTexParameteri(m_target, GL_TEXTURE_MIN_LOD, 0);
+				__glcheck glTexParameteri(m_target, GL_TEXTURE_MAX_LOD, 0);
+			}
+			else
+			{
+				__glcheck glTexParameteri(m_target, GL_TEXTURE_MIN_FILTER, gl_tex_min_filter(tex.min_filter()));
+
+				__glcheck glTexParameterf(m_target, GL_TEXTURE_LOD_BIAS, tex.bias());
+				__glcheck glTexParameteri(m_target, GL_TEXTURE_MIN_LOD, (tex.min_lod() >> 8));
+				__glcheck glTexParameteri(m_target, GL_TEXTURE_MAX_LOD, (tex.max_lod() >> 8));
 			}
 
-			__glcheck glTexParameteri(m_target, GL_TEXTURE_MIN_FILTER, min_filter);
 			__glcheck glTexParameteri(m_target, GL_TEXTURE_MAG_FILTER, gl_tex_mag_filter(tex.mag_filter()));
 			__glcheck glTexParameterf(m_target, GL_TEXTURE_MAX_ANISOTROPY_EXT, max_aniso(tex.max_aniso()));
 		}

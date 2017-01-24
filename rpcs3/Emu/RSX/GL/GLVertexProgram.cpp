@@ -3,6 +3,7 @@
 
 #include "GLVertexProgram.h"
 #include "GLCommonDecompiler.h"
+#include "../GCM.h"
 
 #include <algorithm>
 
@@ -59,7 +60,7 @@ void GLVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::v
 	std::sort(input_data.begin(), input_data.end());
 
 	int location = 1;
-	for (const std::tuple<size_t, std::string> item : input_data)
+	for (const std::tuple<size_t, std::string>& item : input_data)
 	{
 		for (const ParamType &PT : inputs)
 		{
@@ -68,11 +69,11 @@ void GLVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::v
 				if (PI.name == std::get<1>(item))
 				{
 					bool is_int = false;
-					for (auto &attrib : rsx_vertex_program.rsx_vertex_inputs)
+					for (const auto &attrib : rsx_vertex_program.rsx_vertex_inputs)
 					{
 						if (attrib.location == std::get<0>(item))
 						{
-							if (attrib.int_type) is_int = true;
+							if (attrib.int_type || attrib.flags & GL_VP_SINT_MASK) is_int = true;
 							break;
 						}
 					}
@@ -82,6 +83,11 @@ void GLVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::v
 				}
 			}
 		}
+	}
+
+	for (int i = 0; i <= 5; i++)
+	{
+		OS << "uniform int uc_m" + std::to_string(i) + "= 0;\n";
 	}
 }
 
@@ -121,14 +127,13 @@ static const reg_info reg_table[] =
 	{ "front_diff_color", true, "dst_reg3", "", false },
 	{ "front_spec_color", true, "dst_reg4", "", false },
 	{ "fog_c", true, "dst_reg5", ".xxxx", true },
-	{ "gl_ClipDistance[0]", false, "dst_reg5", ".y", false },
-	{ "gl_ClipDistance[1]", false, "dst_reg5", ".z", false },
-	{ "gl_ClipDistance[2]", false, "dst_reg5", ".w", false },
+	{ "gl_ClipDistance[0]", false, "dst_reg5", ".y * uc_m0", false },
+	{ "gl_ClipDistance[1]", false, "dst_reg5", ".z * uc_m1", false },
+	{ "gl_ClipDistance[2]", false, "dst_reg5", ".w * uc_m2", false },
 	{ "gl_PointSize", false, "dst_reg6", ".x", false },
-	//Disable user clip planes until they are properly handled
-	//{ "gl_ClipDistance[3]", false, "dst_reg6", ".y", false },
-	//{ "gl_ClipDistance[4]", false, "dst_reg6", ".z", false },
-	//{ "gl_ClipDistance[5]", false, "dst_reg6", ".w", false },
+	{ "gl_ClipDistance[3]", false, "dst_reg6", ".y * uc_m3", false },
+	{ "gl_ClipDistance[4]", false, "dst_reg6", ".z * uc_m4", false },
+	{ "gl_ClipDistance[5]", false, "dst_reg6", ".w * uc_m5", false },
 	{ "tc0", true, "dst_reg7", "", false },
 	{ "tc1", true, "dst_reg8", "", false },
 	{ "tc2", true, "dst_reg9", "", false },
@@ -143,13 +148,42 @@ static const reg_info reg_table[] =
 
 void GLVertexDecompilerThread::insertOutputs(std::stringstream & OS, const std::vector<ParamType> & outputs)
 {
+	bool insert_front_diffuse = (rsx_vertex_program.output_mask & 1);
+	bool insert_back_diffuse = (rsx_vertex_program.output_mask & 4);
+
+	bool insert_front_specular = (rsx_vertex_program.output_mask & 2);
+	bool insert_back_specular = (rsx_vertex_program.output_mask & 8);
+
+	bool front_back_diffuse = (insert_back_diffuse && insert_front_diffuse);
+	bool front_back_specular = (insert_back_specular && insert_front_specular);
+
 	for (auto &i : reg_table)
 	{
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", i.src_reg) && i.need_declare)
 		{
-			OS << "out vec4 " << i.name << ";" << std::endl;
+			if (i.name == "front_diff_color")
+				insert_front_diffuse = false;
+
+			if (i.name == "front_spec_color")
+				insert_front_specular = false;
+
+			std::string name = i.name;
+
+			if (front_back_diffuse && name == "diff_color")
+				name = "back_diff_color";
+
+			if (front_back_specular && name == "spec_color")
+				name = "back_spec_color";
+
+			OS << "out vec4 " << name << ";" << std::endl;
 		}
 	}
+
+	if (insert_back_diffuse && insert_front_diffuse)
+		OS << "out vec4 front_diff_color;" << std::endl;
+
+	if (insert_back_specular && insert_front_specular)
+		OS << "out vec4 front_spec_color;" << std::endl;
 }
 
 void add_input(std::stringstream & OS, const ParamItem &PI, const std::vector<rsx_vertex_input> &inputs)
@@ -163,9 +197,18 @@ void add_input(std::stringstream & OS, const ParamItem &PI, const std::vector<rs
 		if (real_input.int_type)
 			vecType = "	ivec4 ";
 
+		std::string scale = "";
+		if (real_input.flags & GL_VP_SINT_MASK)
+		{
+			if (real_input.flags & GL_VP_ATTRIB_S16_INT)
+				scale = " / 32767.";
+			else
+				scale = " / 2147483647.";
+		}
+
 		if (!real_input.is_array)
 		{
-			OS << vecType << PI.name << " = texelFetch(" << PI.name << "_buffer, 0);" << std::endl;
+			OS << vecType << PI.name << " = texelFetch(" << PI.name << "_buffer, 0)" << scale << ";" << std::endl;
 			return;
 		}
 
@@ -173,36 +216,55 @@ void add_input(std::stringstream & OS, const ParamItem &PI, const std::vector<rs
 		{
 			if (real_input.is_modulo)
 			{
-				OS << vecType << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID %" << real_input.frequency << ");" << std::endl;
+				OS << vecType << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID %" << real_input.frequency << ")" << scale << ";" << std::endl;
 				return;
 			}
 
-			OS << vecType << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID /" << real_input.frequency << ");" << std::endl;
+			OS << vecType << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID /" << real_input.frequency << ")" << scale << ";" << std::endl;
 			return;
 		}
 
-		OS << vecType << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID).rgba;" << std::endl;
+		OS << vecType << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID)" << scale << ";" << std::endl;
 		return;
 	}
 
-	OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID).rgba;" << std::endl;
+	LOG_WARNING(RSX, "Vertex input %s does not have a matching vertex_input declaration", PI.name.c_str());
+	
+	OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID);" << std::endl;
 }
 
 void GLVertexDecompilerThread::insertMainStart(std::stringstream & OS)
 {
 	insert_glsl_legacy_function(OS);
 
-	OS << "void main()" << std::endl;
+	std::string parameters = "";
+	for (int i = 0; i < 16; ++i)
+	{
+		std::string reg_name = "dst_reg" + std::to_string(i);
+		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", reg_name))
+		{
+			if (parameters.length())
+				parameters += ", ";
+
+			parameters += "inout vec4 " + reg_name;
+		}
+	}
+
+	OS << "void vs_main(" << parameters << ")" << std::endl;
 	OS << "{" << std::endl;
 
-	// Declare inside main function
+	//Declare temporary registers, ignoring those mapped to outputs
 	for (const ParamType PT : m_parr.params[PF_PARAM_NONE])
 	{
 		for (const ParamItem &PI : PT.items)
 		{
+			if (PI.name.substr(0, 7) == "dst_reg")
+				continue;
+
 			OS << "	" << PT.type << " " << PI.name;
 			if (!PI.value.empty())
 				OS << " = " << PI.value;
+
 			OS << ";" << std::endl;
 		}
 	}
@@ -227,11 +289,78 @@ void GLVertexDecompilerThread::insertMainStart(std::stringstream & OS)
 
 void GLVertexDecompilerThread::insertMainEnd(std::stringstream & OS)
 {
+	OS << "}" << std::endl << std::endl;
+
+	OS << "void main ()" << std::endl;
+	OS << "{" << std::endl;
+
+	std::string parameters = "";
+	
+	if (ParamType *vec4Types = m_parr.SearchParam(PF_PARAM_NONE, "vec4"))
+	{
+		for (int i = 0; i < 16; ++i)
+		{
+			std::string reg_name = "dst_reg" + std::to_string(i);
+			for (auto &PI : vec4Types->items)
+			{
+				if (reg_name == PI.name)
+				{
+					if (parameters.length())
+						parameters += ", ";
+
+					parameters += reg_name;
+					OS << "	vec4 " << reg_name;
+
+					if (!PI.value.empty())
+						OS << "= " << PI.value;
+
+					OS << ";" << std::endl;
+				}
+			}
+		}
+	}
+
+	OS << std::endl << "	vs_main(" << parameters << ");" << std::endl << std::endl;
+
+	bool insert_front_diffuse = (rsx_vertex_program.output_mask & 1);
+	bool insert_front_specular = (rsx_vertex_program.output_mask & 2);
+
+	bool insert_back_diffuse = (rsx_vertex_program.output_mask & 4);
+	bool insert_back_specular = (rsx_vertex_program.output_mask & 8);
+
+	bool front_back_diffuse = (insert_back_diffuse && insert_front_diffuse);
+	bool front_back_specular = (insert_back_specular && insert_front_specular);
+
 	for (auto &i : reg_table)
 	{
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", i.src_reg))
-			OS << "	" << i.name << " = " << i.src_reg << i.src_reg_mask << ";" << std::endl;
+		{
+			if (i.name == "front_diff_color")
+				insert_front_diffuse = false;
+
+			if (i.name == "front_spec_color")
+				insert_front_specular = false;
+
+			std::string name = i.name;
+
+			if (front_back_diffuse && name == "diff_color")
+				name = "back_diff_color";
+
+			if (front_back_specular && name == "spec_color")
+				name = "back_spec_color";
+
+			OS << "	" << name << " = " << i.src_reg << i.src_reg_mask << ";" << std::endl;
+		}
 	}
+
+	if (insert_back_diffuse && insert_front_diffuse)
+		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", "dst_reg1"))
+			OS << "	front_diff_color = dst_reg1;\n";
+
+	if (insert_back_specular && insert_front_specular)
+		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", "dst_reg2"))
+			OS << "	front_spec_color = dst_reg2;\n";
+
 	OS << "	gl_Position = gl_Position * scaleOffsetMat;" << std::endl;
 	OS << "}" << std::endl;
 }

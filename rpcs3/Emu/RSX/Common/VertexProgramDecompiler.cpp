@@ -151,7 +151,7 @@ void VertexProgramDecompiler::SetDST(bool is_sca, std::string value)
 
 	std::string dest;
 
-	if (d0.cond_update_enable_0 && d0.cond_update_enable_1)
+	if (d0.cond_update_enable_0 || d0.cond_update_enable_1)
 	{
 		dest = m_parr.AddParam(PF_PARAM_NONE, getFloatTypeName(4), "cc" + std::to_string(d0.cond_reg_sel_1), getFloatTypeName(4) + "(0., 0., 0., 0.)") + mask;
 	}
@@ -189,7 +189,7 @@ std::string VertexProgramDecompiler::GetFunc()
 
 std::string VertexProgramDecompiler::GetTex()
 {
-	return m_parr.AddParam(PF_PARAM_UNIFORM, "sampler2D", std::string("vtex") + std::to_string(/*?.tex_num*/0));
+	return m_parr.AddParam(PF_PARAM_UNIFORM, "sampler2D", std::string("vtex") + std::to_string(d2.tex_num));
 }
 
 std::string VertexProgramDecompiler::Format(const std::string& code)
@@ -557,6 +557,42 @@ std::string VertexProgramDecompiler::Decompile()
 			AddCode("//nop");
 		}
 
+		switch (d1.vec_opcode)
+		{
+		case RSX_VEC_OPCODE_NOP: break;
+		case RSX_VEC_OPCODE_MOV: SetDSTVec("$0"); break;
+		case RSX_VEC_OPCODE_MUL: SetDSTVec("($0 * $1)"); break;
+		case RSX_VEC_OPCODE_ADD: SetDSTVec("($0 + $2)"); break;
+		case RSX_VEC_OPCODE_MAD: SetDSTVec("($0 * $1 + $2)"); break;
+		case RSX_VEC_OPCODE_DP3: SetDSTVec(getFunction(FUNCTION::FUNCTION_DP3)); break;
+		case RSX_VEC_OPCODE_DPH: SetDSTVec(getFunction(FUNCTION::FUNCTION_DPH)); break;
+		case RSX_VEC_OPCODE_DP4: SetDSTVec(getFunction(FUNCTION::FUNCTION_DP4)); break;
+		case RSX_VEC_OPCODE_DST: SetDSTVec("vec4(distance($0, $1))"); break;
+		case RSX_VEC_OPCODE_MIN: SetDSTVec("min($0, $1)"); break;
+		case RSX_VEC_OPCODE_MAX: SetDSTVec("max($0, $1)"); break;
+		case RSX_VEC_OPCODE_SLT: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SLT, "$0", "$1") + ")"); break;
+		case RSX_VEC_OPCODE_SGE: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SGE, "$0", "$1") + ")"); break;
+			// Note: It looks like ARL opcode ignore input/output swizzle mask (SH3)
+		case RSX_VEC_OPCODE_ARL: AddCode("$ifcond $awm = " + getIntTypeName(4) + "($0);");  break;
+		case RSX_VEC_OPCODE_FRC: SetDSTVec(getFunction(FUNCTION::FUNCTION_FRACT)); break;
+		case RSX_VEC_OPCODE_FLR: SetDSTVec("floor($0)"); break;
+		case RSX_VEC_OPCODE_SEQ: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SEQ, "$0", "$1") + ")"); break;
+		case RSX_VEC_OPCODE_SFL: SetDSTVec(getFunction(FUNCTION::FUNCTION_SFL)); break;
+		case RSX_VEC_OPCODE_SGT: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SGT, "$0", "$1") + ")"); break;
+		case RSX_VEC_OPCODE_SLE: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SLE, "$0", "$1") + ")"); break;
+		case RSX_VEC_OPCODE_SNE: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SNE, "$0", "$1") + ")"); break;
+		case RSX_VEC_OPCODE_STR: SetDSTVec(getFunction(FUNCTION::FUNCTION_STR)); break;
+		case RSX_VEC_OPCODE_SSG: SetDSTVec("sign($0)"); break;
+		case RSX_VEC_OPCODE_TXL: SetDSTVec(getFunction(FUNCTION::FUNCTION_VERTEX_TEXTURE_FETCH2D)); break;
+
+		default:
+			AddCode(fmt::format("//Unknown vp opcode 0x%x", u32{ d1.vec_opcode }));
+			LOG_ERROR(RSX, "Unknown vp opcode 0x%x", u32{ d1.vec_opcode });
+			Emu.Pause();
+			break;
+		}
+
+		//NOTE: Branch instructions have to be decoded last in case there was a dual-issued instruction!
 		switch (d1.sca_opcode)
 		{
 		case RSX_SCA_OPCODE_NOP: break;
@@ -644,41 +680,6 @@ std::string VertexProgramDecompiler::Decompile()
 		default:
 			AddCode(fmt::format("//Unknown vp sca_opcode 0x%x", u32{ d1.sca_opcode }));
 			LOG_ERROR(RSX, "Unknown vp sca_opcode 0x%x", u32{ d1.sca_opcode });
-			Emu.Pause();
-			break;
-		}
-
-		switch (d1.vec_opcode)
-		{
-		case RSX_VEC_OPCODE_NOP: break;
-		case RSX_VEC_OPCODE_MOV: SetDSTVec("$0"); break;
-		case RSX_VEC_OPCODE_MUL: SetDSTVec("($0 * $1)"); break;
-		case RSX_VEC_OPCODE_ADD: SetDSTVec("($0 + $2)"); break;
-		case RSX_VEC_OPCODE_MAD: SetDSTVec("($0 * $1 + $2)"); break;
-		case RSX_VEC_OPCODE_DP3: SetDSTVec(getFunction(FUNCTION::FUNCTION_DP3)); break;
-		case RSX_VEC_OPCODE_DPH: SetDSTVec(getFunction(FUNCTION::FUNCTION_DPH)); break;
-		case RSX_VEC_OPCODE_DP4: SetDSTVec(getFunction(FUNCTION::FUNCTION_DP4)); break;
-		case RSX_VEC_OPCODE_DST: SetDSTVec("vec4(distance($0, $1))"); break;
-		case RSX_VEC_OPCODE_MIN: SetDSTVec("min($0, $1)"); break;
-		case RSX_VEC_OPCODE_MAX: SetDSTVec("max($0, $1)"); break;
-		case RSX_VEC_OPCODE_SLT: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SLT, "$0", "$1") + ")"); break;
-		case RSX_VEC_OPCODE_SGE: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SGE, "$0", "$1") + ")"); break;
-			// Note: It looks like ARL opcode ignore input/output swizzle mask (SH3)
-		case RSX_VEC_OPCODE_ARL: AddCode("$ifcond $awm = " + getIntTypeName(4) + "($0);");  break;
-		case RSX_VEC_OPCODE_FRC: SetDSTVec(getFunction(FUNCTION::FUNCTION_FRACT)); break;
-		case RSX_VEC_OPCODE_FLR: SetDSTVec("floor($0)"); break;
-		case RSX_VEC_OPCODE_SEQ: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SEQ, "$0", "$1") + ")"); break;
-		case RSX_VEC_OPCODE_SFL: SetDSTVec(getFunction(FUNCTION::FUNCTION_SFL)); break;
-		case RSX_VEC_OPCODE_SGT: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SGT, "$0", "$1") + ")"); break;
-		case RSX_VEC_OPCODE_SLE: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SLE, "$0", "$1") + ")"); break;
-		case RSX_VEC_OPCODE_SNE: SetDSTVec(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SNE, "$0", "$1") + ")"); break;
-		case RSX_VEC_OPCODE_STR: SetDSTVec(getFunction(FUNCTION::FUNCTION_STR)); break;
-		case RSX_VEC_OPCODE_SSG: SetDSTVec("sign($0)"); break;
-		case RSX_VEC_OPCODE_TXL: SetDSTVec(getFunction(FUNCTION::FUNCTION_VERTEX_TEXTURE_FETCH2D)); break;
-
-		default:
-			AddCode(fmt::format("//Unknown vp opcode 0x%x", u32{ d1.vec_opcode }));
-			LOG_ERROR(RSX, "Unknown vp opcode 0x%x", u32{ d1.vec_opcode });
 			Emu.Pause();
 			break;
 		}

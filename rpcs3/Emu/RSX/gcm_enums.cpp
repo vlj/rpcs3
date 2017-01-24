@@ -77,14 +77,37 @@ rsx::comparison_function rsx::to_comparison_function(u16 in)
 {
 	switch (in)
 	{
-	case CELL_GCM_NEVER: return rsx::comparison_function::never;
-	case CELL_GCM_LESS: return rsx::comparison_function::less;
-	case CELL_GCM_EQUAL: return rsx::comparison_function::equal;
-	case CELL_GCM_LEQUAL: return rsx::comparison_function::less_or_equal;
-	case CELL_GCM_GREATER: return rsx::comparison_function::greater;
-	case CELL_GCM_NOTEQUAL: return rsx::comparison_function::not_equal;
-	case CELL_GCM_GEQUAL: return rsx::comparison_function::greater_or_equal;
-	case CELL_GCM_ALWAYS: return rsx::comparison_function::always;
+	case CELL_GCM_TEXTURE_ZFUNC_NEVER & CELL_GCM_SCULL_SFUNC_NEVER:
+	case CELL_GCM_NEVER:
+		return rsx::comparison_function::never;
+
+	case CELL_GCM_TEXTURE_ZFUNC_LESS & CELL_GCM_SCULL_SFUNC_LESS:
+	case CELL_GCM_LESS:
+		return rsx::comparison_function::less;
+
+	case CELL_GCM_TEXTURE_ZFUNC_EQUAL & CELL_GCM_SCULL_SFUNC_EQUAL:
+	case CELL_GCM_EQUAL:
+		return rsx::comparison_function::equal;
+
+	case CELL_GCM_TEXTURE_ZFUNC_LEQUAL & CELL_GCM_SCULL_SFUNC_LEQUAL:
+	case CELL_GCM_LEQUAL:
+		return rsx::comparison_function::less_or_equal;
+
+	case CELL_GCM_TEXTURE_ZFUNC_GREATER & CELL_GCM_SCULL_SFUNC_GREATER:
+	case CELL_GCM_GREATER:
+		return rsx::comparison_function::greater;
+
+	case CELL_GCM_TEXTURE_ZFUNC_NOTEQUAL & CELL_GCM_SCULL_SFUNC_NOTEQUAL:
+	case CELL_GCM_NOTEQUAL:
+		return rsx::comparison_function::not_equal;
+
+	case CELL_GCM_TEXTURE_ZFUNC_GEQUAL & CELL_GCM_SCULL_SFUNC_GEQUAL:
+	case CELL_GCM_GEQUAL:
+		return rsx::comparison_function::greater_or_equal;
+
+	case CELL_GCM_TEXTURE_ZFUNC_ALWAYS & CELL_GCM_SCULL_SFUNC_ALWAYS:
+	case CELL_GCM_ALWAYS:
+		return rsx::comparison_function::always;
 	}
 	fmt::throw_exception("Unknown comparison function 0x%x" HERE, in);
 }
@@ -376,7 +399,7 @@ namespace rsx
 		switch (op)
 		{
 		case user_clip_plane_op::disable: return "disabled";
-		case user_clip_plane_op::greather_or_equal: return "greater or equal";
+		case user_clip_plane_op::greater_or_equal: return "greater or equal";
 		case user_clip_plane_op::less_than: return "less than";
 		}
 		throw;
@@ -679,6 +702,7 @@ rsx::surface_color_format rsx::to_surface_color_format(u8 in)
 
 enum
 {
+	CELL_GCM_INVERT = 0x150A,
 	CELL_GCM_KEEP = 0x1E00,
 	CELL_GCM_REPLACE = 0x1E01,
 	CELL_GCM_INCR = 0x1E02,
@@ -691,6 +715,7 @@ rsx::stencil_op rsx::to_stencil_op(u16 in)
 {
 	switch (in)
 	{
+	case CELL_GCM_INVERT: return rsx::stencil_op::invert;
 	case CELL_GCM_KEEP: return rsx::stencil_op::keep;
 	case CELL_GCM_REPLACE: return rsx::stencil_op::replace;
 	case CELL_GCM_INCR: return rsx::stencil_op::incr;
@@ -782,7 +807,6 @@ enum
 	CELL_GCM_OR = 0x1507,
 	CELL_GCM_NOR = 0x1508,
 	CELL_GCM_EQUIV = 0x1509,
-	CELL_GCM_INVERT = 0x150A,
 	CELL_GCM_OR_REVERSE = 0x150B,
 	CELL_GCM_COPY_INVERTED = 0x150C,
 	CELL_GCM_OR_INVERTED = 0x150D,
@@ -985,7 +1009,7 @@ rsx::user_clip_plane_op rsx::to_user_clip_plane_op(u8 in)
 	{
 	case CELL_GCM_USER_CLIP_PLANE_DISABLE: return rsx::user_clip_plane_op::disable;
 	case CELL_GCM_USER_CLIP_PLANE_ENABLE_LT: return rsx::user_clip_plane_op::less_than;
-	case CELL_GCM_USER_CLIP_PLANE_ENABLE_GE: return rsx::user_clip_plane_op::greather_or_equal;
+	case CELL_GCM_USER_CLIP_PLANE_ENABLE_GE: return rsx::user_clip_plane_op::greater_or_equal;
 	}
 	fmt::throw_exception("Unknown user clip plane 0x%x" HERE, in);
 }

@@ -22,13 +22,16 @@ namespace
 	u32 to_gl_internal_type(rsx::vertex_base_type type, u8 size)
 	{
 		/**
-		* The buffer texture spec only allows fetches aligned to 8, 16, 32, etc...
+		* NOTE 1. The buffer texture spec only allows fetches aligned to 8, 16, 32, etc...
 		* This rules out most 3-component formats, except for the 32-wide RGB32F, RGB32I, RGB32UI
+		*
+		* NOTE 2. While s1 & cmp types are signed normalized 16-bit integers, some GPU vendors dont support texture buffer access
+		* using these formats. Pass a 16 bit unnormalized integer and convert it in the vertex shader
 		*/
-		const u32 vec1_types[] = { GL_R16, GL_R32F, GL_R16F, GL_R8, GL_R16I, GL_R16, GL_R8UI };
-		const u32 vec2_types[] = { GL_RG16, GL_RG32F, GL_RG16F, GL_RG8, GL_RG16I, GL_RG16, GL_RG8UI };
-		const u32 vec3_types[] = { GL_RGBA16, GL_RGB32F, GL_RGBA16F, GL_RGBA8, GL_RGBA16I, GL_RGBA16, GL_RGBA8UI };	//VEC3 COMPONENTS NOT SUPPORTED!
-		const u32 vec4_types[] = { GL_RGBA16, GL_RGBA32F, GL_RGBA16F, GL_RGBA8, GL_RGBA16I, GL_RGBA16, GL_RGBA8UI };
+		const u32 vec1_types[] = { GL_R16I, GL_R32F, GL_R16F, GL_R8, GL_R16I, GL_RGBA16I, GL_R8UI };
+		const u32 vec2_types[] = { GL_RG16I, GL_RG32F, GL_RG16F, GL_RG8, GL_RG16I, GL_RGBA16I, GL_RG8UI };
+		const u32 vec3_types[] = { GL_RGBA16I, GL_RGB32F, GL_RGBA16F, GL_RGBA8, GL_RGBA16I, GL_RGBA16I, GL_RGBA8UI };	//VEC3 COMPONENTS NOT SUPPORTED!
+		const u32 vec4_types[] = { GL_RGBA16I, GL_RGBA32F, GL_RGBA16F, GL_RGBA8, GL_RGBA16I, GL_RGBA16I, GL_RGBA8UI };
 
 		const u32* vec_selectors[] = { 0, vec1_types, vec2_types, vec3_types, vec4_types };
 
@@ -152,7 +155,7 @@ namespace
 		}
 
 		u32 first = 0;
-		auto mapping = dst.alloc_and_map(vertex_draw_count * sizeof(u16));
+		auto mapping = dst.alloc_from_heap(vertex_draw_count * sizeof(u16), 256);
 		char *mapped_buffer = (char *)mapping.first;
 
 		for (const auto &pair : first_count_commands)
@@ -163,7 +166,6 @@ namespace
 			first += pair.second;
 		}
 
-		dst.unmap();
 		return std::make_tuple(vertex_draw_count, mapping.second);
 	}
 
@@ -171,7 +173,8 @@ namespace
 	{
 		u32 min_index, max_index, vertex_draw_count = initial_vertex_count;
 
-		vertex_draw_count = (u32)get_index_count(draw_mode, ::narrow<int>(vertex_draw_count));
+		if (!gl::is_primitive_native(draw_mode))
+			vertex_draw_count = (u32)get_index_count(draw_mode, ::narrow<int>(vertex_draw_count));
 
 		u32 type_size = ::narrow<u32>(get_index_type_size(type));
 		u32 block_sz = vertex_draw_count * type_size;
@@ -179,7 +182,7 @@ namespace
 		gsl::span<gsl::byte> dst{ reinterpret_cast<gsl::byte*>(ptr), ::narrow<u32>(block_sz) };
 		std::tie(min_index, max_index) = write_index_array_data_to_buffer(dst, raw_index_buffer,
 			type, draw_mode, rsx::method_registers.restart_index_enabled(), rsx::method_registers.restart_index(), first_count_commands,
-			[](auto prim) { return !is_primitive_native(prim); });
+			[](auto prim) { return !gl::is_primitive_native(prim); });
 
 		return std::make_tuple(min_index, max_index, vertex_draw_count);
 	}
@@ -200,12 +203,10 @@ namespace
 
 	struct vertex_buffer_visitor
 	{
-		vertex_buffer_visitor(u32 vtx_cnt, u32 texture_idx_offset, gl::ring_buffer& heap,
-		    gl::glsl::program* prog, gl::texture* attrib_buffer, u32 min_texbuffer_offset)
+		vertex_buffer_visitor(u32 vtx_cnt, gl::ring_buffer& heap, gl::glsl::program* prog, gl::texture* attrib_buffer, u32 min_texbuffer_offset)
 		    : vertex_count(vtx_cnt)
 		    , m_attrib_ring_info(heap)
 		    , m_program(prog)
-		    , texture_index_offset(texture_idx_offset)
 		    , m_gl_attrib_buffers(attrib_buffer)
 		    , m_min_texbuffer_alignment(min_texbuffer_offset)
 		{
@@ -225,7 +226,7 @@ namespace
 			auto& texture = m_gl_attrib_buffers[vertex_array.index];
 
 			u32 buffer_offset = 0;
-			auto mapping      = m_attrib_ring_info.alloc_from_reserve(data_size, m_min_texbuffer_alignment);
+			auto mapping      = m_attrib_ring_info.alloc_from_heap(data_size, m_min_texbuffer_alignment);
 			gsl::byte* dst    = static_cast<gsl::byte*>(mapping.first);
 			buffer_offset     = mapping.second;
 			gsl::span<gsl::byte> dest_span(dst, data_size);
@@ -235,9 +236,6 @@ namespace
 			write_vertex_array_data_to_buffer(dest_span, vertex_array.data, vertex_count, vertex_array.type, vertex_array.attribute_size, vertex_array.stride, rsx::get_vertex_type_size_on_host(vertex_array.type, vertex_array.attribute_size));
 
 			texture.copy_from(m_attrib_ring_info, gl_type, buffer_offset, data_size);
-
-			//Link texture to uniform
-			m_program->uniforms.texture(location, vertex_array.index + texture_index_offset, texture);
 		}
 
 		void operator()(const rsx::vertex_array_register& vertex_register)
@@ -255,14 +253,11 @@ namespace
 
 				auto& texture = m_gl_attrib_buffers[vertex_register.index];
 
-				auto mapping = m_attrib_ring_info.alloc_from_reserve(data_size, m_min_texbuffer_alignment);
+				auto mapping = m_attrib_ring_info.alloc_from_heap(data_size, m_min_texbuffer_alignment);
 				u8 *dst = static_cast<u8*>(mapping.first);
 
 				memcpy(dst, vertex_register.data.data(), element_size);
 				texture.copy_from(m_attrib_ring_info, gl_type, mapping.second, data_size);
-
-				//Link texture to uniform
-				m_program->uniforms.texture(location, vertex_register.index + texture_index_offset, texture);
 				break;
 			}
 			default:
@@ -273,19 +268,12 @@ namespace
 
 		void operator()(const rsx::empty_vertex_array& vbo)
 		{
-			int location;
-			if (!m_program->uniforms.has_location(s_reg_table[vbo.index], &location))
-				return;
-			glActiveTexture(GL_TEXTURE0 + vbo.index + texture_index_offset);
-			glBindTexture(GL_TEXTURE_BUFFER, 0);
-			glProgramUniform1i(m_program->id(), location, vbo.index + texture_index_offset);
 		}
 
 	protected:
 		u32 vertex_count;
 		gl::ring_buffer& m_attrib_ring_info;
 		gl::glsl::program* m_program;
-		u32 texture_index_offset;
 		gl::texture* m_gl_attrib_buffers;
 		GLint m_min_texbuffer_alignment;
 	};
@@ -328,21 +316,13 @@ namespace
 				    rsx::method_registers.current_draw_clause.first_count_commands,
 				    rsx::method_registers.current_draw_clause.primitive, m_index_ring_buffer);
 
-				upload_vertex_buffers(min_index, max_index, max_vertex_attrib_size, texture_index_offset);
-
-				//			std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
-				//			m_vertex_upload_time += std::chrono::duration_cast<std::chrono::microseconds>(now -
-				//then).count();
+				upload_vertex_buffers(min_index, max_index, max_vertex_attrib_size);
 
 				return std::make_tuple(index_count,
 				    std::make_tuple(static_cast<GLenum>(GL_UNSIGNED_SHORT), offset_in_index_buffer));
 			}
 
-			upload_vertex_buffers(min_index, max_index, max_vertex_attrib_size, texture_index_offset);
-
-			//		std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
-			//		m_vertex_upload_time += std::chrono::duration_cast<std::chrono::microseconds>(now -
-			//then).count();
+			upload_vertex_buffers(min_index, max_index, max_vertex_attrib_size);
 
 			return std::make_tuple(vertex_count, std::optional<std::tuple<GLenum, u32>>());
 		}
@@ -351,43 +331,41 @@ namespace
 		    const rsx::draw_indexed_array_command& command)
 		{
 			u32 min_index = 0, max_index = 0;
-			u32 max_vertex_attrib_size = 0;
 
 			rsx::index_array_type type = rsx::method_registers.index_type();
 			u32 type_size              = ::narrow<u32>(get_index_type_size(type));
 
-			u32 index_count = get_index_count(rsx::method_registers.current_draw_clause.primitive,
-			    rsx::method_registers.current_draw_clause.get_elements_count());
+			u32 vertex_count = rsx::method_registers.current_draw_clause.get_elements_count();
+			u32 index_count = vertex_count;
+			
+			if (!gl::is_primitive_native(rsx::method_registers.current_draw_clause.primitive))
+				index_count = (u32)get_index_count(rsx::method_registers.current_draw_clause.primitive, vertex_count);
 
 			u32 max_size               = index_count * type_size;
-			auto mapping               = m_index_ring_buffer.alloc_and_map(max_size);
+			auto mapping               = m_index_ring_buffer.alloc_from_heap(max_size, 256);
 			void* ptr                  = mapping.first;
 			u32 offset_in_index_buffer = mapping.second;
 
-			u32 expanded_index_count;
-			std::tie(min_index, max_index, expanded_index_count) = upload_index_buffer(
+			std::tie(min_index, max_index, index_count) = upload_index_buffer(
 			    command.raw_index_buffer, ptr, type, rsx::method_registers.current_draw_clause.primitive,
-			    rsx::method_registers.current_draw_clause.first_count_commands, index_count);
-			min_index = 0; // we must keep index to vertex mapping
-			m_index_ring_buffer.unmap();
+			    rsx::method_registers.current_draw_clause.first_count_commands, vertex_count);
+			
+			upload_vertex_buffers(0, max_index, max_vertex_attrib_size);
 
-			upload_vertex_buffers(min_index, max_index, max_vertex_attrib_size, texture_index_offset);
-
-			return std::make_tuple(
-			    expanded_index_count, std::make_tuple(get_index_type(type), offset_in_index_buffer));
+			return std::make_tuple(index_count, std::make_tuple(get_index_type(type), offset_in_index_buffer));
 		}
 
 		std::tuple<u32, std::optional<std::tuple<GLenum, u32>>> operator()(
 		    const rsx::draw_inlined_array& command)
 		{
 			// We need to go through array to determine vertex count so upload it
-			u32 vertex_count = upload_inline_array(max_vertex_attrib_size, texture_index_offset);
+			u32 vertex_count = upload_inline_array(max_vertex_attrib_size);
 
 			if (!gl::is_primitive_native(rsx::method_registers.current_draw_clause.primitive)) {
 				u32 offset_in_index_buffer;
 				u32 index_count;
 				std::tie(index_count, offset_in_index_buffer) = get_index_array_for_emulated_non_indexed_draw(
-				    rsx::method_registers.current_draw_clause.first_count_commands,
+					{ std::make_pair(0, vertex_count) },
 				    rsx::method_registers.current_draw_clause.primitive, m_index_ring_buffer);
 				return std::make_tuple(index_count,
 				    std::make_tuple(static_cast<GLenum>(GL_UNSIGNED_SHORT), offset_in_index_buffer));
@@ -396,8 +374,6 @@ namespace
 		}
 
 	private:
-		const u32 texture_index_offset =
-		    rsx::limits::fragment_textures_count + rsx::limits::vertex_textures_count;
 		u32 max_vertex_attrib_size = 0;
 		gl::ring_buffer& m_index_ring_buffer;
 		gl::ring_buffer& m_attrib_ring_buffer;
@@ -408,31 +384,18 @@ namespace
 		std::function<attribute_storage(rsx::rsx_state, std::vector<std::pair<u32, u32>>)>
 		    get_vertex_buffers;
 
-		void upload_vertex_buffers(u32 min_index, u32 max_index, const u32& max_vertex_attrib_size,
-		    const u32& texture_index_offset)
+		void upload_vertex_buffers(u32 min_index, u32 max_index, const u32& max_vertex_attrib_size)
 		{
 			u32 verts_allocated = max_index - min_index + 1;
-			__glcheck m_attrib_ring_buffer.reserve_and_map(verts_allocated * max_vertex_attrib_size);
-			// Disable texture then reenable them
-			// Is it really necessary ?
-			for (int index = 0; index < rsx::limits::vertex_count; ++index) {
-				int location;
-				if (!m_program->uniforms.has_location(s_reg_table[index], &location)) continue;
 
-				glActiveTexture(GL_TEXTURE0 + index + texture_index_offset);
-				glBindTexture(GL_TEXTURE_BUFFER, 0);
-				glProgramUniform1i(m_program->id(), location, index + texture_index_offset);
-				continue;
-			}
-			vertex_buffer_visitor visitor(verts_allocated, texture_index_offset, m_attrib_ring_buffer,
+			vertex_buffer_visitor visitor(verts_allocated, m_attrib_ring_buffer,
 			    m_program, m_gl_attrib_buffers, m_min_texbuffer_alignment);
 			const auto& vertex_buffers =
 			    get_vertex_buffers(rsx::method_registers, {{min_index, verts_allocated}});
 			for (const auto& vbo : vertex_buffers) std::apply_visitor(visitor, vbo);
-			m_attrib_ring_buffer.unmap();
 		}
 
-		u32 upload_inline_array(const u32& max_vertex_attrib_size, const u32& texture_index_offset)
+		u32 upload_inline_array(const u32& max_vertex_attrib_size)
 		{
 			u32 stride                             = 0;
 			u32 offsets[rsx::limits::vertex_count] = {0};
@@ -448,7 +411,6 @@ namespace
 			u32 vertex_draw_count =
 			    (u32)(rsx::method_registers.current_draw_clause.inline_vertex_array.size() * sizeof(u32)) /
 			    stride;
-			m_attrib_ring_buffer.reserve_and_map(vertex_draw_count * max_vertex_attrib_size);
 
 			for (int index = 0; index < rsx::limits::vertex_count; ++index) {
 				auto& vertex_info = rsx::method_registers.vertex_arrays_info[index];
@@ -456,13 +418,8 @@ namespace
 				int location;
 				if (!m_program->uniforms.has_location(s_reg_table[index], &location)) continue;
 
-				if (!vertex_info.size()) // disabled, bind a null sampler
-				{
-					glActiveTexture(GL_TEXTURE0 + index + texture_index_offset);
-					glBindTexture(GL_TEXTURE_BUFFER, 0);
-					glProgramUniform1i(m_program->id(), location, index + texture_index_offset);
+				if (!vertex_info.size())
 					continue;
-				}
 
 				const u32 element_size =
 				    rsx::get_vertex_type_size_on_host(vertex_info.type(), vertex_info.size());
@@ -473,7 +430,7 @@ namespace
 
 				u8* src =
 				    reinterpret_cast<u8*>(rsx::method_registers.current_draw_clause.inline_vertex_array.data());
-				auto mapping = m_attrib_ring_buffer.alloc_from_reserve(data_size, m_min_texbuffer_alignment);
+				auto mapping = m_attrib_ring_buffer.alloc_from_heap(data_size, m_min_texbuffer_alignment);
 				u8* dst      = static_cast<u8*>(mapping.first);
 
 				src += offsets[index];
@@ -495,10 +452,6 @@ namespace
 				}
 
 				texture.copy_from(m_attrib_ring_buffer, gl_type, mapping.second, data_size);
-
-				// Link texture to uniform
-				m_program->uniforms.texture(location, index + texture_index_offset, texture);
-				m_attrib_ring_buffer.unmap();
 			}
 			return vertex_draw_count;
 		}
@@ -508,12 +461,16 @@ namespace
 std::tuple<u32, std::optional<std::tuple<GLenum, u32>>> GLGSRender::set_vertex_buffer()
 {
 	std::chrono::time_point<std::chrono::system_clock> then = std::chrono::system_clock::now();
-	return std::apply_visitor(draw_command_visitor(m_index_ring_buffer, m_attrib_ring_buffer,
+	auto result = std::apply_visitor(draw_command_visitor(*m_index_ring_buffer, *m_attrib_ring_buffer,
 	                              m_gl_attrib_buffers, m_program, m_min_texbuffer_alignment,
 	                              [this](const auto& state, const auto& list) {
 		                              return this->get_vertex_buffers(state, list);
 		                             }),
 	    get_draw_command(rsx::method_registers));
+
+	std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
+	m_vertex_upload_time += std::chrono::duration_cast<std::chrono::microseconds>(now - then).count();
+	return result;
 }
 
 namespace

@@ -27,6 +27,7 @@ cfg::bool_entry g_cfg_rsx_log_programs(cfg::root.video, "Log shader programs");
 cfg::bool_entry g_cfg_rsx_vsync(cfg::root.video, "VSync");
 cfg::bool_entry g_cfg_rsx_debug_output(cfg::root.video, "Debug output");
 cfg::bool_entry g_cfg_rsx_overlay(cfg::root.video, "Debug overlay");
+cfg::bool_entry g_cfg_rsx_gl_legacy_buffers(cfg::root.video, "Use Legacy OpenGL Buffers (Debug)");
 
 bool user_asked_for_frame_capture = false;
 rsx::frame_capture_data frame_debug;
@@ -403,14 +404,21 @@ namespace rsx
 			const u32 cmd = ReadIO32(get);
 			const u32 count = (cmd >> 18) & 0x7ff;
 
-			if (cmd & CELL_GCM_METHOD_FLAG_JUMP)
+			if ((cmd & RSX_METHOD_OLD_JUMP_CMD_MASK) == RSX_METHOD_OLD_JUMP_CMD)
 			{
-				u32 offs = cmd & 0x1fffffff;
+				u32 offs = cmd & 0x1ffffffc;
 				//LOG_WARNING(RSX, "rsx jump(0x%x) #addr=0x%x, cmd=0x%x, get=0x%x, put=0x%x", offs, m_ioAddress + get, cmd, get, put);
 				ctrl->get = offs;
 				continue;
 			}
-			if (cmd & CELL_GCM_METHOD_FLAG_CALL)
+			if ((cmd & RSX_METHOD_NEW_JUMP_CMD_MASK) == RSX_METHOD_NEW_JUMP_CMD)
+			{
+				u32 offs = cmd & 0xfffffffc;
+				//LOG_WARNING(RSX, "rsx jump(0x%x) #addr=0x%x, cmd=0x%x, get=0x%x, put=0x%x", offs, m_ioAddress + get, cmd, get, put);
+				ctrl->get = offs;
+				continue;
+			}
+			if ((cmd & RSX_METHOD_CALL_CMD_MASK) == RSX_METHOD_CALL_CMD)
 			{
 				m_call_stack.push(get + 4);
 				u32 offs = cmd & ~3;
@@ -418,7 +426,7 @@ namespace rsx
 				ctrl->get = offs;
 				continue;
 			}
-			if (cmd == CELL_GCM_METHOD_FLAG_RETURN)
+			if (cmd == RSX_METHOD_RETURN_CMD)
 			{
 				u32 get = m_call_stack.top();
 				m_call_stack.pop();
@@ -426,7 +434,6 @@ namespace rsx
 				ctrl->get = get;
 				continue;
 			}
-
 			if (cmd == 0) //nop
 			{
 				ctrl->get = get + 4;
@@ -435,7 +442,7 @@ namespace rsx
 
 			auto args = vm::ptr<u32>::make((u32)RSXIOMem.RealAddr(get + 4));
 
-			u32 first_cmd = (cmd & 0xffff) >> 2;
+			u32 first_cmd = (cmd & 0xfffc) >> 2;
 
 			if (cmd & 0x3)
 			{
@@ -444,7 +451,7 @@ namespace rsx
 
 			for (u32 i = 0; i < count; i++)
 			{
-				u32 reg = cmd & CELL_GCM_METHOD_FLAG_NON_INCREMENT ? first_cmd : first_cmd + i;
+				u32 reg = ((cmd & RSX_METHOD_NON_INCREMENT_CMD_MASK) == RSX_METHOD_NON_INCREMENT_CMD) ? first_cmd : first_cmd + i;
 				u32 value = args[i];
 
 				//LOG_NOTICE(RSX, "%s(0x%x) = 0x%x", get_method_name(reg).c_str(), reg, value);
@@ -793,7 +800,7 @@ namespace rsx
 				        rsx::method_registers.vertex_arrays_info[index].frequency(),
 				        !!((modulo_mask >> index) & 0x1),
 				        true,
-				        is_int_type(rsx::method_registers.vertex_arrays_info[index].type())});
+				        is_int_type(rsx::method_registers.vertex_arrays_info[index].type()), 0});
 			}
 			else if (rsx::method_registers.register_vertex_info[index].size > 0)
 			{
@@ -803,7 +810,7 @@ namespace rsx
 				        rsx::method_registers.register_vertex_info[index].frequency,
 				        !!((modulo_mask >> index) & 0x1),
 				        false,
-				        is_int_type(rsx::method_registers.vertex_arrays_info[index].type())});
+				        is_int_type(rsx::method_registers.vertex_arrays_info[index].type()), 0});
 			}
 		}
 		return result;
@@ -828,6 +835,8 @@ namespace rsx
 		result.origin_mode = rsx::method_registers.shader_window_origin();
 		result.pixel_center_mode = rsx::method_registers.shader_window_pixel();
 		result.height = rsx::method_registers.shader_window_height();
+		result.redirected_textures = 0;
+
 
 		std::array<texture_dimension_extended, 16> texture_dimensions;
 		for (u32 i = 0; i < rsx::limits::fragment_textures_count; ++i)
